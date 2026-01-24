@@ -8,9 +8,13 @@ architecture "x64"
 system "windows"
 systemversion "10.0.26100.0:latest"
 warnings "Default"
-buffersecuritycheck "on"
-fatalwarnings { "warnings" }
+buffersecuritycheck "On"
+fatalwarnings { "All" }
 multiprocessorcompile "On"
+
+filter "action:vs*"
+    --buildoptions { "/ZW" } Not supported with C++23 Preview and premake5 beta8 forces to that
+    buildoptions { "/sdl" }
 
 files {
     "**.h",
@@ -43,10 +47,6 @@ filter {}
 
 filter "configurations:Release"
     linkoptions { "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF" }
-filter {}
-
-filter "action:vs*"
-    defines { "_CRT_SECURE_NO_WARNINGS" }
 filter {}
 
 filter "files:shader.hlsl"
