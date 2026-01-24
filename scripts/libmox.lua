@@ -212,10 +212,7 @@ function mox_project(name, output_name)
             filter {}
         end
 
-        -- Fast compile
-        flags {
-            "MultiProcessorCompile",
-        }
+        multiprocessorcompile("On")
 
         -- Custom project configuration
         if cmox_function_setupproject~=nil then

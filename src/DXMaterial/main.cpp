@@ -1,8 +1,12 @@
-#include <spdlog/spdlog.h>
+#include <stdafx.h>
+#include <app.h>
 
-int main()
+_Use_decl_annotations_
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 {
-    // We will use spdlog to say hello!
-    // So that you can see that conan works :-)
-    spdlog::warn("Hello World from version {}!", D12F_VERSION);
+    app app(1280, 720, L"Hello World", hInstance, nCmdShow);
+
+    app.OnInit();
+
+    app.Run();
 }
