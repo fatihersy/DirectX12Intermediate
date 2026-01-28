@@ -9,4 +9,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
     app.OnInit();
 
     app.Run();
+
+    return EXIT_SUCCESS;
 }

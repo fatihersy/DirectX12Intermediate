@@ -28,7 +28,8 @@ links {
     "d3dcompiler.lib",
     "dxguid.lib",
     "winmm.lib",
-    "comctl32.lib"
+    "comctl32.lib",
+    "delayimp.lib"
 }
 
 pchheader "stdafx.h"

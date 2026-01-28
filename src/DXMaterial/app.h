@@ -2,6 +2,9 @@
 
 #include <IApp.h>
 
+template<typename T>
+using ComPtr = Microsoft::WRL::ComPtr<T>;
+
 class app : public IApp
 {
 public:
@@ -45,27 +48,34 @@ private:
 
     CD3DX12_VIEWPORT m_viewport;
     CD3DX12_RECT m_scissorRect;
-    Microsoft::WRL::ComPtr<IDXGISwapChain4> m_swapchain;
-    Microsoft::WRL::ComPtr<ID3D12Device14> m_device;
-    Microsoft::WRL::ComPtr<ID3D12Resource2> m_renderTarget;
-    //Microsoft::WRL::ComPtr<ID3D12Resource2> m_depthStencil;
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocator;
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
-    //Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipeline;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> m_commandList;
+    ComPtr<IDXGISwapChain4> m_swapchain;
+    ComPtr<ID3D12Device14> m_device;
+    ComPtr<ID3D12Resource2> m_renderTarget[FrameCount];
+    ComPtr<ID3D12Resource2> m_depthStencil;
+    ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
+    ComPtr<ID3D12CommandQueue> m_commandQueue;
+    ComPtr<ID3D12RootSignature> m_rootSignature;
+    ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
+    ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+    ComPtr<ID3D12PipelineState> m_pipeline;
+    ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource2> m_perFrameConstants;
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+    ComPtr<ID3D12Resource2> m_vertexBufferGPU;
+    //D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
+    //ComPtr<ID3D12Resource2> m_indexBufferGPU;
+
+    ComPtr<ID3D12Resource2> m_perFrameConstants;
     UINT m_rtvDescriptorSize;
     D3D12_GPU_VIRTUAL_ADDRESS m_constantDataGpuVirtualAddr;
     PaddedConstantBuffer* m_constantDataCpuAddr;
 
     UINT m_frameIndex;
     HANDLE m_fenceEvent;
-    Microsoft::WRL::ComPtr<ID3D12Fence1> m_fence;
+    ComPtr<ID3D12Fence1> m_fence;
     UINT64 m_fenceGeneration;
+
+    UINT c_maxObjects = 1;
 
     void PopulateCommandList();
     void WaitForGPU();
@@ -73,6 +83,7 @@ private:
     void LoadPipeline();
     void LoadAssets();
 
+    float m_angle;
     DirectX::XMMATRIX m_worldMatrix;
     DirectX::XMMATRIX m_viewMatrix;
     DirectX::XMMATRIX m_projectionMatrix;
