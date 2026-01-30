@@ -1,9 +1,7 @@
 #pragma once
 
 #include <IApp.h>
-
-template<typename T>
-using ComPtr = Microsoft::WRL::ComPtr<T>;
+#include "Mesh.h"
 
 class app : public IApp
 {
@@ -22,12 +20,6 @@ public:
     void OnKeyUp(UINT8 key) override;
 private:
     static const UINT FrameCount = 2;
-
-    struct Vertex
-    {
-        DirectX::XMFLOAT3 position;
-        DirectX::XMFLOAT3 normal;
-    };
 
     struct ConstantBuffer
     {
@@ -60,10 +52,12 @@ private:
     ComPtr<ID3D12PipelineState> m_pipeline;
     ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
-    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    ComPtr<ID3D12Resource2> m_vertexBufferGPU;
+    //D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+    //ComPtr<ID3D12Resource2> m_vertexBufferGPU;
     //D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
     //ComPtr<ID3D12Resource2> m_indexBufferGPU;
+
+    Model m_crateModel;
 
     ComPtr<ID3D12Resource2> m_perFrameConstants;
     UINT m_rtvDescriptorSize;

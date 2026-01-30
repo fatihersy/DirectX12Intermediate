@@ -29,7 +29,8 @@ links {
     "dxguid.lib",
     "winmm.lib",
     "comctl32.lib",
-    "delayimp.lib"
+    "delayimp.lib",
+    "assimp-vc143-mt.lib"
 }
 
 pchheader "stdafx.h"

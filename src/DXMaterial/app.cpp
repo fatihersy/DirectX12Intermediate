@@ -15,7 +15,6 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_fenceEvent(nullptr),
     m_fenceGeneration{},
     m_aspectRatio{},
-    m_vertexBufferView{},
     m_angle{}
 {
     plat = platform(width, height, title, hInstance, nCmdShow, this);
@@ -28,16 +27,17 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
 
     m_worldMatrix = DirectX::XMMatrixIdentity();
 
-    static const DirectX::XMVECTORF32 c_eye{ 0.f, 1.5f, -4.f, 0.f};
-    static const DirectX::XMVECTORF32 c_at { 0.f, 0.f,  0.f, 0.f };
+    static const DirectX::XMVECTORF32 c_eye{ 0.f, 50.f, -50.f, 0.f};
+    static const DirectX::XMVECTORF32 c_at { 0.f, 10.f,  0.f, 0.f };
     static const DirectX::XMVECTORF32 c_up { 0.f, 1.f,  0.f, 0.f };
     m_viewMatrix = DirectX::XMMatrixLookAtLH(c_eye, c_at, c_up);
 
-    m_projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, 01.f, 100.f);
+    m_projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, 01.f, 500.f);
 
     m_lightDir = DirectX::XMVectorSet(-0.577f, 0.577f, -0.577f, 0.0f);
     //m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.0f);
     m_lightColor = DirectX::XMVectorSet(0.9f, 0.9f, 0.9f, 1.0f);
+
 }
 app::~app() {}
 void app::OnDestroy() {}
@@ -104,7 +104,6 @@ void app::MoveToNextFrame()
 
     m_frameIndex = m_swapchain->GetCurrentBackBufferIndex();
 }
-
 
 void app::LoadPipeline()
 {
@@ -319,6 +318,7 @@ void app::LoadAssets()
         D3D12_INPUT_ELEMENT_DESC inputElements[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
             { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         };
 
         // Create the pipeline state objects, which includes compiling and loading shaders.
@@ -348,199 +348,12 @@ void app::LoadAssets()
     // Command List 
     ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 
-
-    // Vertex Buffer
-    ComPtr<ID3D12Resource2> vertexUploadHeap;
+    m_crateModel = Model(m_device.Get());
     {
-        Vertex cubeVertices[] =
-        {
-            // Front face (Z = -0.5, normal pointing towards -Z)
-            { { -0.5f,  0.5f, -0.5f }, {  0.0f,  0.0f, -1.0f } },  // Top-left
-            { {  0.5f,  0.5f, -0.5f }, {  0.0f,  0.0f, -1.0f } },  // Top-right
-            { { -0.5f, -0.5f, -0.5f }, {  0.0f,  0.0f, -1.0f } },  // Bottom-left
-            { {  0.5f,  0.5f, -0.5f }, {  0.0f,  0.0f, -1.0f } },  // Top-right
-            { {  0.5f, -0.5f, -0.5f }, {  0.0f,  0.0f, -1.0f } },  // Bottom-right
-            { { -0.5f, -0.5f, -0.5f }, {  0.0f,  0.0f, -1.0f } },  // Bottom-left
-
-            // Back face (Z = +0.5, normal pointing towards +Z)
-            { {  0.5f,  0.5f,  0.5f }, {  0.0f,  0.0f,  1.0f } },  // Top-right
-            { { -0.5f,  0.5f,  0.5f }, {  0.0f,  0.0f,  1.0f } },  // Top-left
-            { {  0.5f, -0.5f,  0.5f }, {  0.0f,  0.0f,  1.0f } },  // Bottom-right
-            { { -0.5f,  0.5f,  0.5f }, {  0.0f,  0.0f,  1.0f } },  // Top-left
-            { { -0.5f, -0.5f,  0.5f }, {  0.0f,  0.0f,  1.0f } },  // Bottom-left
-            { {  0.5f, -0.5f,  0.5f }, {  0.0f,  0.0f,  1.0f } },  // Bottom-right
-
-            // Left face (X = -0.5, normal pointing towards -X)
-            { { -0.5f,  0.5f,  0.5f }, { -1.0f,  0.0f,  0.0f } },  // Top-back
-            { { -0.5f,  0.5f, -0.5f }, { -1.0f,  0.0f,  0.0f } },  // Top-front
-            { { -0.5f, -0.5f,  0.5f }, { -1.0f,  0.0f,  0.0f } },  // Bottom-back
-            { { -0.5f,  0.5f, -0.5f }, { -1.0f,  0.0f,  0.0f } },  // Top-front
-            { { -0.5f, -0.5f, -0.5f }, { -1.0f,  0.0f,  0.0f } },  // Bottom-front
-            { { -0.5f, -0.5f,  0.5f }, { -1.0f,  0.0f,  0.0f } },  // Bottom-back
-
-            // Right face (X = +0.5, normal pointing towards +X)
-            { {  0.5f,  0.5f, -0.5f }, {  1.0f,  0.0f,  0.0f } },  // Top-front
-            { {  0.5f,  0.5f,  0.5f }, {  1.0f,  0.0f,  0.0f } },  // Top-back
-            { {  0.5f, -0.5f, -0.5f }, {  1.0f,  0.0f,  0.0f } },  // Bottom-front
-            { {  0.5f,  0.5f,  0.5f }, {  1.0f,  0.0f,  0.0f } },  // Top-back
-            { {  0.5f, -0.5f,  0.5f }, {  1.0f,  0.0f,  0.0f } },  // Bottom-back
-            { {  0.5f, -0.5f, -0.5f }, {  1.0f,  0.0f,  0.0f } },  // Bottom-front
-
-            // Top face (Y = +0.5, normal pointing towards +Y)
-            { { -0.5f,  0.5f,  0.5f }, {  0.0f,  1.0f,  0.0f } },  // Back-left
-            { {  0.5f,  0.5f,  0.5f }, {  0.0f,  1.0f,  0.0f } },  // Back-right
-            { { -0.5f,  0.5f, -0.5f }, {  0.0f,  1.0f,  0.0f } },  // Front-left
-            { {  0.5f,  0.5f,  0.5f }, {  0.0f,  1.0f,  0.0f } },  // Back-right
-            { {  0.5f,  0.5f, -0.5f }, {  0.0f,  1.0f,  0.0f } },  // Front-right
-            { { -0.5f,  0.5f, -0.5f }, {  0.0f,  1.0f,  0.0f } },  // Front-left
-
-            // Bottom face (Y = -0.5, normal pointing towards -Y)
-            { { -0.5f, -0.5f, -0.5f }, {  0.0f, -1.0f,  0.0f } },  // Front-left
-            { {  0.5f, -0.5f, -0.5f }, {  0.0f, -1.0f,  0.0f } },  // Front-right
-            { { -0.5f, -0.5f,  0.5f }, {  0.0f, -1.0f,  0.0f } },  // Back-left
-            { {  0.5f, -0.5f, -0.5f }, {  0.0f, -1.0f,  0.0f } },  // Front-right
-            { {  0.5f, -0.5f,  0.5f }, {  0.0f, -1.0f,  0.0f } },  // Back-right
-            { { -0.5f, -0.5f,  0.5f }, {  0.0f, -1.0f,  0.0f } },  // Back-left
-        };
-
-        const UINT vertexBufferSize = sizeof(cubeVertices);
-
-        auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-        auto heapDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &heapDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(m_vertexBufferGPU.ReleaseAndGetAddressOf())
-        ));
-        auto uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &uploadHeapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &heapDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(vertexUploadHeap.ReleaseAndGetAddressOf())
-        ));
-
-        void* pData = nullptr;
-        vertexUploadHeap->Map(0, nullptr, reinterpret_cast<void**>(&pData));
-        memcpy(pData, cubeVertices, vertexBufferSize);
-        vertexUploadHeap->Unmap(0, nullptr);
-
-        {
-            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                m_vertexBufferGPU.Get(),
-                D3D12_RESOURCE_STATE_COMMON,
-                D3D12_RESOURCE_STATE_COPY_DEST
-            );
-            m_commandList->ResourceBarrier(1, &barrier);
-        }
-
-        m_commandList->CopyResource(m_vertexBufferGPU.Get(), vertexUploadHeap.Get());
-
-        {
-            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                m_vertexBufferGPU.Get(),
-                D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
-            );
-            m_commandList->ResourceBarrier(1, &barrier);
-        }
-
-        m_vertexBufferView.BufferLocation = m_vertexBufferGPU->GetGPUVirtualAddress();
-        m_vertexBufferView.SizeInBytes = vertexBufferSize;
-        m_vertexBufferView.StrideInBytes = sizeof(Vertex);
+        std::string _path = WStringToString(GetAssetFullPath(L"crate\\crate_mesh.obj"));
+        m_crateModel.Load(_path, m_commandList.Get());
+        m_crateModel.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
     }
-
-    // Index Buffer
-    /* 
-    ComPtr<ID3D12Resource2> indexUploadHeap;
-    {
-        UINT16 cubeIndices[] =
-        {
-            // Front face (looking at -Z)
-            0, 1, 2,    // Triangle 1
-            2, 1, 3,    // Triangle 2
-
-            // Back face (looking at +Z)
-            5, 4, 7,    // Triangle 1
-            7, 4, 6,    // Triangle 2
-
-            // Left face (looking at -X)
-            4, 0, 6,    // Triangle 1
-            6, 0, 2,    // Triangle 2
-
-            // Right face (looking at +X)
-            1, 5, 3,    // Triangle 1
-            3, 5, 7,    // Triangle 2
-
-            // Top face (looking at +Y)
-            4, 5, 0,    // Triangle 1
-            0, 5, 1,    // Triangle 2
-
-            // Bottom face (looking at -Y)
-            2, 3, 6,    // Triangle 1
-            6, 3, 7,    // Triangle 2
-        };
-        const UINT indexBufferSize = sizeof(cubeIndices);
-
-        auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-        auto heapDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &heapDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(m_indexBufferGPU.ReleaseAndGetAddressOf())
-        ));
-        auto uploadHeapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &uploadHeapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &heapDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(indexUploadHeap.ReleaseAndGetAddressOf())
-        ));
-
-        void* pData = nullptr;
-        indexUploadHeap->Map(0, nullptr, reinterpret_cast<void**>(&pData));
-        memcpy(pData, cubeIndices, indexBufferSize);
-        indexUploadHeap->Unmap(0, nullptr);
-
-        {
-            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                m_indexBufferGPU.Get(),
-                D3D12_RESOURCE_STATE_COMMON,
-                D3D12_RESOURCE_STATE_COPY_DEST
-            );
-            m_commandList->ResourceBarrier(1, &barrier);
-        }
-
-        m_commandList->CopyResource(m_indexBufferGPU.Get(), indexUploadHeap.Get());
-
-        {
-            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                m_indexBufferGPU.Get(),
-                D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_INDEX_BUFFER
-            );
-            m_commandList->ResourceBarrier(1, &barrier);
-        }
-
-        m_indexBufferView.BufferLocation = m_indexBufferGPU->GetGPUVirtualAddress();
-        m_indexBufferView.SizeInBytes = indexBufferSize;
-        m_indexBufferView.Format = DXGI_FORMAT_R16_UINT;
-    }
-    */
-
-    ThrowIfFailed(m_commandList->Close());
-    ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
-    m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Create synchronization objects and wait until assets have been uploaded to the GPU.
     {
@@ -556,8 +369,7 @@ void app::LoadAssets()
         WaitForGPU();
     }
 
-    vertexUploadHeap.Reset();
-    //indexUploadHeap.Reset();
+    m_crateModel.ResetUploadHeaps();
 }
 void app::PopulateCommandList()
 {
@@ -587,9 +399,6 @@ void app::PopulateCommandList()
 
     m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-    //m_commandList->IASetIndexBuffer(&m_indexBufferView);
-
     ConstantBuffer cbParams{};
     DirectX::XMStoreFloat4x4(&cbParams.worldMatrix, DirectX::XMMatrixTranspose(m_worldMatrix));
     DirectX::XMStoreFloat4x4(&cbParams.viewMatrix, DirectX::XMMatrixTranspose(m_viewMatrix));
@@ -603,7 +412,7 @@ void app::PopulateCommandList()
     auto baseGpuAddr = m_constantDataGpuVirtualAddr + sizeof(PaddedConstantBuffer) * constantBufferIndex;
     m_commandList->SetGraphicsRootConstantBufferView(0, baseGpuAddr);
 
-    m_commandList->DrawInstanced(36, 1, 0, 0);
+    m_crateModel.Draw(m_commandList.Get());
 
     {
         CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);

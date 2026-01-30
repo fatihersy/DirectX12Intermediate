@@ -16,12 +16,10 @@ cmox_product_name = "DirectX12Intermediate"
 -- The second array _d are the configuration debug flags
 -- (use true on all debugging configurations)
 cmox_configurations_n = {
-    "Debug",
-    "Release",
+    "Debug", "Release"
 }
 cmox_configurations_d = {
-    true,
-    false,
+    true, false
 }
 
 -- CPPVERSION

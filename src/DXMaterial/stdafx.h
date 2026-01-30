@@ -9,5 +9,9 @@
 #include "d3dx12.h"
 
 #include <string>
+#include <vector>
 #include <wrl.h>
 #include <shellapi.h>
+
+#include <MeshTypes.h>
+#include <ComTypes.h>

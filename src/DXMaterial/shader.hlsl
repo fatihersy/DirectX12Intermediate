@@ -11,9 +11,10 @@ struct PSInput
 {
     float4 position : SV_POSITION;
     float3 normal : NORMAL;
+    float2 texcoord : TEXCOORD0;
 };
  
-PSInput mainVS(float3 position : POSITION, float3 normal : NORMAL)
+PSInput mainVS(float3 position : POSITION, float3 normal : NORMAL, float2 texcoord : TEXCOORD0)
 {
     PSInput result;
 
@@ -27,6 +28,7 @@ PSInput mainVS(float3 position : POSITION, float3 normal : NORMAL)
     
     float3 worldNormal = mul(normal, (float3x3) world);
     result.normal = normalize(worldNormal);
+    result.texcoord = texcoord;
  
     return result;
 }
