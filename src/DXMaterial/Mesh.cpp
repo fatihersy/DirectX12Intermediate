@@ -6,6 +6,7 @@
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
+#include <directxtk12/WICTextureLoader.h>
 
 Model::Model() {}
 

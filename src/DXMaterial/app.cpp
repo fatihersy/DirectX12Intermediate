@@ -350,7 +350,7 @@ void app::LoadAssets()
 
     m_crateModel = Model(m_device.Get());
     {
-        std::string _path = WStringToString(GetAssetFullPath(L"crate\\crate_mesh.obj"));
+        std::string _path = WStringToString(GetAssetFullPath(L"crate/crate_mesh.obj"));
         m_crateModel.Load(_path, m_commandList.Get());
         m_crateModel.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
     }

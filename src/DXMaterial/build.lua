@@ -2,6 +2,7 @@
 mox_project("DXMaterial", "dx_material")
 mox_cpp("C++20")
 mox_windowed()
+mox_use_vcpkg()
 uuid("d54bdce0-8b62-11f0-b558-0800200c9a66")
 
 architecture "x64"
@@ -21,6 +22,8 @@ files {
     "**.cpp",
     "**.hlsl"
 }
+
+mox_link_vcpkg("DirectXTK12")
 
 links {
     "d3d12.lib",

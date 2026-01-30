@@ -26,6 +26,10 @@
 **.vcxproj
 **.vcxproj.user
 **.vcxproj.filters
+.qgrep
 
 # Dependencie graph output
 /dependencies_*.html
+
+# External
+/external

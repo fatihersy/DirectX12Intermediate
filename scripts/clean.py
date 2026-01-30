@@ -4,6 +4,7 @@ Multiple modes:
 - "output" (default): Removes the build directory
 - "project": Removes all visual studio files / Makefiles
 - "dependencies": Removes the external downloaded dependencies (not the conan cache)
+- "vcpkg": Removes vcpkg installed packages (keeps vcpkg submodule)
 - "all": All above steps
 
 Copyright (c) 2025 Moxibyte GmbH
@@ -54,6 +55,15 @@ def CleanDependencies():
     shutil.rmtree('./profiles', ignore_errors=True)
     shutil.rmtree('./dlls', ignore_errors=True)
 
+def CleanVcpkg():
+    """Clean vcpkg installed packages and build artifacts"""
+    print('Cleaning vcpkg packages...')
+    shutil.rmtree('./dependencies/vcpkg/buildtrees', ignore_errors=True)
+    shutil.rmtree('./dependencies/vcpkg/packages', ignore_errors=True)
+    shutil.rmtree('./dependencies/vcpkg/installed', ignore_errors=True)
+    shutil.rmtree('./dependencies/vcpkg_installed', ignore_errors=True)
+    print('vcpkg packages cleaned.')
+
 def CleanProject():
     shutil.rmtree('./vs', ignore_errors=True)
     RecursiveRemove(
@@ -66,7 +76,7 @@ if __name__ == '__main__':
     # Get mode from cli
     p = argparse.ArgumentParser(prog="clean.py", allow_abbrev=False)
     p.add_argument("mode", nargs="?", default="output",
-                   choices=["output", "project", "dependencies", "all"],
+                   choices=["output", "project", "dependencies", "vcpkg", "all"],
                    help="Clean mode (default: output)")
     args = p.parse_args()
 
@@ -77,7 +87,10 @@ if __name__ == '__main__':
         CleanProject()
     elif args.mode == 'dependencies':
         CleanDependencies()
+    elif args.mode == 'vcpkg':
+        CleanVcpkg()
     elif args.mode == 'all':
         CleanOutput()
         CleanProject()
         CleanDependencies()
+        CleanVcpkg()

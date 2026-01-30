@@ -59,7 +59,7 @@ def GetPremakeDownloadUrl(version):
     else:
         return baseUrl + '-windows.zip'
 
-def DownloadPremake(version = '5.0.0-beta7'):
+def DownloadPremake(version = '5.0.0-beta8'):
     premakeDownloadUrl = GetPremakeDownloadUrl(version)
     premakeTargetFolder = './dependencies/premake5'
     premakeTargetZip = f'{premakeTargetFolder}/premake5.tmp'
@@ -78,6 +78,80 @@ def DownloadPremake(version = '5.0.0-beta7'):
                 tarFile.extractall(premakeTargetFolder, filter=tarfile.data_filter)
             os.chmod(premakeTargetExe, os.stat(premakeTargetExe).st_mode | stat.S_IEXEC)
 
+
+def GetVcpkgDownloadUrl():
+    """Get the download URL for vcpkg based on the platform"""
+    # vcpkg is distributed as source, we clone/download and bootstrap
+    return 'https://github.com/microsoft/vcpkg/archive/refs/heads/master.zip'
+
+def DownloadVcpkg():
+    """Download and bootstrap vcpkg"""
+    vcpkgTargetFolder = './dependencies/vcpkg'
+    vcpkgTargetZip = './dependencies/vcpkg.tmp.zip'
+    vcpkgExe = f'{vcpkgTargetFolder}/{GetExecutable("vcpkg")}'
+    
+    if not os.path.exists(vcpkgExe):
+        print('Downloading vcpkg...')
+        os.makedirs('./dependencies', exist_ok=True)
+        
+        # Download vcpkg
+        urllib.request.urlretrieve(GetVcpkgDownloadUrl(), vcpkgTargetZip)
+        
+        # Extract vcpkg
+        with zipfile.ZipFile(vcpkgTargetZip, 'r') as zipFile:
+            # vcpkg archive extracts to vcpkg-master/, we need to rename it
+            zipFile.extractall('./dependencies')
+        
+        # Rename extracted folder
+        extractedFolder = './dependencies/vcpkg-master'
+        if os.path.exists(extractedFolder):
+            if os.path.exists(vcpkgTargetFolder):
+                import shutil
+                shutil.rmtree(vcpkgTargetFolder)
+            os.rename(extractedFolder, vcpkgTargetFolder)
+        
+        # Clean up zip file
+        os.remove(vcpkgTargetZip)
+        
+        # Bootstrap vcpkg
+        print('Bootstrapping vcpkg...')
+        if sys.platform.startswith('win'):
+            bootstrapScript = os.path.join(os.path.abspath(vcpkgTargetFolder), 'bootstrap-vcpkg.bat')
+            subprocess.run([bootstrapScript], cwd=os.path.abspath(vcpkgTargetFolder), check=True)
+        else:
+            bootstrapScript = os.path.join(os.path.abspath(vcpkgTargetFolder), 'bootstrap-vcpkg.sh')
+            subprocess.run(['bash', bootstrapScript], cwd=os.path.abspath(vcpkgTargetFolder), check=True)
+        
+        print('vcpkg downloaded and bootstrapped successfully.')
+    else:
+        print('vcpkg already available.')
+
+def InitializeVcpkg():
+    """Download vcpkg and install dependencies"""
+    vcpkgPath = os.path.abspath('./dependencies/vcpkg')
+    vcpkgInstalledPath = os.path.abspath('./dependencies/vcpkg_installed')
+    vcpkgExe = os.path.join(vcpkgPath, GetExecutable('vcpkg'))
+    
+    # Download and bootstrap vcpkg if needed
+    DownloadVcpkg()
+    
+    # Install vcpkg dependencies from vcpkg.json
+    if os.path.exists('vcpkg.json'):
+        print('Installing vcpkg dependencies...')
+        triplet = 'x64-windows' if sys.platform.startswith('win') else 'x64-linux'
+        subprocess.run([
+            vcpkgExe,
+            'install',
+            f'--x-install-root={vcpkgInstalledPath}',
+            f'--vcpkg-root={vcpkgPath}',
+            f'--triplet={triplet}'
+        ], check=True)
+        print('vcpkg dependencies installed successfully.')
+    else:
+        print('No vcpkg.json found. Skipping vcpkg package installation.')
+    
+    return True
+
 def ConanBuild(conf, host_profile, build_profile):
     return (
         'conan', 'install', '.',
@@ -93,11 +167,13 @@ if __name__ == '__main__':
     # Cli
     p = argparse.ArgumentParser(prog="init.py", allow_abbrev=False)
     p.add_argument("--skip-conan", action="store_true", help="Skip Conan evaluation")
+    p.add_argument("--skip-vcpkg", action="store_true", help="Skip vcpkg initialization")
     p.add_argument("--arch", default=platform.machine().lower(), help="Alternative (cross compile) architecture")
     p.add_argument("--conan-release-only", action=argparse.BooleanOptionalAction, default=DEFAULT_TO_CONAN_ALWAY_RELEASE, help="Forces conan into only generating release dependencies.")
     args = p.parse_args()
 
     skipConan = args.skip_conan
+    skipVcpkg = args.skip_vcpkg
     arch = args.arch
     conanReleaseOnly = args.conan_release_only
 
@@ -113,6 +189,11 @@ if __name__ == '__main__':
 
     # Download tool applications
     DownloadPremake()
+
+    # Initialize vcpkg
+    if not skipVcpkg:
+        print('\n=== Initializing vcpkg ===')
+        InitializeVcpkg()
 
     # Get system architecture
     buildArch = mox.GetThisPlatformInfo()
@@ -139,6 +220,9 @@ if __name__ == '__main__':
     # GCC Prefix
     gccPrefix = hostArch[f'gcc_{ "linux" if sys.platform.startswith("linux") else "windows"  }_prefix'] + '-'
 
+    # Get vcpkg installed path for premake
+    vcpkgInstalledRoot = os.path.abspath('./dependencies/vcpkg_installed')
+
     # Run premake5
     premakeGenerator = GetPremakeGenerator()
     subprocess.run((
@@ -148,6 +232,7 @@ if __name__ == '__main__':
         f'--mox_gcc_prefix={ gccPrefix }',
         f'--mox_version={ version }',
         f'--mox_conan_release_only={ conanReleaseOnly }',
+        f'--mox_vcpkg_root={ vcpkgInstalledRoot }',
         '--file=./scripts/premake5.lua',
         premakeGenerator
     ))

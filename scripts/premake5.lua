@@ -1,24 +1,6 @@
--- premake5.lua root script
+-- premake5.lua root script with vcpkg support
 --
 -- Copyright (c) 2025 Moxibyte GmbH
---
--- Permission is hereby granted, free of charge, to any person obtaining a copy
--- of this software and associated documentation files (the "Software"), to deal
--- in the Software without restriction, including without limitation the rights
--- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
--- copies of the Software, and to permit persons to whom the Software is
--- furnished to do so, subject to the following conditions:
---
--- The above copyright notice and this permission notice shall be included in all
--- copies or substantial portions of the Software.
---
--- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
--- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
--- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
--- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
--- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
--- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
--- SOFTWARE.
 
 include "libmox.lua"
 include "../dependencies/conandeps.premake5.lua"
@@ -77,9 +59,75 @@ newoption {
     },
     default = "False"
 }
+newoption {
+    trigger = "mox_vcpkg_root",
+    value = "PATH",
+    description = "Path to vcpkg root directory",
+    category = "MoxPP",
+    default = ""
+}
 
 -- Extract if conan is release only
 hmox_conan_release_only = _OPTIONS["mox_conan_release_only"] == "True"
+
+-- vcpkg configuration
+if _OPTIONS["mox_vcpkg_root"] and _OPTIONS["mox_vcpkg_root"] ~= "" then
+    hmox_vcpkg_root = _OPTIONS["mox_vcpkg_root"]
+    hmox_vcpkg_triplet = "x64-windows"  -- Adjust based on platform if needed
+    
+    -- vcpkg_installed is passed as root, packages are at {triplet}/include, etc.
+    _G.vcpkg = {
+        root = hmox_vcpkg_root,
+        triplet = hmox_vcpkg_triplet,
+        includePath = hmox_vcpkg_root .. "/" .. hmox_vcpkg_triplet .. "/include",
+        libPath = hmox_vcpkg_root .. "/" .. hmox_vcpkg_triplet .. "/lib",
+        debugLibPath = hmox_vcpkg_root .. "/" .. hmox_vcpkg_triplet .. "/debug/lib",
+        binPath = hmox_vcpkg_root .. "/" .. hmox_vcpkg_triplet .. "/bin",
+        debugBinPath = hmox_vcpkg_root .. "/" .. hmox_vcpkg_triplet .. "/debug/bin"
+    }
+    
+    print("vcpkg configured at: " .. hmox_vcpkg_root)
+else
+    _G.vcpkg = nil
+end
+
+-- Helper function for projects to use vcpkg
+function mox_use_vcpkg()
+    if _G.vcpkg == nil then
+        print("Warning: vcpkg not configured. Skipping vcpkg includes/libs.")
+        return
+    end
+    
+    includedirs { _G.vcpkg.includePath }
+    
+    filter "configurations:Debug"
+        libdirs { _G.vcpkg.debugLibPath }
+    filter {}
+    
+    filter "configurations:Release"
+        libdirs { _G.vcpkg.libPath }
+    filter {}
+end
+
+-- Helper function to link vcpkg library
+function mox_link_vcpkg(libname)
+    if _G.vcpkg == nil then
+        print("Warning: vcpkg not configured. Skipping vcpkg library: " .. libname)
+        return
+    end
+    
+    filter "configurations:Debug"
+        links { libname .. ".lib" }
+    filter {}
+    
+    filter "configurations:Release"
+        links { libname .. ".lib" }
+    filter {}
+end
+
+-- Make helper functions global
+_G.mox_use_vcpkg = mox_use_vcpkg
+_G.mox_link_vcpkg = mox_link_vcpkg
 
 workspace(cmox_product_name)
     -- Workspace configuration
@@ -126,3 +174,4 @@ workspace(cmox_product_name)
     if cmox_unit_test_src ~= nil then
         include("../" .. cmox_unit_test_src .. "/build.lua")
     end
+    
