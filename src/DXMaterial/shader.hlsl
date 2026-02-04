@@ -13,6 +13,9 @@ struct PSInput
     float3 normal : NORMAL;
     float2 texcoord : TEXCOORD0;
 };
+
+Texture2D diffuseTexture : register(t0);
+SamplerState linearSampler : register(s0);
  
 PSInput mainVS(float3 position : POSITION, float3 normal : NORMAL, float2 texcoord : TEXCOORD0)
 {
@@ -61,10 +64,10 @@ float4 mainPS(PSInput input) : SV_TARGET
     // ========================================
     // NORMAL RENDERING: Full lighting
     // ========================================
-    float3 norm = normalize(input.normal);
-    float diffuse = max(dot(norm, normalize(lightDir.xyz)), 0.0f);
-    float ambient = 0.05f;
-    float lighting = ambient + diffuse * 0.8f;
-    float4 baseColor = float4(1.0f, 0.5f, 0.0f, 1.0f);
-    return baseColor * lightColor * lighting;
+    float3 normal = normalize(input.normal);
+    float4 texColor = diffuseTexture.Sample(linearSampler, input.texcoord);
+    float NdotL = max(0.0f, dot(normal, -normalize(lightDir.xyz)));
+    float ambient = 0.05f; // Define ambient here (adjust as needed)
+    float lighting = ambient + NdotL * 0.95f;
+    return texColor * lighting * lightColor;
 }

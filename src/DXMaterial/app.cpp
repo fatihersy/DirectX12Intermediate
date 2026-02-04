@@ -9,6 +9,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_viewport(0.f, 0.f, static_cast<float>(width), static_cast<float>(height)),
     m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
     m_rtvDescriptorSize{},
+    m_srvDescriptorSize{},
     m_constantDataGpuVirtualAddr{},
     m_constantDataCpuAddr(nullptr),
     m_frameIndex{},
@@ -19,16 +20,18 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
 {
     plat = platform(width, height, title, hInstance, nCmdShow, this);
 
-    WCHAR assetsPath[512];
-    GetAssetsPath(assetsPath, _countof(assetsPath));
-    m_assetsPath = assetsPath;
+    m_assetsPath = std::filesystem::current_path().generic_wstring().append(L"/");
+
+    WCHAR executablePath[512];
+    GetAssetsPath(executablePath, _countof(executablePath));
+    m_executablePath = executablePath;
 
     m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
     m_worldMatrix = DirectX::XMMatrixIdentity();
 
-    static const DirectX::XMVECTORF32 c_eye{ 0.f, 50.f, -50.f, 0.f};
-    static const DirectX::XMVECTORF32 c_at { 0.f, 10.f,  0.f, 0.f };
+    static const DirectX::XMVECTORF32 c_eye{ 0.f, 1.25f,  2.5f, 0.f};
+    static const DirectX::XMVECTORF32 c_at { 0.f, 0.f,  0.f, 0.f };
     static const DirectX::XMVECTORF32 c_up { 0.f, 1.f,  0.f, 0.f };
     m_viewMatrix = DirectX::XMMatrixLookAtLH(c_eye, c_at, c_up);
 
@@ -38,9 +41,14 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     //m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.0f);
     m_lightColor = DirectX::XMVectorSet(0.9f, 0.9f, 0.9f, 1.0f);
 
+    ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+    ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory)));
 }
 app::~app() {}
-void app::OnDestroy() {}
+void app::OnDestroy()
+{
+    CoUninitialize();
+}
 
 void app::OnInit()
 {
@@ -240,11 +248,28 @@ void app::LoadAssets()
             rootSignature.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
         }
 
-        CD3DX12_ROOT_PARAMETER1 rp[1]{};
+        CD3DX12_DESCRIPTOR_RANGE1 srvRange[1]{};
+        srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+
+        CD3DX12_ROOT_PARAMETER1 rp[2]{};
         rp[0].InitAsConstantBufferView(0, 0);
+        rp[1].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
+
+        D3D12_STATIC_SAMPLER_DESC sampler{};
+        sampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
+        sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+        sampler.MipLODBias = 0;
+        sampler.MaxAnisotropy = 0;
+        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+        sampler.MinLOD = 0.f;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        sampler.ShaderRegister = 0;
+        sampler.RegisterSpace = 0;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
         CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init_1_1(_countof(rp), rp, 0, nullptr,
+        rootSignatureDesc.Init_1_1(_countof(rp), rp, 1, &sampler,
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
         );
 
@@ -258,7 +283,7 @@ void app::LoadAssets()
                 const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
                 OutputDebugStringA(errorMsg);
             }
-            ThrowIfFailed(hr);
+            throw std::runtime_error("Failed to serialize root signature");
         }
         ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
     }
@@ -289,7 +314,7 @@ void app::LoadAssets()
         // Vertex Shader
         {
             ComPtr<ID3D10Blob> error;
-            HRESULT hr = D3DCompileFromFile(GetAssetFullPath(L"shader.hlsl").c_str(), nullptr, nullptr, "mainVS", "vs_5_0", compileFlags, 0, &vertexShader, &error);
+            HRESULT hr = D3DCompileFromFile((m_assetsPath + L"shader.hlsl").c_str(), nullptr, nullptr, "mainVS", "vs_5_0", compileFlags, 0, &vertexShader, &error);
             if (FAILED(hr))
             {
                 if (error)
@@ -348,13 +373,6 @@ void app::LoadAssets()
     // Command List 
     ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 
-    m_crateModel = Model(m_device.Get());
-    {
-        std::string _path = WStringToString(GetAssetFullPath(L"crate/crate_mesh.obj"));
-        m_crateModel.Load(_path, m_commandList.Get());
-        m_crateModel.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
-    }
-
     // Create synchronization objects and wait until assets have been uploaded to the GPU.
     {
         ThrowIfFailed(m_device->CreateFence(m_fenceGeneration, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
@@ -369,7 +387,143 @@ void app::LoadAssets()
         WaitForGPU();
     }
 
-    m_crateModel.ResetUploadHeaps();
+    m_model = Model(m_device.Get(), m_wicFactory.Get());
+    {
+        m_model.Load(GetAssetFullPath(L"res/scifi_9mm_pistol/scene.gltf"), m_commandList.Get());
+
+        //ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+
+        m_model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+
+        WaitForGPU();
+
+        m_model.ResetUploadHeaps();
+    }
+
+    // Default texture
+    {
+        const UINT width = 64;
+        const UINT height = 64;
+        const UINT squareSize = width / 8;
+
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = width;
+        desc.Height = height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeapProp(D3D12_HEAP_TYPE_DEFAULT);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &defaultHeapProp,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&m_fallbackTexture)
+        ));
+
+        const UINT rowPitch = width * 4;
+        const UINT dataSize = rowPitch * height;
+        CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &uploadHeapProp,
+            D3D12_HEAP_FLAG_NONE,
+            &uploadDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&m_fallbackTextureUpload)
+        ));
+
+        uint8_t* mappedData = nullptr;
+        ThrowIfFailed(m_fallbackTextureUpload->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
+
+        for (UINT y = 0; y < height; y++)
+        {
+            uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * rowPitch);
+            for (UINT x = 0; x < width; x++)
+            {
+                bool isBlack = ((x / squareSize) + (y / squareSize)) % 2 == 0;
+                row[x] = isBlack ? 0xFF000000 : 0xFFFFFFFF;
+            }
+        }
+        m_fallbackTextureUpload->Unmap(0, nullptr);
+
+        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+        srcLoc.pResource = m_fallbackTextureUpload.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint.Footprint.Width = width;
+        srcLoc.PlacedFootprint.Footprint.Height = height;
+        srcLoc.PlacedFootprint.Footprint.Depth = 1;
+        srcLoc.PlacedFootprint.Footprint.Format = desc.Format;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = rowPitch;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+        dstLoc.pResource = m_fallbackTexture.Get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
+
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
+        m_commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_fallbackTexture.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+        );
+        m_commandList->ResourceBarrier(1, &barrier);
+
+        ThrowIfFailed(m_commandList->Close());
+        ID3D12CommandList* ppCmdLists[] = { m_commandList.Get() };
+        m_commandQueue->ExecuteCommandLists(_countof(ppCmdLists), ppCmdLists);
+    }
+
+    WaitForGPU();
+
+    // Shader Resource Views
+    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+    srvHeapDesc.NumDescriptors = static_cast<UINT>(m_model.GetMeshes().size()); // 1 texture for every meshes
+    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ThrowIfFailed(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap)));
+
+    m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    // SRV Creation
+    {
+        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_srvHeap->GetCPUDescriptorHandleForHeapStart());
+        UINT textureIndex = 0;
+        for (const auto& mesh : m_model.GetMeshes())
+        {
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC desc {};
+            desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            desc.Texture2D.MipLevels = 1;
+            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+            ID3D12Resource* texResource = nullptr;
+            if (mesh.defaultDiffuseTexture)
+            {
+                texResource = mesh.defaultDiffuseTexture.Get();
+            }
+            else {
+                texResource = m_fallbackTexture.Get();
+            }
+            
+            m_device->CreateShaderResourceView(texResource, &desc, srvHandle);
+            srvHandle.Offset(1, m_srvDescriptorSize);
+            textureIndex++;
+        }
+    }
+
+    m_fallbackTextureUpload.Reset();
+
 }
 void app::PopulateCommandList()
 {
@@ -377,7 +531,8 @@ void app::PopulateCommandList()
 
     ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipeline.Get()));
 
-    //ID3D12DescriptorHeap* ppHeaps[] = { m_srvHeap.Get()};
+    ID3D12DescriptorHeap* ppHeaps[] = { m_srvHeap.Get()};
+    m_commandList->SetDescriptorHeaps(1, ppHeaps);
 
     m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
     m_commandList->RSSetViewports(1, &m_viewport);
@@ -412,7 +567,9 @@ void app::PopulateCommandList()
     auto baseGpuAddr = m_constantDataGpuVirtualAddr + sizeof(PaddedConstantBuffer) * constantBufferIndex;
     m_commandList->SetGraphicsRootConstantBufferView(0, baseGpuAddr);
 
-    m_crateModel.Draw(m_commandList.Get());
+    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+
+    m_model.Draw(m_commandList.Get(), srvGPUHandle, m_srvDescriptorSize);
 
     {
         CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);

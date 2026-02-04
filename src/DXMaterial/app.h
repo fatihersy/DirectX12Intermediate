@@ -1,7 +1,7 @@
 #pragma once
 
 #include <IApp.h>
-#include "Mesh.h"
+#include "Model.h"
 
 class app : public IApp
 {
@@ -19,6 +19,7 @@ public:
     void OnKeyDown(UINT8 key) override;
     void OnKeyUp(UINT8 key) override;
 private:
+    ComPtr<IWICImagingFactory2> m_wicFactory;
     static const UINT FrameCount = 2;
 
     struct ConstantBuffer
@@ -49,18 +50,18 @@ private:
     ComPtr<ID3D12RootSignature> m_rootSignature;
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+    ComPtr<ID3D12DescriptorHeap> m_srvHeap;
     ComPtr<ID3D12PipelineState> m_pipeline;
     ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
-    //D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-    //ComPtr<ID3D12Resource2> m_vertexBufferGPU;
-    //D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
-    //ComPtr<ID3D12Resource2> m_indexBufferGPU;
+    ComPtr<ID3D12Resource2> m_fallbackTexture;
+    ComPtr<ID3D12Resource2> m_fallbackTextureUpload;
 
-    Model m_crateModel;
+    Model m_model;
 
     ComPtr<ID3D12Resource2> m_perFrameConstants;
     UINT m_rtvDescriptorSize;
+    UINT m_srvDescriptorSize;
     D3D12_GPU_VIRTUAL_ADDRESS m_constantDataGpuVirtualAddr;
     PaddedConstantBuffer* m_constantDataCpuAddr;
 
@@ -86,6 +87,7 @@ private:
 
     float m_aspectRatio;
     std::wstring m_assetsPath;
+    std::wstring m_executablePath;
 
     inline std::wstring GetAssetFullPath(LPCWSTR assetName) {
         return m_assetsPath + assetName;

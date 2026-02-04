@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <wincodec.h>
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -12,6 +13,10 @@
 #include <vector>
 #include <wrl.h>
 #include <shellapi.h>
+#include <print>
+#include <format>
+#include <array>
+#include <filesystem>
 
 #include <MeshTypes.h>
 #include <ComTypes.h>

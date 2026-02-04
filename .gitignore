@@ -33,3 +33,7 @@
 
 # External
 /external
+
+# App
+/app/res
+/app/shader.hlsl

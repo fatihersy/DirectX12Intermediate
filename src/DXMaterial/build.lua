@@ -56,8 +56,8 @@ filter {}
 
 filter "files:shader.hlsl"
     buildaction "CustomBuild"
-    buildoutputs { "%{cfg.targetdir}/%{file.name}" }
-    buildcommands { 'copy "%{file.relpath}" "%{cfg.targetdir}/%{file.name}" > NUL' }
+    buildoutputs { "%{wks.location}/app/%{file.name}" }
+    buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
     linkbuildoutputs "false"
 filter {}
 
