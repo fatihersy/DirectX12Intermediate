@@ -19,6 +19,10 @@ public:
     UINT textureWidth{};
     UINT textureHeight{};
     UINT textureRowPitch{};
+
+    DirectX::XMFLOAT3 m_position{};
+    DirectX::XMFLOAT4 m_rotationQ{};
+    DirectX::XMFLOAT3 m_scale{};
 };
 
 class Model
@@ -31,7 +35,8 @@ public:
     bool isOnGPU = false;
     bool isOnCPU = false;
 
-    void Draw(_In_ ID3D12GraphicsCommandList* cmdList, _In_ CD3DX12_GPU_DESCRIPTOR_HANDLE& srvGPUHandle, UINT srvDescriptorSize);
+    void Rotate(DirectX::XMFLOAT3 rotation);
+    void Draw(_In_ DrawContext ctx);
 
     bool Load(_In_ const std::filesystem::path& path, _In_ ID3D12GraphicsCommandList* cmdList);
     void UploadGPU(_In_ ID3D12GraphicsCommandList* cmdList, _In_ ID3D12CommandQueue* cmdQueue);

@@ -42,7 +42,6 @@ bool Model::Load(const std::filesystem::path& path, ID3D12GraphicsCommandList* c
 
     m_assetPath = path;
     ProcessNode(scene->mRootNode, scene, cmdList);
-
     return true;
 }
 
@@ -76,35 +75,33 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
     std::vector<UINT> indices;
 
     aiMatrix4x4 aiGlobalTransform = GetGlobalNodeTransformation(node);
-    DirectX::XMFLOAT4X4 globalFloat;
-    memcpy(&globalFloat, &aiGlobalTransform, sizeof(FLOAT) * 16);
-    DirectX::XMMATRIX globalMatrix = DirectX::XMLoadFloat4x4(&globalFloat);
 
-    DirectX::XMVECTOR det = DirectX::XMMatrixDeterminant(globalMatrix);
-    DirectX::XMMATRIX invTranspose = DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(&det, globalMatrix));
+    DirectX::XMMATRIX globalMatrix = DirectX::XMMatrixSet(
+        aiGlobalTransform.a1, aiGlobalTransform.b1, aiGlobalTransform.c1, aiGlobalTransform.d1,
+        aiGlobalTransform.a2, aiGlobalTransform.b2, aiGlobalTransform.c2, aiGlobalTransform.d2,
+        aiGlobalTransform.a3, aiGlobalTransform.b3, aiGlobalTransform.c3, aiGlobalTransform.d3,
+        aiGlobalTransform.a4, aiGlobalTransform.b4, aiGlobalTransform.c4, aiGlobalTransform.d4
+    );
+
+    DirectX::XMVECTOR outScale, outRotQ, outPos;
+    if (not DirectX::XMMatrixDecompose(&outScale, &outRotQ, &outPos, globalMatrix))
+    {
+        throw std::runtime_error("Failed to decompose matrix");
+    }
+
+    DirectX::XMStoreFloat3(&outMesh.m_position, outPos);
+    DirectX::XMStoreFloat4(&outMesh.m_rotationQ, outRotQ);
+    DirectX::XMStoreFloat3(&outMesh.m_scale, outScale);
 
     for (UINT i = 0; i < pAiMesh->mNumVertices; i++)
     {
-         Vertex v{};
+        Vertex v{};
 
-         DirectX::XMVECTOR pos = DirectX::XMVectorSet(pAiMesh->mVertices[i].x, pAiMesh->mVertices[i].y, pAiMesh->mVertices[i].z, 1.f);
-         pos = DirectX::XMVector3TransformCoord(pos, globalMatrix);
-         DirectX::XMStoreFloat3(&v.position, pos);
+        v.position = DirectX::XMFLOAT3 { pAiMesh->mVertices[i].x, pAiMesh->mVertices[i].y, pAiMesh->mVertices[i].z };
+        v.normal   = pAiMesh->HasNormals() ? DirectX::XMFLOAT3 { pAiMesh->mNormals[i].x, pAiMesh->mNormals[i].y, pAiMesh->mNormals[i].z } : DirectX::XMFLOAT3{ 0.f, 0.f, 0.f };
+        v.texCoord = pAiMesh->mTextureCoords[0] ? DirectX::XMFLOAT2{ pAiMesh->mTextureCoords[0][i].x, pAiMesh->mTextureCoords[0][i].y   } : DirectX::XMFLOAT2{ 0.f, 0.f };
 
-         if (pAiMesh->HasNormals())
-         {
-            DirectX::XMVECTOR norm = DirectX::XMVectorSet(pAiMesh->mNormals[i].x, pAiMesh->mNormals[i].y, pAiMesh->mNormals[i].z, 0.f);
-            norm = DirectX::XMVector3Transform(norm, invTranspose);
-            norm = DirectX::XMVector3Normalize(norm);
-            DirectX::XMStoreFloat3(&v.normal, norm);
-         }
-         else {
-             v.normal = DirectX::XMFLOAT3{ 0.f, 0.f, 0.f };
-         }
-
-         v.texCoord = pAiMesh->mTextureCoords[0] ? DirectX::XMFLOAT2{ pAiMesh->mTextureCoords[0][i].x, pAiMesh->mTextureCoords[0][i].y   } : DirectX::XMFLOAT2{0.f, 0.f};
-
-         vertices.push_back(v);
+        vertices.push_back(v);
     }
 
     for (UINT i = 0; i < pAiMesh->mNumFaces; i++)
@@ -116,9 +113,9 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
         }
     }
 
-    OutputDebugStringA(std::format("Mesh loaded: {} vertices, {} indices\n",
+    std::string dbgStr = std::format("Mesh loaded: {} vertices, {} indices",
         static_cast<UINT>(vertices.size()),
-        static_cast<UINT>(indices.size())).c_str()
+        static_cast<UINT>(indices.size())
     );
 
     outMesh.vertexCount = static_cast<UINT>(vertices.size());
@@ -310,7 +307,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
                 //OutputDebugStringA(std::format("Texture loaded: {0}x{1}\n", outMesh.textureWidth, outMesh.textureHeight).c_str());
             }
         }
-        else OutputDebugStringA("No diffuse texture");
+        else dbgStr.append(" - No diffuse texture");
     }
     __material_process_end__:
 
@@ -339,6 +336,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
             IID_PPV_ARGS(&outMesh.defaultDiffuseTexture)))) throw std::runtime_error("Failed to create default diffuse heap");
     }
 
+    OutputDebugStringA(dbgStr.append("\n").c_str());
     isOnCPU = true;
 }
 
@@ -439,24 +437,63 @@ void Model::UploadGPU(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cm
 }
 
 _Use_decl_annotations_
-void Model::Draw(ID3D12GraphicsCommandList* cmdList, _In_ CD3DX12_GPU_DESCRIPTOR_HANDLE& srvGPUHandle, UINT srvDescriptorSize)
+void Model::Draw(DrawContext ctx)
 {
-    if (not cmdList)
+    //struct DrawContext {
+    //    ID3D12GraphicsCommandList* cmdList;
+    //    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle;
+    //    D3D12_GPU_VIRTUAL_ADDRESS baseGpuAddr;
+    //    PaddedConstantBuffer* cbBufferCPU;
+    //    ConstantBuffer cbParams;
+    //    UINT frameBaseIndex;
+    //    UINT srvDescriptorSize;
+    //};
+
+
+    if (not ctx.cmdList)
     {
         throw std::runtime_error("At least one of the pointers are invalid");
     }
 
     UINT textureIndex{};
+    UINT meshIndex{};
     for (const Mesh& mesh : meshes)
     {
-        CD3DX12_GPU_DESCRIPTOR_HANDLE texHandle(srvGPUHandle, textureIndex * srvDescriptorSize);
-        cmdList->SetGraphicsRootDescriptorTable(1, texHandle);
+        const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
+        const DirectX::XMMATRIX rotQMatrix  = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
+        const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
+        const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix;
 
-        cmdList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-        cmdList->IASetIndexBuffer(&mesh.indexBufferView);
-        cmdList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+        DirectX::XMStoreFloat4x4(&ctx.cbParams.worldMatrix, DirectX::XMMatrixTranspose(worldMatrix));
+
+        UINT slot = ctx.frameBaseIndex + meshIndex;
+        memcpy(&ctx.cbBufferCPU[slot].constant, &ctx.cbParams, sizeof(ConstantBuffer));
+
+        D3D12_GPU_VIRTUAL_ADDRESS meshGpuAddr = ctx.baseGpuAddr + sizeof(PaddedConstantBuffer) * meshIndex;
+        ctx.cmdList->SetGraphicsRootConstantBufferView(0, meshGpuAddr);
+
+        CD3DX12_GPU_DESCRIPTOR_HANDLE texHandle(ctx.srvGPUHandle, textureIndex * ctx.srvDescriptorSize);
+        ctx.cmdList->SetGraphicsRootDescriptorTable(1, texHandle);
+
+        ctx.cmdList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+        ctx.cmdList->IASetIndexBuffer(&mesh.indexBufferView);
+        ctx.cmdList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
 
         textureIndex++;
+        meshIndex++;
+    }
+}
+
+void Model::Rotate(DirectX::XMFLOAT3 rotation)
+{
+    for (Mesh& mesh : meshes)
+    {
+        DirectX::XMVECTOR quaternion = DirectX::XMQuaternionRotationRollPitchYaw(
+            rotation.x,
+            rotation.y,
+            rotation.z
+        );
+        DirectX::XMStoreFloat4(&mesh.m_rotationQ, quaternion);
     }
 }
 

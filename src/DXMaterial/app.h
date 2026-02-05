@@ -22,23 +22,6 @@ private:
     ComPtr<IWICImagingFactory2> m_wicFactory;
     static const UINT FrameCount = 2;
 
-    struct ConstantBuffer
-    {
-        DirectX::XMFLOAT4X4 worldMatrix;
-        DirectX::XMFLOAT4X4 viewMatrix;
-        DirectX::XMFLOAT4X4 projectionMatrix;
-        DirectX::XMFLOAT4 lightDir;
-        DirectX::XMFLOAT4 lightColor;
-    };
-    static_assert(sizeof(ConstantBuffer) == 224);
-
-    union PaddedConstantBuffer
-    {
-        ConstantBuffer constant;
-        uint8_t bytes[D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT];
-    };
-    static_assert(sizeof(PaddedConstantBuffer) == D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * 1);
-
     CD3DX12_VIEWPORT m_viewport;
     CD3DX12_RECT m_scissorRect;
     ComPtr<IDXGISwapChain4> m_swapchain;
@@ -70,7 +53,7 @@ private:
     ComPtr<ID3D12Fence1> m_fence;
     UINT64 m_fenceGeneration;
 
-    UINT c_maxObjects = 1;
+    UINT m_maxObjects;
 
     void PopulateCommandList();
     void WaitForGPU();
@@ -79,7 +62,6 @@ private:
     void LoadAssets();
 
     float m_angle;
-    DirectX::XMMATRIX m_worldMatrix;
     DirectX::XMMATRIX m_viewMatrix;
     DirectX::XMMATRIX m_projectionMatrix;
     DirectX::XMVECTOR m_lightDir;

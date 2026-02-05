@@ -10,6 +10,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
     m_rtvDescriptorSize{},
     m_srvDescriptorSize{},
+    m_maxObjects{},
     m_constantDataGpuVirtualAddr{},
     m_constantDataCpuAddr(nullptr),
     m_frameIndex{},
@@ -27,8 +28,6 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_executablePath = executablePath;
 
     m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
-
-    m_worldMatrix = DirectX::XMMatrixIdentity();
 
     static const DirectX::XMVECTORF32 c_eye{ 0.f, 1.25f,  2.5f, 0.f};
     static const DirectX::XMVECTORF32 c_at { 0.f, 0.f,  0.f, 0.f };
@@ -75,8 +74,6 @@ void app::OnUpdate()
     {
         m_angle -= DirectX::XM_2PI;
     }
-
-    m_worldMatrix = DirectX::XMMatrixRotationY(m_angle);
 }
 void app::OnRender()
 {
@@ -238,6 +235,38 @@ void app::LoadPipeline()
 }
 void app::LoadAssets()
 {
+    // Command List 
+    ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+
+    // Create synchronization objects and wait until assets have been uploaded to the GPU.
+    {
+        ThrowIfFailed(m_device->CreateFence(m_fenceGeneration, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+        m_fenceGeneration++;
+
+        m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+        if (m_fenceEvent == nullptr)
+        {
+            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+        }
+
+        WaitForGPU();
+    }
+
+    m_model = Model(m_device.Get(), m_wicFactory.Get());
+    {
+        m_model.Load(GetAssetFullPath(L"res/scifi_9mm_pistol/scene.gltf"), m_commandList.Get());
+
+        //ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+
+        m_model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+
+        WaitForGPU();
+
+        m_model.ResetUploadHeaps();
+    }
+
+    m_maxObjects = static_cast<UINT>(m_model.GetMeshes().size());
+
     //Root signature
     {
         D3D12_FEATURE_DATA_ROOT_SIGNATURE rootSignature{};
@@ -291,7 +320,7 @@ void app::LoadAssets()
     // Create the constant buffer memory and map the resource
     {
         const D3D12_HEAP_PROPERTIES uploadHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        size_t cbSize = ((UINT64)c_maxObjects) * FrameCount * sizeof(PaddedConstantBuffer);
+        size_t cbSize = ((UINT64)m_maxObjects) * FrameCount * sizeof(PaddedConstantBuffer);
 
         const D3D12_RESOURCE_DESC heapDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
         ThrowIfFailed(m_device->CreateCommittedResource(
@@ -302,7 +331,8 @@ void app::LoadAssets()
             nullptr,
             IID_PPV_ARGS(m_perFrameConstants.ReleaseAndGetAddressOf())
         ));
-        ThrowIfFailed(m_perFrameConstants->Map(0, nullptr, reinterpret_cast<void**>(&m_constantDataCpuAddr)));
+        CD3DX12_RANGE readRange(0, 0);
+        ThrowIfFailed(m_perFrameConstants->Map(0, &readRange, reinterpret_cast<void**>(&m_constantDataCpuAddr)));
 
         m_constantDataGpuVirtualAddr = m_perFrameConstants->GetGPUVirtualAddress();
     }
@@ -368,36 +398,6 @@ void app::LoadAssets()
             desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
             ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_pipeline)));
         }
-    }
-
-    // Command List 
-    ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
-
-    // Create synchronization objects and wait until assets have been uploaded to the GPU.
-    {
-        ThrowIfFailed(m_device->CreateFence(m_fenceGeneration, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-        m_fenceGeneration++;
-
-        m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-        if (m_fenceEvent == nullptr)
-        {
-            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-        }
-
-        WaitForGPU();
-    }
-
-    m_model = Model(m_device.Get(), m_wicFactory.Get());
-    {
-        m_model.Load(GetAssetFullPath(L"res/scifi_9mm_pistol/scene.gltf"), m_commandList.Get());
-
-        //ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
-
-        m_model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
-
-        WaitForGPU();
-
-        m_model.ResetUploadHeaps();
     }
 
     // Default texture
@@ -554,22 +554,27 @@ void app::PopulateCommandList()
 
     m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    ConstantBuffer cbParams{};
-    DirectX::XMStoreFloat4x4(&cbParams.worldMatrix, DirectX::XMMatrixTranspose(m_worldMatrix));
-    DirectX::XMStoreFloat4x4(&cbParams.viewMatrix, DirectX::XMMatrixTranspose(m_viewMatrix));
-    DirectX::XMStoreFloat4x4(&cbParams.projectionMatrix, DirectX::XMMatrixTranspose(m_projectionMatrix));
-    DirectX::XMStoreFloat4(&cbParams.lightDir,  m_lightDir);
-    DirectX::XMStoreFloat4(&cbParams.lightColor, m_lightColor);
-
-    UINT constantBufferIndex = (m_frameIndex % FrameCount) * c_maxObjects;
-    memcpy(&m_constantDataCpuAddr[constantBufferIndex], &cbParams, sizeof(cbParams));
-
+    UINT constantBufferIndex = (m_frameIndex % FrameCount) * m_maxObjects;
     auto baseGpuAddr = m_constantDataGpuVirtualAddr + sizeof(PaddedConstantBuffer) * constantBufferIndex;
-    m_commandList->SetGraphicsRootConstantBufferView(0, baseGpuAddr);
-
     CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(m_srvHeap->GetGPUDescriptorHandleForHeapStart());
 
-    m_model.Draw(m_commandList.Get(), srvGPUHandle, m_srvDescriptorSize);
+    ConstantBuffer cbParams{};
+    //DirectX::XMStoreFloat4x4(&cbParams.worldMatrix, DirectX::XMMatrixTranspose(mesh.m_worldMatrix));
+    DirectX::XMStoreFloat4x4(&cbParams.viewMatrix, DirectX::XMMatrixTranspose(m_viewMatrix));
+    DirectX::XMStoreFloat4x4(&cbParams.projectionMatrix, DirectX::XMMatrixTranspose(m_projectionMatrix));
+    DirectX::XMStoreFloat4(&cbParams.lightDir, m_lightDir);
+    DirectX::XMStoreFloat4(&cbParams.lightColor, m_lightColor);
+
+    //m_model.Rotate({90.f, m_angle, 0.f});
+    m_model.Draw({
+        m_commandList.Get(),
+        srvGPUHandle,
+        baseGpuAddr,
+        m_constantDataCpuAddr,
+        cbParams,
+        constantBufferIndex,
+        m_srvDescriptorSize
+    });
 
     {
         CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
