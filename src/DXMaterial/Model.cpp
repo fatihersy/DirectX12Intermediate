@@ -449,11 +449,12 @@ void Model::Draw(DrawContext ctx)
     //    UINT srvDescriptorSize;
     //};
 
-
     if (not ctx.cmdList)
     {
         throw std::runtime_error("At least one of the pointers are invalid");
     }
+
+    DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
 
     UINT textureIndex{};
     UINT meshIndex{};
@@ -462,7 +463,7 @@ void Model::Draw(DrawContext ctx)
         const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
         const DirectX::XMMATRIX rotQMatrix  = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
         const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
-        const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix;
+        const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation;
 
         DirectX::XMStoreFloat4x4(&ctx.cbParams.worldMatrix, DirectX::XMMatrixTranspose(worldMatrix));
 
@@ -484,17 +485,28 @@ void Model::Draw(DrawContext ctx)
     }
 }
 
-void Model::Rotate(DirectX::XMFLOAT3 rotation)
+void Model::RotateAdd(DirectX::XMFLOAT3 rotation)
 {
-    for (Mesh& mesh : meshes)
+    m_rotation.x += DirectX::XMConvertToRadians(rotation.x);
+    m_rotation.y += DirectX::XMConvertToRadians(rotation.y);
+    m_rotation.z += DirectX::XMConvertToRadians(rotation.z);
+
+    if (m_rotation.x >= DirectX::XM_2PI)
     {
-        DirectX::XMVECTOR quaternion = DirectX::XMQuaternionRotationRollPitchYaw(
-            rotation.x,
-            rotation.y,
-            rotation.z
-        );
-        DirectX::XMStoreFloat4(&mesh.m_rotationQ, quaternion);
+        m_rotation.x -= DirectX::XM_2PI;
     }
+    if (m_rotation.y >= DirectX::XM_2PI)
+    {
+        m_rotation.y -= DirectX::XM_2PI;
+    }
+    if (m_rotation.z >= DirectX::XM_2PI)
+    {
+        m_rotation.z -= DirectX::XM_2PI;
+    }
+
+    char buf[256];
+    sprintf_s(buf, "Rotation (%.3f, %.3f, %.3f)\n", m_rotation.x, m_rotation.y, m_rotation.z);
+    OutputDebugStringA(buf);
 }
 
 void Model::ResetUploadHeaps() {

@@ -61,7 +61,6 @@ private:
     void LoadPipeline();
     void LoadAssets();
 
-    float m_angle;
     DirectX::XMMATRIX m_viewMatrix;
     DirectX::XMMATRIX m_projectionMatrix;
     DirectX::XMVECTOR m_lightDir;

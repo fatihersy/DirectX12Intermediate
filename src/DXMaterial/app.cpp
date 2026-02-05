@@ -16,8 +16,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_frameIndex{},
     m_fenceEvent(nullptr),
     m_fenceGeneration{},
-    m_aspectRatio{},
-    m_angle{}
+    m_aspectRatio{}
 {
     plat = platform(width, height, title, hInstance, nCmdShow, this);
 
@@ -64,17 +63,7 @@ void app::Run()
         plat.PlatMessageDispatch(msg);
     }
 }
-void app::OnUpdate()
-{
-    static const float rotationSpeed = .01f;
-
-    m_angle += rotationSpeed;
-
-    if (m_angle >= DirectX::XM_2PI)
-    {
-        m_angle -= DirectX::XM_2PI;
-    }
-}
+void app::OnUpdate(){}
 void app::OnRender()
 {
     PopulateCommandList();
@@ -253,6 +242,7 @@ void app::LoadAssets()
     }
 
     m_model = Model(m_device.Get(), m_wicFactory.Get());
+    m_model.m_rotation = { 0.f, 0.f, 0.f};
     {
         m_model.Load(GetAssetFullPath(L"res/scifi_9mm_pistol/scene.gltf"), m_commandList.Get());
 
@@ -523,7 +513,6 @@ void app::LoadAssets()
     }
 
     m_fallbackTextureUpload.Reset();
-
 }
 void app::PopulateCommandList()
 {
@@ -565,7 +554,7 @@ void app::PopulateCommandList()
     DirectX::XMStoreFloat4(&cbParams.lightDir, m_lightDir);
     DirectX::XMStoreFloat4(&cbParams.lightColor, m_lightColor);
 
-    //m_model.Rotate({90.f, m_angle, 0.f});
+    m_model.RotateAdd({0.f, .5f, 0.f});
     m_model.Draw({
         m_commandList.Get(),
         srvGPUHandle,

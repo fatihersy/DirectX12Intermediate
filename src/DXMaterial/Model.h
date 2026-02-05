@@ -31,17 +31,21 @@ public:
     Model();
     Model(_In_ ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory);
 
-    std::filesystem::path m_assetPath;
-    bool isOnGPU = false;
-    bool isOnCPU = false;
+    DirectX::XMFLOAT3 m_position{};
+    DirectX::XMFLOAT3 m_rotation{};
+    DirectX::XMFLOAT3 m_scale{1.f, 1.f, 1.f};
 
-    void Rotate(DirectX::XMFLOAT3 rotation);
+    void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Draw(_In_ DrawContext ctx);
 
     bool Load(_In_ const std::filesystem::path& path, _In_ ID3D12GraphicsCommandList* cmdList);
     void UploadGPU(_In_ ID3D12GraphicsCommandList* cmdList, _In_ ID3D12CommandQueue* cmdQueue);
     void ResetUploadHeaps();
     inline const std::vector<Mesh>& GetMeshes() { return meshes; };
+
+    std::filesystem::path m_assetPath;
+    bool isOnGPU = false;
+    bool isOnCPU = false;
 private:
     ID3D12Device* m_device;
     IWICImagingFactory2* m_wicFactory;
