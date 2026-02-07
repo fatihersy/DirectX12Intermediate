@@ -17,6 +17,8 @@
 #include <format>
 #include <array>
 #include <filesystem>
+#include <cstdio>
+#include <memory>
 
 #include <MeshTypes.h>
 #include <ComTypes.h>

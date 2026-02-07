@@ -16,7 +16,9 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_frameIndex{},
     m_fenceEvent(nullptr),
     m_fenceGeneration{},
-    m_aspectRatio{}
+    m_aspectRatio{},
+    m_keyboard(std::make_unique<DirectX::Keyboard>()),
+    m_mouse(std::make_unique<DirectX::Mouse>())
 {
     plat = platform(width, height, title, hInstance, nCmdShow, this);
 
@@ -28,7 +30,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
 
     m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
-    static const DirectX::XMVECTORF32 c_eye{ 0.f, 1.25f,  2.5f, 0.f};
+    static const DirectX::XMVECTORF32 c_eye{ 0.f, 10.25f,  20.5f, 0.f};
     static const DirectX::XMVECTORF32 c_at { 0.f, 0.f,  0.f, 0.f };
     static const DirectX::XMVECTORF32 c_up { 0.f, 1.f,  0.f, 0.f };
     m_viewMatrix = DirectX::XMMatrixLookAtLH(c_eye, c_at, c_up);
@@ -41,6 +43,8 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
 
     ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
     ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory)));
+
+    m_mouse->SetWindow(plat.GetHWND());
 }
 app::~app() {}
 void app::OnDestroy()
@@ -53,6 +57,8 @@ void app::OnInit()
     app::LoadPipeline();
     app::LoadAssets();
     plat.PlatShowWindow();
+
+    m_keyboardTracker.Reset();
 }
 void app::Run()
 {
@@ -63,7 +69,11 @@ void app::Run()
         plat.PlatMessageDispatch(msg);
     }
 }
-void app::OnUpdate(){}
+void app::OnUpdate()
+{
+    app::UpdateKeyBindings();
+    app::UpdateMouseBindings();
+}
 void app::OnRender()
 {
     PopulateCommandList();
@@ -244,7 +254,7 @@ void app::LoadAssets()
     m_model = Model(m_device.Get(), m_wicFactory.Get());
     m_model.m_rotation = { 0.f, 0.f, 0.f};
     {
-        m_model.Load(GetAssetFullPath(L"res/scifi_9mm_pistol/scene.gltf"), m_commandList.Get());
+        m_model.Load(GetAssetFullPath(L"res/lowpoly_ramen_bowl.glb"), m_commandList.Get());
 
         //ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
 
@@ -300,7 +310,7 @@ void app::LoadAssets()
             if (error)
             {
                 const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-                OutputDebugStringA(errorMsg);
+                g_FError(errorMsg);
             }
             throw std::runtime_error("Failed to serialize root signature");
         }
@@ -340,7 +350,7 @@ void app::LoadAssets()
                 if (error)
                 {
                     const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-                    OutputDebugStringA(errorMsg);
+                    g_FError(errorMsg);
                 }
                 ThrowIfFailed(hr);
             }
@@ -354,7 +364,7 @@ void app::LoadAssets()
                 if (error)
                 {
                     const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-                    OutputDebugStringA(errorMsg);
+                    g_FError(errorMsg);
                 }
                 ThrowIfFailed(hr);
             }
@@ -573,12 +583,31 @@ void app::PopulateCommandList()
     ThrowIfFailed(m_commandList->Close());
 }
 
-
-void app::OnKeyDown(UINT8 key) {}
-void app::OnKeyUp(UINT8 key)
+void app::UpdateKeyBindings()
 {
-    if (key == VK_ESCAPE)
+    auto kbState = m_keyboard->GetState();
+    m_keyboardTracker.Update(kbState);
+
+    if (kbState.W)
     {
-        PostQuitMessage(0);
+        g_FDebug("W %s\n", "is pressed");
     }
+    if (kbState.A)
+    {
+        g_FDebug("W %s\n", "is pressed");
+
+    }
+    if (kbState.S)
+    {
+        g_FDebug("W %s\n", "is pressed");
+
+    }
+    if (kbState.D)
+    {
+        g_FError("W %s\n", "is pressed");
+    }
+}
+void app::UpdateMouseBindings()
+{
+
 }

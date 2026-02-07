@@ -16,8 +16,6 @@ public:
     void OnUpdate() override;
     void OnRender() override;
 
-    void OnKeyDown(UINT8 key) override;
-    void OnKeyUp(UINT8 key) override;
 private:
     ComPtr<IWICImagingFactory2> m_wicFactory;
     static const UINT FrameCount = 2;
@@ -60,6 +58,8 @@ private:
     void MoveToNextFrame();
     void LoadPipeline();
     void LoadAssets();
+    void UpdateKeyBindings();
+    void UpdateMouseBindings();
 
     DirectX::XMMATRIX m_viewMatrix;
     DirectX::XMMATRIX m_projectionMatrix;
@@ -69,6 +69,10 @@ private:
     float m_aspectRatio;
     std::wstring m_assetsPath;
     std::wstring m_executablePath;
+
+    std::unique_ptr<DirectX::Keyboard> m_keyboard;
+    std::unique_ptr<DirectX::Mouse> m_mouse;
+    DirectX::Keyboard::KeyboardStateTracker m_keyboardTracker;
 
     inline std::wstring GetAssetFullPath(LPCWSTR assetName) {
         return m_assetsPath + assetName;

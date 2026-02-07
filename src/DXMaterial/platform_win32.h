@@ -1,6 +1,8 @@
 #pragma once
 
-#include <IApp.h>
+#include "Tool.h"
+#include "IApp.h"
+#include "Logger.h"
 
 class platform
 {
@@ -19,9 +21,19 @@ public:
     static void GetHWND(HWND hwnd)                { m_hwnd = hwnd; }
     static void GetHINSTANCE(HINSTANCE hInstance) { m_hInstance = hInstance; }
 
+    template<typename... Args>
+    static inline void FDebug(const char* fmt, Args&&... args) {
+        PlatformConsoleWrite(FlogLevel::FLOG_DEBUG, FString::format(fmt, std::forward<Args>(args)...));
+    }
+
+    template<typename... Args>
+    static inline void FError(const char* fmt, Args&&... args) {
+        PlatformConsoleWrite(FlogLevel::FLOG_ERROR, FString::format(fmt, std::forward<Args>(args)...));
+    }
+
 protected:
     static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
-
+    static void PlatformConsoleWrite(FlogLevel level, const std::string_view& message);
 private:
     static int m_nCmdShow;
     static HWND m_hwnd;

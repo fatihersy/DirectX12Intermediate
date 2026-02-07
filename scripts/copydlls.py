@@ -81,6 +81,43 @@ def copy_binaries(source_root, debug_dest, release_dest, conan_arch):
                             shutil.copy2(binary_file.resolve(), dest_file)
                             print(f"Copied (materialized) {binary_file} -> {dest_file}")
 
+def copy_vcpkg_binaries(vcpkg_root, debug_dest, release_dest, triplet="x64-windows"):
+    """Copy vcpkg DLLs to destination directories."""
+    vcpkg_root = Path(vcpkg_root).resolve()
+    debug_dest = Path(debug_dest).resolve()
+    release_dest = Path(release_dest).resolve()
+
+    if not vcpkg_root.exists():
+        print(f"vcpkg directory does not exist: {vcpkg_root}")
+        return
+
+    # Determine file extension based on platform
+    system = platform.system()
+    if system == "Windows":
+        binary_ext = ".dll"
+    elif system == "Linux":
+        binary_ext = ".so"
+    else:
+        print(f"Unsupported platform: {system}")
+        return
+
+    # vcpkg uses {triplet}/bin for release and {triplet}/debug/bin for debug
+    release_bin = vcpkg_root / triplet / "bin"
+    debug_bin = vcpkg_root / triplet / "debug" / "bin"
+
+    for src_dir, dest_dir in [(debug_bin, debug_dest), (release_bin, release_dest)]:
+        if not src_dir.exists():
+            print(f"vcpkg bin directory does not exist: {src_dir}")
+            continue
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        for binary_file in src_dir.glob(f"*{binary_ext}"):
+            dest_file = dest_dir / binary_file.name
+            shutil.copy2(binary_file, dest_file)
+            print(f"Copied {binary_file} -> {dest_file}")
+
+
 if __name__ == "__main__":
     # Cli
     p = argparse.ArgumentParser(prog="copydlls.py", allow_abbrev=False)
@@ -91,9 +128,14 @@ if __name__ == "__main__":
     # Resolve architecture
     hostArch = mox.GetPlatformInfo(args.arch)
 
-    # Example usage
-    source_directory = "./dependencies/full_deploy"
+    # Output directories
     debug_output_directory = f"./dlls/Debug-{hostArch['premake_arch']}"
     release_output_directory = f"./dlls/Release-{hostArch['premake_arch']}"
 
-    copy_binaries(source_directory, debug_output_directory, release_output_directory, hostArch["conan_arch"])
+    # Copy Conan binaries
+    conan_source_directory = "./dependencies/full_deploy"
+    copy_binaries(conan_source_directory, debug_output_directory, release_output_directory, hostArch["conan_arch"])
+
+    # Copy vcpkg binaries
+    vcpkg_source_directory = "./dependencies/vcpkg_installed"
+    copy_vcpkg_binaries(vcpkg_source_directory, debug_output_directory, release_output_directory)

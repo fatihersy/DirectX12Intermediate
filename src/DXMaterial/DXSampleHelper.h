@@ -11,6 +11,7 @@
 
 #pragma once
 #include <stdexcept>
+#include "Logger.h"
 
 // Note that while ComPtr is used to manage the lifetime of resources on the CPU,
 // it has no understanding of the lifetime of resources on the GPU. Apps must account
@@ -220,7 +221,7 @@ inline Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(
 
     if (errors != nullptr)
     {
-        OutputDebugStringA((char*)errors->GetBufferPointer());
+        g_FError((char*)errors->GetBufferPointer());
     }
     ThrowIfFailed(hr);
 

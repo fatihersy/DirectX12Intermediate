@@ -36,7 +36,7 @@ bool Model::Load(const std::filesystem::path& path, ID3D12GraphicsCommandList* c
     );
     if (not scene or scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE or not scene->mRootNode)
     {
-        OutputDebugStringA(importer.GetErrorString());
+        g_FError(importer.GetErrorString());
         throw std::runtime_error("\n");
     }
 
@@ -190,10 +190,10 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
             aiTextureType texType = static_cast<aiTextureType>(type);
             unsigned int count = material->GetTextureCount(texType);
             if (count > 0) {
-                OutputDebugStringA(std::format("Found {} textures of type {}\n", count, type).c_str());
+                g_FDebug(std::format("Found {} textures of type {}\n", count, type).c_str());
                 aiString path;
                 if (material->GetTexture(texType, 0, &path) == aiReturn_SUCCESS) {
-                    OutputDebugStringA(std::format("Texture path: {}\n", path.C_Str()).c_str());
+                    g_FDebug(std::format("Texture path: {}\n", path.C_Str()).c_str());
                 }
             }
         }
@@ -217,18 +217,18 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
                         ComPtr<IWICStream> stream;
                         if (FAILED(m_wicFactory->CreateStream(&stream)))
                         {
-                            OutputDebugStringA("Failed to create WIC stream\n");
+                            g_FError("Failed to create WIC stream\n");
                             goto __material_process_end__;
                         }
                         if (FAILED(stream->InitializeFromMemory(reinterpret_cast<BYTE*>(embeddedTex->pcData), embeddedTex->mWidth)))
                         {
-                            OutputDebugStringA("Failed to initialize stream from memory\n");
+                            g_FError("Failed to initialize stream from memory\n");
                             goto __material_process_end__;
                         }
 
                         if (FAILED(m_wicFactory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder)))
                         {
-                            OutputDebugStringA("Failed to create WIC decoder\n");
+                            g_FError("Failed to create WIC decoder\n");
                             goto __material_process_end__;
                         }
                     }
@@ -238,19 +238,19 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
 
                     if (FAILED(m_wicFactory->CreateDecoderFromFilename(directory.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder)))
                     {
-                        OutputDebugStringW(std::format(L"Failed to create decoder from file: {}\n", directory).c_str());
+                        g_FError("Failed to create decoder from file: %s\n", WStringToString(directory).c_str());
                     }
                 }
 
                 ComPtr<IWICBitmapFrameDecode> frame;
                 if (FAILED(decoder->GetFrame(0, &frame)))
                 {
-                    OutputDebugStringA("Failed to get frame from decoder\n");
+                    g_FError("Failed to get frame from decoder\n");
                     goto __material_process_end__;
                 }
                 if (FAILED(frame->GetSize(&outMesh.textureWidth, &outMesh.textureHeight)))
                 {
-                    OutputDebugStringA("Failed to get texture dimensions\n");
+                    g_FError("Failed to get texture dimensions\n");
                     goto __material_process_end__;
                 }
 
@@ -263,12 +263,12 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
                 ComPtr<IWICFormatConverter> converter;
                 if (FAILED(m_wicFactory->CreateFormatConverter(&converter)))
                 {
-                    OutputDebugStringA("Failed to create format converter\n");
+                    g_FError("Failed to create format converter\n");
                     goto __material_process_end__;
                 }
                 if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.f, WICBitmapPaletteTypeCustom)))
                 {
-                    OutputDebugStringA("Failed to initialize format converter\n");
+                    g_FError("Failed to initialize format converter\n");
                     goto __material_process_end__;
                 }
 
@@ -286,7 +286,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
                 void* pMappedData = nullptr;
                 if (FAILED(outMesh.uploadDiffuseBuffer->Map(0, nullptr, &pMappedData)))
                 {
-                    OutputDebugStringA("Failed to map texture upload buffer\n");
+                    g_FError("Failed to map texture upload buffer\n");
                     goto __material_process_end__;
                 }
 
@@ -298,13 +298,13 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
                 )))
                 {
                     outMesh.uploadDiffuseBuffer->Unmap(0, nullptr);
-                    OutputDebugStringA("Failed to copy pixels\n");
+                    g_FError("Failed to copy pixels\n");
                     goto __material_process_end__;
                 }
 
                 outMesh.uploadDiffuseBuffer->Unmap(0, nullptr);
 
-                //OutputDebugStringA(std::format("Texture loaded: {0}x{1}\n", outMesh.textureWidth, outMesh.textureHeight).c_str());
+                //g_FDebug(std::format("Texture loaded: {0}x{1}\n", outMesh.textureWidth, outMesh.textureHeight).c_str());
             }
         }
         else dbgStr.append(" - No diffuse texture");
@@ -336,7 +336,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
             IID_PPV_ARGS(&outMesh.defaultDiffuseTexture)))) throw std::runtime_error("Failed to create default diffuse heap");
     }
 
-    OutputDebugStringA(dbgStr.append("\n").c_str());
+    g_FDebug(dbgStr.append("\n").c_str());
     isOnCPU = true;
 }
 
@@ -503,10 +503,6 @@ void Model::RotateAdd(DirectX::XMFLOAT3 rotation)
     {
         m_rotation.z -= DirectX::XM_2PI;
     }
-
-    char buf[256];
-    sprintf_s(buf, "Rotation (%.3f, %.3f, %.3f)\n", m_rotation.x, m_rotation.y, m_rotation.z);
-    OutputDebugStringA(buf);
 }
 
 void Model::ResetUploadHeaps() {
