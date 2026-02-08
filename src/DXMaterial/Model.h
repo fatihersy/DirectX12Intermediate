@@ -40,6 +40,7 @@ public:
 
     bool Load(_In_ const std::filesystem::path& path, _In_ ID3D12GraphicsCommandList* cmdList);
     void UploadGPU(_In_ ID3D12GraphicsCommandList* cmdList, _In_ ID3D12CommandQueue* cmdQueue);
+    void UnloadGPU();
     void ResetUploadHeaps();
     inline const std::vector<Mesh>& GetMeshes() { return meshes; };
 

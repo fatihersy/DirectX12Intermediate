@@ -5,6 +5,8 @@
 #include "io.h"
 #include "fcntl.h"
 
+#include "directxtk12/Keyboard.h"
+#include "directxtk12/Mouse.h"
 
 int platform::m_nCmdShow = 0;
 HWND platform::m_hwnd = nullptr;
@@ -74,11 +76,15 @@ platform::platform(UINT width, UINT height, std::wstring title, HINSTANCE hInsta
 LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     IApp* iApp = reinterpret_cast<IApp*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
-    
+
     switch (message)
     {
         case WM_ACTIVATEAPP:
         {
+            if (wParam == WA_INACTIVE)
+            {
+                break;
+            }
             DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
             DirectX::Mouse::ProcessMessage(message, wParam, lParam);
             break;
@@ -101,18 +107,10 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
         
         case WM_KEYDOWN:
         case WM_KEYUP:
-        case WM_SYSKEYUP: DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
-            break;
-
+        case WM_SYSKEYUP:
         case WM_SYSKEYDOWN:
-        {
-            DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
-            if (wParam == VK_RETURN and (lParam & 0x60000000) == 0x20000000)
-            {
-                // Alt+Enter
-            }
+        DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
             break;
-        }
         
         case WM_MOUSEACTIVATE:
             return MA_ACTIVATEANDEAT;
@@ -133,7 +131,13 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
         
             return 0;
         }
-        
+
+        case WM_CLOSE:
+        {
+            iApp->OnDestroy();
+            DestroyWindow(hWnd);
+            return 0;
+        }
         case WM_DESTROY:
         {
             PostQuitMessage(0);

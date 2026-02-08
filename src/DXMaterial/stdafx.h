@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <memory>
+#include <algorithm>
 
 #include <MeshTypes.h>
 #include <ComTypes.h>

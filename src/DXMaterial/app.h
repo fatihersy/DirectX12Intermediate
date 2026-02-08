@@ -1,7 +1,11 @@
 #pragma once
 
-#include <IApp.h>
+#include "IApp.h"
 #include "Model.h"
+#include "StepTimer.h"
+
+#include "directxtk12/Keyboard.h"
+#include "directxtk12/Mouse.h"
 
 class app : public IApp
 {
@@ -60,9 +64,18 @@ private:
     void LoadAssets();
     void UpdateKeyBindings();
     void UpdateMouseBindings();
+    void UpdateCamera();
 
     DirectX::XMMATRIX m_viewMatrix;
     DirectX::XMMATRIX m_projectionMatrix;
+
+    DirectX::XMVECTOR m_camEye;
+    DirectX::XMVECTOR m_camFwd;
+    DirectX::XMVECTOR m_camUp;
+    FLOAT m_camYaw;
+    FLOAT m_camPitch;
+    FLOAT m_camSpeed;
+    FLOAT m_lookSensitivity;
     DirectX::XMVECTOR m_lightDir;
     DirectX::XMVECTOR m_lightColor;
 
@@ -74,7 +87,9 @@ private:
     std::unique_ptr<DirectX::Mouse> m_mouse;
     DirectX::Keyboard::KeyboardStateTracker m_keyboardTracker;
 
-    inline std::wstring GetAssetFullPath(LPCWSTR assetName) {
+    StepTimer m_timer;
+
+    inline std::wstring GetAssetFullPath(const LPCWSTR assetName) const {
         return m_assetsPath + assetName;
     }
 };

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "InputTypes.h"
-
 class IApp
 {
 public:

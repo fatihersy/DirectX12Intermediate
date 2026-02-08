@@ -519,3 +519,13 @@ void Model::ResetUploadHeaps() {
     }
     isOnCPU = false;
 }
+
+void Model::UnloadGPU()
+{
+    for(Mesh& mesh : meshes)
+    {
+        mesh.defaultDiffuseTexture.Reset();
+        mesh.defaultIndexBuffer.Reset();
+        mesh.defaultVertexBuffer.Reset();
+    }
+}
