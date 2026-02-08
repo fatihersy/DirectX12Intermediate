@@ -29,6 +29,9 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_lookSensitivity(.1f),
     m_viewMatrix{}
 {
+    m_defaultWindowedRECT = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+    m_isFullscreen = false;
+
     plat = platform(width, height, title, hInstance, nCmdShow, this);
 
     m_assetsPath = std::filesystem::current_path().generic_wstring().append(L"/");
@@ -39,10 +42,10 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
 
     m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
-    m_projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, 01.f, 500.f);
+    m_projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, .01f, 500.f);
 
-    // m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.0f);
-    m_lightDir = DirectX::XMVectorSet(-0.577f, 0.577f, -0.577f, 0.0f);
+    m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.0f);
+    //m_lightDir = DirectX::XMVectorSet(-0.577f, 0.577f, -0.577f, 0.0f);
     m_lightColor = DirectX::XMVectorSet(0.9f, 0.9f, 0.9f, 1.0f);
 
     ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
@@ -571,7 +574,7 @@ void app::PopulateCommandList() {
     DirectX::XMStoreFloat4(&cbParams.lightDir, m_lightDir);
     DirectX::XMStoreFloat4(&cbParams.lightColor, m_lightColor);
 
-    m_model.RotateAdd({ 0.f, 1.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
+    m_model.RotateAdd({ 0.f, 5.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
     m_model.Draw({ m_commandList.Get(), srvGPUHandle, baseGpuAddr, m_constantDataCpuAddr, cbParams, constantBufferIndex, m_srvDescriptorSize });
 
     {
@@ -648,7 +651,6 @@ void app::UpdateMouseBindings() {
         m_mouse->ResetScrollWheelValue();
     }
 }
-
 void app::UpdateCamera() {
     DirectX::XMMATRIX rotMatrix = DirectX::XMMatrixRotationRollPitchYaw(DirectX::XMConvertToRadians(m_camPitch), DirectX::XMConvertToRadians(m_camYaw), 0.f);
 
@@ -662,3 +664,92 @@ void app::UpdateCamera() {
 
     m_viewMatrix = DirectX::XMMatrixLookAtLH(m_camEye, lookAt, m_camUp);
 }
+
+void app::OnResize(UINT width, UINT height) {
+    if (width == 0 or height == 0 or (width == m_width and height == m_height))
+    {
+        return;
+    }
+
+    m_width = width;
+    m_height = height;
+    m_aspectRatio = static_cast<FLOAT>(m_width) / static_cast<FLOAT>(m_height);
+
+    WaitForGPU();
+
+    for (UINT i = 0; i < FrameCount; i++)
+    {
+        m_renderTarget[i].Reset();
+    }
+    m_depthStencil.Reset();
+
+    {
+        DXGI_SWAP_CHAIN_DESC1 desc{};
+        m_swapchain->GetDesc1(&desc);
+        ThrowIfFailed(m_swapchain->ResizeBuffers(FrameCount, m_width, m_height, desc.Format, desc.Flags));
+    }
+
+    m_frameIndex = m_swapchain->GetCurrentBackBufferIndex();
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+    for (UINT i = 0; i < FrameCount; i++)
+    {
+        ThrowIfFailed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&m_renderTarget[i])));
+        m_device->CreateRenderTargetView(m_renderTarget[i].Get(), nullptr, rtvHandle);
+        rtvHandle.Offset(1, m_rtvDescriptorSize);
+    }
+
+    {
+        D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, m_width, m_height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+        D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.f, 0);
+        ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
+    }
+
+    {
+        D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
+        desc.Format = DXGI_FORMAT_D32_FLOAT;
+        desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        desc.Flags = D3D12_DSV_FLAG_NONE;
+        CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+        m_device->CreateDepthStencilView(m_depthStencil.Get(), &desc, dsvHandle);
+    }
+
+    m_viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(m_width), static_cast<FLOAT>(m_height));
+    m_scissorRect = CD3DX12_RECT(0L, 0L, static_cast<LONG>(m_width), static_cast<LONG>(m_height));
+
+    const DirectX::XMMATRIX oldProjection = m_projectionMatrix;
+    m_projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, .01f, 500.f);
+}
+
+void app::ToggleFullScreen()
+{
+    m_isFullscreen = not m_isFullscreen;
+
+    MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
+    GetMonitorInfo(MonitorFromWindow(plat.GetHWND(), MONITOR_DEFAULTTOPRIMARY), &monitorInfo);
+    const UINT monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+    const UINT monitorHeight = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
+    const UINT monitorLeft = monitorInfo.rcMonitor.left;
+    const UINT monitorTop = monitorInfo.rcMonitor.top;
+
+    if (m_isFullscreen)
+    {
+        SetWindowLong(plat.GetHWND(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(plat.GetHWND(), HWND_TOP, monitorInfo.rcMonitor.left, monitorInfo.rcMonitor.top, monitorWidth, monitorHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+        app::OnResize(monitorWidth, monitorHeight);
+        return;
+    }
+
+    const UINT windowWidth  = m_defaultWindowedRECT.right - m_defaultWindowedRECT.left;
+    const UINT windowHeight = m_defaultWindowedRECT.bottom - m_defaultWindowedRECT.top;
+
+    const UINT windowLeft = monitorLeft + static_cast<UINT>(monitorWidth / 2.f) - static_cast<UINT>(windowWidth / 2.f);
+    const UINT windowTop  = monitorTop + static_cast<UINT>(monitorHeight / 2.f) - static_cast<UINT>(windowHeight / 2.f);
+
+    SetWindowLong(plat.GetHWND(), GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+    SetWindowPos(plat.GetHWND(), HWND_TOP, windowLeft, windowTop, windowWidth, windowHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+    app::OnResize(windowWidth, windowHeight);
+}
+

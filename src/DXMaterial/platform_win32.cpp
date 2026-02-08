@@ -25,6 +25,11 @@ enum class FConsoleColor : WORD {
 
 platform::platform(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow, IApp* iApp)
 {
+    if (not iApp)
+    {
+        throw std::runtime_error("lpParam is invalid");
+    }
+
     if (AllocConsole())
     {
         FILE* dummyFile;
@@ -55,8 +60,7 @@ platform::platform(UINT width, UINT height, std::wstring title, HINSTANCE hInsta
     windowClass.lpszClassName = L"WinMain";
     RegisterClassEx(&windowClass);
 
-    RECT windowRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
-    AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+    AdjustWindowRect(&iApp->m_defaultWindowedRECT, WS_OVERLAPPEDWINDOW, FALSE);
 
     m_hwnd = CreateWindow(
         windowClass.lpszClassName,
@@ -64,8 +68,8 @@ platform::platform(UINT width, UINT height, std::wstring title, HINSTANCE hInsta
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        windowRect.right - windowRect.left,
-        windowRect.bottom - windowRect.top,
+        iApp->m_defaultWindowedRECT.right - iApp->m_defaultWindowedRECT.left,
+        iApp->m_defaultWindowedRECT.bottom - iApp->m_defaultWindowedRECT.top,
         nullptr,
         nullptr,
         m_hInstance,
@@ -108,8 +112,18 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
         case WM_KEYDOWN:
         case WM_KEYUP:
         case WM_SYSKEYUP:
+            DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
+            break;
         case WM_SYSKEYDOWN:
-        DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
+            if (wParam == VK_RETURN and (lParam & 0x60000000) == 0x20000000) // Alt + Enter
+            {
+                if (iApp)
+                {
+                    iApp->ToggleFullScreen();
+                }
+                return 0;
+            }
+            DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
             break;
         
         case WM_MOUSEACTIVATE:
@@ -134,13 +148,26 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
 
         case WM_CLOSE:
         {
-            iApp->OnDestroy();
+            if (iApp)
+            {
+                iApp->OnDestroy();
+            }
             DestroyWindow(hWnd);
             return 0;
         }
         case WM_DESTROY:
         {
             PostQuitMessage(0);
+            return 0;
+        }
+        case WM_SIZE:
+        {
+            if (iApp and wParam != SIZE_MINIMIZED)
+            {
+                const UINT width = LOWORD(lParam);
+                const UINT height = HIWORD(lParam);
+                iApp->OnResize(width, height);
+            }
             return 0;
         }
         

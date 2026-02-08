@@ -19,6 +19,8 @@ public:
     void OnDestroy() override;
     void OnUpdate() override;
     void OnRender() override;
+    void OnResize(UINT width, UINT height) override;
+    void ToggleFullScreen() override;
 
 private:
     ComPtr<IWICImagingFactory2> m_wicFactory;
