@@ -1,6 +1,6 @@
 
 mox_project("DXMaterial", "dx_material")
-mox_cpp("C++20")
+mox_cpp("C++23")
 mox_windowed()
 mox_use_vcpkg()
 uuid("d54bdce0-8b62-11f0-b558-0800200c9a66")
@@ -16,6 +16,7 @@ multiprocessorcompile "On"
 filter "action:vs*"
     --buildoptions { "/ZW" } Not supported with C++23 Preview and premake5 beta8 forces to that
     buildoptions { "/sdl" }
+filter {} 
 
 files {
     "**.h",
@@ -33,7 +34,8 @@ links {
     "winmm.lib",
     "comctl32.lib",
     "delayimp.lib",
-    "assimp-vc143-mt.lib"
+    "assimp-vc143-mt.lib",
+    "imgui.lib"
 }
 
 pchheader "stdafx.h"

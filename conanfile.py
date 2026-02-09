@@ -5,16 +5,10 @@ class MoxPPRecipe(ConanFile):
     generators = "PremakeDeps"
 
     def requirements(self):
-        # You can add your own external requirements. Spdlog is provided as an example!
-        self.requires("spdlog/1.15.3")
         self.requires("assimp/6.0.2")
+        self.requires("imgui/1.92.5")
 
-        # This is required for unit testing! Only remove it when not using unit tests!
-        # You can also swap the testing framework. There is no hard reference to gtest in MoxPP!
         # self.requires("gtest/1.16.0")
 
-    def configure(self):
-        # We set spdlog to be shared lib. This is only done for testing the mechanisms of dll copying in ci
-        # This also serves as an example how options are set
-        # Feel free to change to your desires
-        self.options["spdlog"].shared = True
+    #def configure(self):
+        #self.options["assimp"].shared = True

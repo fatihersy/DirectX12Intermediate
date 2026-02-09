@@ -13,6 +13,11 @@ public:
     app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow);
     ~app();
 
+    static app* GetInstance() {
+        assert( s_instance != nullptr );
+        return s_instance;
+    };
+
     void Run();
 
     void OnInit() override;
@@ -22,7 +27,12 @@ public:
     void OnResize(UINT width, UINT height) override;
     void ToggleFullScreen() override;
 
+    inline UINT GetSRVdescriptorSize() { return m_srvDescriptorSize; }
+    inline std::vector<INT>& GetFreeSRVindices() { return m_freeSRVindices; }
+
 private:
+    static app* s_instance;
+
     ComPtr<IWICImagingFactory2> m_wicFactory;
     static const UINT FrameCount = 2;
 
@@ -46,6 +56,7 @@ private:
 
     Model m_model;
 
+    std::vector<INT> m_freeSRVindices;
     ComPtr<ID3D12Resource2> m_perFrameConstants;
     UINT m_rtvDescriptorSize;
     UINT m_srvDescriptorSize;
@@ -94,5 +105,6 @@ private:
     inline std::wstring GetAssetFullPath(const LPCWSTR assetName) const {
         return m_assetsPath + assetName;
     }
+
 };
 

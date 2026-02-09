@@ -8,9 +8,13 @@
 #include "directxtk12/Keyboard.h"
 #include "directxtk12/Mouse.h"
 
+#include "imgui_impl_win32.h"
+
 int platform::m_nCmdShow = 0;
 HWND platform::m_hwnd = nullptr;
 HINSTANCE platform::m_hInstance = nullptr;
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 enum class FConsoleColor : WORD {
     White = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE,
@@ -81,6 +85,11 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
 {
     IApp* iApp = reinterpret_cast<IApp*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+    {
+        return true;
+    }
+
     switch (message)
     {
         case WM_ACTIVATEAPP:
@@ -133,6 +142,7 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
         {
             if (iApp)
             {
+                ImGui_ImplWin32_NewFrame();
                 iApp->OnUpdate();
                 iApp->OnRender();
             }
@@ -150,6 +160,7 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
         {
             if (iApp)
             {
+                ImGui_ImplWin32_Shutdown();
                 iApp->OnDestroy();
             }
             DestroyWindow(hWnd);
@@ -179,6 +190,7 @@ LRESULT CALLBACK platform::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LP
 
 void platform::PlatShowWindow()
 {
+    ImGui_ImplWin32_Init(m_hwnd);
     ShowWindow(m_hwnd, m_nCmdShow);
 }
 void platform::PlatMessageDispatch(MSG& msg)

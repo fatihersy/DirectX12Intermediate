@@ -6,7 +6,15 @@
 #include "DXSampleHelper.h"
 #include "platform_win32.h"
 
+#include "imgui.h"
+#include "imgui_impl_dx12.h"
+
+app* app::s_instance = nullptr;
+
 platform plat{};
+
+void SrvDescriptorAllocFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle);
+void SrvDescriptorFreeFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle);
 
 app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow) : IApp(width, height, title),
     m_viewport(0.f, 0.f, static_cast<float>(width), static_cast<float>(height)),
@@ -29,10 +37,12 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_lookSensitivity(.1f),
     m_viewMatrix{}
 {
+    s_instance = this;
+
     m_defaultWindowedRECT = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
     m_isFullscreen = false;
 
-    plat = platform(width, height, title, hInstance, nCmdShow, this);
+    plat = platform(width, height, title, hInstance, nCmdShow, s_instance);
 
     m_assetsPath = std::filesystem::current_path().generic_wstring().append(L"/");
 
@@ -56,6 +66,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_mouse->SetWindow(plat.GetHWND());
 }
 app::~app() {
+    s_instance = nullptr;
 }
 void app::OnDestroy()
 {
@@ -64,6 +75,9 @@ void app::OnDestroy()
         m_perFrameConstants->Unmap(0, nullptr);
         m_constantDataCpuAddr = nullptr;
     }
+
+    ImGui_ImplDX12_Shutdown();
+    ImGui::DestroyContext();
 
     m_mouse.release();
     m_mouse.reset();
@@ -128,6 +142,28 @@ void app::OnDestroy()
 void app::OnInit() {
     app::LoadPipeline();
     app::LoadAssets();
+
+    // ImGui Init
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+        ImGui_ImplDX12_InitInfo initInfo{};
+        initInfo.UserData = s_instance;
+        initInfo.Device = m_device.Get();
+        initInfo.CommandQueue = m_commandQueue.Get();
+        initInfo.NumFramesInFlight = FrameCount;
+        initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+        initInfo.SrvDescriptorHeap = m_srvHeap.Get();
+        initInfo.SrvDescriptorAllocFn = &SrvDescriptorAllocFn;
+        initInfo.SrvDescriptorFreeFn = &SrvDescriptorFreeFn;
+        ImGui_ImplDX12_Init(&initInfo);
+    }
+
     plat.PlatShowWindow();
 
     m_keyboardTracker.Reset();
@@ -141,6 +177,10 @@ void app::Run() {
 }
 void app::OnUpdate() {
     m_timer.Tick(NULL);
+
+    ImGui_ImplDX12_NewFrame();
+    ImGui::NewFrame();
+    ImGui::ShowDemoWindow();
 
     app::UpdateKeyBindings();
     app::UpdateMouseBindings();
@@ -499,43 +539,49 @@ void app::LoadAssets() {
 
     WaitForGPU();
 
-    // Shader Resource Views
-    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
-    srvHeapDesc.NumDescriptors = static_cast<UINT>(m_model.GetMeshes().size()); // 1 texture for every meshes
-    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap)));
 
-    m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
     // SRV Creation
     {
+        // Shader Resource Views descriptor heaps
+        D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+        srvHeapDesc.NumDescriptors = static_cast<UINT>(m_model.GetMeshes().size() + 100); // 1 texture for every meshes
+        srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        ThrowIfFailed(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap)));
+
+        m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
         CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_srvHeap->GetCPUDescriptorHandleForHeapStart());
-        UINT textureIndex = 0;
-        for (const auto& mesh : m_model.GetMeshes()) {
+        UINT createdSRVcount = 0;
+        for (const auto& mesh : m_model.GetMeshes())
+        {
+            ID3D12Resource* texResource = mesh.defaultDiffuseTexture
+                ? mesh.defaultDiffuseTexture.Get()
+                : m_fallbackTexture.Get();
 
             D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
             desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             desc.Texture2D.MipLevels = 1;
             desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-            ID3D12Resource* texResource = nullptr;
-            if (mesh.defaultDiffuseTexture) {
-                texResource = mesh.defaultDiffuseTexture.Get();
-            }
-            else {
-                texResource = m_fallbackTexture.Get();
-            }
 
             m_device->CreateShaderResourceView(texResource, &desc, srvHandle);
             srvHandle.Offset(1, m_srvDescriptorSize);
-            textureIndex++;
+
+            createdSRVcount++;
+        }
+
+        for (UINT i = createdSRVcount; i < srvHeapDesc.NumDescriptors; i++)
+        {
+            m_freeSRVindices.push_back(i);
         }
     }
 
     m_fallbackTextureUpload.Reset();
 }
-void app::PopulateCommandList() {
+void app::PopulateCommandList()
+{
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
 
     ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipeline.Get()));
@@ -577,6 +623,9 @@ void app::PopulateCommandList() {
     m_model.RotateAdd({ 0.f, 5.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
     m_model.Draw({ m_commandList.Get(), srvGPUHandle, baseGpuAddr, m_constantDataCpuAddr, cbParams, constantBufferIndex, m_srvDescriptorSize });
 
+    ImGui::Render();
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+
     {
         CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
         m_commandList->ResourceBarrier(1, &barrier);
@@ -596,6 +645,15 @@ void app::UpdateKeyBindings() {
     
     if (kbState.End) {
         PostMessage(plat.GetHWND(), WM_CLOSE, 0, 0);
+    }
+
+    if (kbState.Insert)
+    {
+        if (m_mouse->GetState().positionMode == DirectX::Mouse::MODE_RELATIVE)
+        {
+            m_mouse->SetMode(DirectX::Mouse::MODE_ABSOLUTE);
+        }
+        else  m_mouse->SetMode(DirectX::Mouse::MODE_RELATIVE);
     }
     
     // Camera Movement
@@ -634,10 +692,6 @@ void app::UpdateKeyBindings() {
 }
 void app::UpdateMouseBindings() {
     auto mouseState = m_mouse->GetState();
-    
-    if (mouseState.leftButton and mouseState.positionMode == DirectX::Mouse::MODE_ABSOLUTE) {
-        m_mouse->SetMode(DirectX::Mouse::MODE_RELATIVE);
-    }
     
     if (mouseState.positionMode == DirectX::Mouse::MODE_RELATIVE) {
         FLOAT dx = static_cast<FLOAT>(mouseState.x) * m_lookSensitivity;
@@ -753,3 +807,45 @@ void app::ToggleFullScreen()
     app::OnResize(windowWidth, windowHeight);
 }
 
+void SrvDescriptorAllocFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle)
+{
+    app* userData = static_cast<app*>(info->UserData);
+    if (userData->GetFreeSRVindices().empty())
+    {
+        g_FError("No free SRV descriptors available");
+        *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+        *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+        return;
+    }
+
+
+    INT idx = userData->GetFreeSRVindices().back();
+    userData->GetFreeSRVindices().pop_back();
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, userData->GetSRVdescriptorSize());
+
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->GetSRVdescriptorSize());
+}
+void SrvDescriptorFreeFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
+{
+    app* userData = static_cast<app*>(info->UserData);
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
+    if (offset % userData->GetSRVdescriptorSize() != 0 || offset < 0)
+    {
+        g_FError("Invalid SRV descriptor handle to free!");
+        return;
+    }
+
+    INT idx = static_cast<INT>(offset / userData->GetSRVdescriptorSize());
+    if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
+    {
+        g_FError("SRV descriptor index out of bounds!");
+        return;
+    }
+
+    userData->GetFreeSRVindices().push_back(idx);
+}
