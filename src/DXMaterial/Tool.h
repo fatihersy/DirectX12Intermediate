@@ -13,6 +13,15 @@ public:
         return std::string(buf.get(), buf.get() + size - 1);
     }
 
+    template<typename... Args>
+    static inline std::wstring wformat(const std::string& format, Args&&... args)
+    {
+        size_t size = std::snprintf(nullptr, 0, format.c_str(), to_str(args)...) + 1;
+        std::unique_ptr<char[]> buf(new char[size]);
+        std::snprintf(buf.get(), size, format.c_str(), to_str(args)...);
+        return std::wstring(buf.get(), buf.get() + size - 1);
+    }
+
 private:
     static const char* to_str(std::string&& t)
     {

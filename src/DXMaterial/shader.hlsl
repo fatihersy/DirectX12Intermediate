@@ -38,32 +38,6 @@ PSInput mainVS(float3 position : POSITION, float3 normal : NORMAL, float2 texcoo
  
 float4 mainPS(PSInput input) : SV_TARGET
 {
-    // ========================================
-    // DEBUG OPTION 1: Solid color
-    // ========================================
-    // Uncomment this to see if cube renders at all (should be bright red)
-    // return float4(1.0f, 0.0f, 0.0f, 1.0f);
-    
-    // ========================================
-    // DEBUG OPTION 2: Visualize normals as colors
-    // ========================================
-    // Uncomment this to see if normals are correct
-    //Normals map to RGB: X→Red, Y→Green, Z→Blue
-    //return float4(input.normal * 0.5f + 0.5f, 1.0f);
-    
-    // ========================================
-    // DEBUG OPTION 3: Visualize lighting only
-    // ========================================
-    // Uncomment to see just the lighting intensity
-    //float3 norm = normalize(input.normal);
-    //float diffuse = max(dot(norm, normalize(lightDir.xyz)), 0.0f);
-    //float ambient = 0.2f;
-    //float lighting = ambient + diffuse * 0.8f;
-    //return float4(lighting, lighting, lighting, 1.0f);
-    
-    // ========================================
-    // NORMAL RENDERING: Full lighting
-    // ========================================
     float3 normal = normalize(input.normal);
     float4 texColor = diffuseTexture.Sample(linearSampler, input.texcoord);
     float NdotL = max(0.0f, dot(normal, -normalize(lightDir.xyz)));

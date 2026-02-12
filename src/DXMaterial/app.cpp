@@ -9,21 +9,18 @@
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 
-app* app::s_instance = nullptr;
+IApp* IApp::s_instance = nullptr;
 
 platform plat{};
-
-void SrvDescriptorAllocFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle);
-void SrvDescriptorFreeFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle);
 
 app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow) : IApp(width, height, title),
     m_viewport(0.f, 0.f, static_cast<float>(width), static_cast<float>(height)),
     m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
     m_rtvDescriptorSize{},
-    m_srvDescriptorSize{},
-    m_maxObjects{},
-    m_constantDataGpuVirtualAddr{},
-    m_constantDataCpuAddr(nullptr),
+    m_frameConstantsGpuVirtualAddr{},
+    m_meshConstantsGpuVirtualAddr{},
+    m_frameConstantsCpuAddr(nullptr),
+    m_meshConstantsCpuAddr(nullptr),
     m_frameIndex{},
     m_fenceEvent(nullptr),
     m_fenceGeneration{},
@@ -70,12 +67,11 @@ app::~app() {
 }
 void app::OnDestroy()
 {
-    if (m_constantDataCpuAddr && m_perFrameConstants)
-    {
-        m_perFrameConstants->Unmap(0, nullptr);
-        m_constantDataCpuAddr = nullptr;
-    }
-
+    if (m_frameConstantsGpuResource) m_frameConstantsGpuResource->Unmap(0, nullptr);
+    if (m_meshConstantsGpuResource) m_meshConstantsGpuResource->Unmap(0, nullptr);
+    if (m_frameConstantsCpuAddr) m_frameConstantsCpuAddr = nullptr;
+    if (m_meshConstantsCpuAddr) m_meshConstantsCpuAddr = nullptr;
+        
     ImGui_ImplDX12_Shutdown();
     ImGui::DestroyContext();
 
@@ -85,43 +81,38 @@ void app::OnDestroy()
     m_keyboard.reset();
 
     m_commandList.Reset();
-    for (UINT i = 0; i < FrameCount; i++)
-    {
-        m_commandAllocators[i].Reset();
-    }
 
+    for (UINT i = 0; i < FrameCount; i++) m_commandAllocators[i].Reset();
+    
     m_pipeline.Reset();
     m_rootSignature.Reset();
 
-    m_fallbackTextureUpload.Reset();
-    m_fallbackTexture.Reset();
+    if (m_fallbackTexture.uploadBuffer) m_fallbackTexture.uploadBuffer.Reset();
+    if (m_fallbackTexture.defaultBuffer) m_fallbackTexture.defaultBuffer.Reset();
+    
+    m_frameConstantsGpuResource.Reset();
+    m_meshConstantsGpuResource.Reset();
 
-    m_perFrameConstants.Reset();
 
-    m_srvHeap.Reset();
+    m_model.UnloadGPU();
+
+    im_modelSrvHeap.Reset();
+    im_imGuiSrvHeap.Reset();
+    im_fallbackTexSrvHeap.Reset();
     m_dsvHeap.Reset();
     m_rtvHeap.Reset();
 
     m_depthStencil.Reset();
 
-    for (UINT i = 0; i < FrameCount; i++)
-    {
-        m_renderTarget[i].Reset();
-    }
-
+    for (UINT i = 0; i < FrameCount; i++) m_renderTarget[i].Reset();
+    
     m_swapchain.Reset();
-
 
     m_wicFactory.Reset();
     m_device.Reset();
 
-    m_model.UnloadGPU();
-
-    if (m_fence && m_commandQueue && m_fenceEvent)
-    {
-        WaitForGPU();
-    }
-
+    if (m_fence && m_commandQueue && m_fenceEvent) WaitForGPU();
+    
     m_fence.Reset();
     m_commandQueue.Reset();
 
@@ -158,9 +149,49 @@ void app::OnInit() {
         initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
-        initInfo.SrvDescriptorHeap = m_srvHeap.Get();
-        initInfo.SrvDescriptorAllocFn = &SrvDescriptorAllocFn;
-        initInfo.SrvDescriptorFreeFn = &SrvDescriptorFreeFn;
+        initInfo.SrvDescriptorHeap = im_imGuiSrvHeap.Get();
+        initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc_handle)
+        {
+            app* userData = static_cast<app*>(info->UserData);
+            if (userData->im_freeImGuiSRVindices.empty())
+            {
+                g_FError("No free SRV descriptors available");
+                *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                return;
+            }
+
+
+            INT idx = userData->im_freeImGuiSRVindices.back();
+            userData->im_freeImGuiSRVindices.pop_back();
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+            *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, userData->im_imGuiSrvDescriptorSize);
+
+            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+            *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->im_imGuiSrvDescriptorSize);
+        };
+        initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
+        {
+            app* userData = static_cast<app*>(info->UserData);
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+            ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
+            if (offset % userData->im_imGuiSrvDescriptorSize != 0 || offset < 0)
+            {
+                g_FError("Invalid SRV descriptor handle to free!");
+                return;
+            }
+
+            INT idx = static_cast<INT>(offset / userData->im_imGuiSrvDescriptorSize);
+            if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
+            {
+                g_FError("SRV descriptor index out of bounds!");
+                return;
+            }
+
+            userData->im_freeImGuiSRVindices.push_back(idx);
+        };
         ImGui_ImplDX12_Init(&initInfo);
     }
 
@@ -180,7 +211,8 @@ void app::OnUpdate() {
 
     ImGui_ImplDX12_NewFrame();
     ImGui::NewFrame();
-    ImGui::ShowDemoWindow();
+
+    m_model.RotateAdd({ 0.f, 5.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
 
     app::UpdateKeyBindings();
     app::UpdateMouseBindings();
@@ -246,6 +278,7 @@ void app::LoadPipeline() {
             }
         }
         ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&m_device)));
+        m_device->SetName(L"app::m_device");
     }
 
     // Describe and create the command queue.
@@ -254,6 +287,7 @@ void app::LoadPipeline() {
         desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
         ThrowIfFailed(m_device->CreateCommandQueue(&desc, IID_PPV_ARGS(&m_commandQueue)));
+        m_commandQueue->SetName(L"app::m_commandQueue");
     }
 
     // Describe and create the swap chain.
@@ -282,12 +316,14 @@ void app::LoadPipeline() {
         rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
         ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
+        m_rtvHeap->SetName(L"app::m_rtvHeap");
 
         D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
         dsvHeapDesc.NumDescriptors = 1;
         dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
         ThrowIfFailed(m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsvHeap)));
+        m_dsvHeap->SetName(L"app::m_dsvHeap");
 
         m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     }
@@ -318,16 +354,19 @@ void app::LoadPipeline() {
         ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
         CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
         m_device->CreateDepthStencilView(m_depthStencil.Get(), &viewDesc, dsvHandle);
+        m_depthStencil->SetName(L"app::m_depthStencil");
     }
 }
 void app::LoadAssets() {
     // Command List
     ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+    m_commandList->SetName(L"app::m_commandList");
 
     // Create synchronization objects and wait until assets have been uploaded to
     // the GPU.
     {
         ThrowIfFailed(m_device->CreateFence(m_fenceGeneration, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+        m_fence->SetName(L"app::m_fence");
         m_fenceGeneration++;
 
         m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -338,22 +377,144 @@ void app::LoadAssets() {
         WaitForGPU();
     }
 
-    m_model = Model(m_device.Get(), m_wicFactory.Get());
-    m_model.m_rotation = { 0.f, 0.f, 0.f };
+    // SRV Descriptor Heaps
     {
-        m_model.Load(GetAssetFullPath(L"res/lowpoly_ramen_bowl.glb"), m_commandList.Get());
+        // Model SRV Descriptor
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC desc{};
+            desc.NumDescriptors = static_cast<UINT>(c_maxObjects * static_cast<UINT>(FTextureType::FTextureType_MAX));
+            desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&im_modelSrvHeap)));
+            im_modelSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            im_modelSrvHeap->SetName(L"IApp::im_modelSrvHeap");
 
-        // ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(),
-        // nullptr));
+            for (UINT i{}; i < desc.NumDescriptors; i++) im_freeModelSRVindices.push_back(i);
+        }
 
-        m_model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        // ImGui SRV Descriptor
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC desc{};
+            desc.NumDescriptors = 100u;
+            desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&im_imGuiSrvHeap)));
+            im_imGuiSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            im_imGuiSrvHeap->SetName(L"IApp::im_imGuiSrvHeap");
 
-        WaitForGPU();
-
-        m_model.ResetUploadHeaps();
+            for (UINT i{}; i < desc.NumDescriptors; i++) im_freeImGuiSRVindices.push_back(i);
+        }
     }
 
-    m_maxObjects = static_cast<UINT>(m_model.GetMeshes().size());
+    // Default texture
+    {
+        ThrowIfFailed(m_commandList->Close());
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+
+        m_fallbackTexture.textureType = FTextureType::FTextureType_DIFFUSE;
+        m_fallbackTexture.width = 64;
+        m_fallbackTexture.height = 64;
+        m_fallbackTexture.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        const UINT squareSize = m_fallbackTexture.width / 8;
+
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = m_fallbackTexture.width;
+        desc.Height = m_fallbackTexture.height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = m_fallbackTexture.format;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeapProp(D3D12_HEAP_TYPE_DEFAULT);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &defaultHeapProp,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&m_fallbackTexture.defaultBuffer))
+        );
+        m_fallbackTexture.defaultBuffer->SetName(L"app::m_fallbackTexture.defaultBuffer");
+
+        CD3DX12_RESOURCE_BARRIER barrierDefaultBufferToCopyDest = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_fallbackTexture.defaultBuffer.Get(),
+            D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_COPY_DEST
+        );
+        m_commandList->ResourceBarrier(1, &barrierDefaultBufferToCopyDest);
+
+        m_fallbackTexture.RowPitch = m_fallbackTexture.width * 4;
+        const UINT dataSize = m_fallbackTexture.RowPitch * m_fallbackTexture.height;
+        CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &uploadHeapProp,
+            D3D12_HEAP_FLAG_NONE,
+            &uploadDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&m_fallbackTexture.uploadBuffer))
+        );
+        m_fallbackTexture.uploadBuffer->SetName(L"app::m_fallbackTexture.uploadBuffer");
+
+        uint8_t* mappedData = nullptr;
+        ThrowIfFailed(m_fallbackTexture.uploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
+
+        for (UINT y = 0; y < m_fallbackTexture.height; y++) {
+            uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * m_fallbackTexture.RowPitch);
+            for (UINT x = 0; x < m_fallbackTexture.width; x++) {
+                bool isBlack = ((x / squareSize) + (y / squareSize)) % 2 == 0;
+                row[x] = isBlack ? 0xFF000000 : 0xFFFF00FF;
+            }
+        }
+        m_fallbackTexture.uploadBuffer->Unmap(0, nullptr);
+
+        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+        srcLoc.pResource = m_fallbackTexture.uploadBuffer.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint.Footprint.Width = m_fallbackTexture.width;
+        srcLoc.PlacedFootprint.Footprint.Height = m_fallbackTexture.height;
+        srcLoc.PlacedFootprint.Footprint.Depth = 1;
+        srcLoc.PlacedFootprint.Footprint.Format = m_fallbackTexture.format;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = m_fallbackTexture.RowPitch;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+        dstLoc.pResource = m_fallbackTexture.defaultBuffer.Get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
+
+        //ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
+        m_commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_fallbackTexture.defaultBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        m_commandList->ResourceBarrier(1, &barrier);
+
+        D3D12_DESCRIPTOR_HEAP_DESC srvDescHeapDesc{};
+        srvDescHeapDesc.NumDescriptors = 1u;
+        srvDescHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        srvDescHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        ThrowIfFailed(m_device->CreateDescriptorHeap(&srvDescHeapDesc, IID_PPV_ARGS(&im_fallbackTexSrvHeap)));
+        im_fallbackTexSrvHeap->SetName(L"IApp::im_fallbackTexSrvHeap");
+        im_fallbackSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        m_fallbackTexture.cpuHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_fallbackTexSrvHeap->GetCPUDescriptorHandleForHeapStart(), 0, im_fallbackSrvDescriptorSize);
+        //m_fallbackTexture.gpuHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(im_fallbackTexSrvHeap->GetGPUDescriptorHandleForHeapStart(), 0, im_fallbackSrvDescriptorSize);
+
+        im_fallbackTextureCpuHandle = m_fallbackTexture.cpuHandle;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.Format = desc.Format;
+        m_device->CreateShaderResourceView(m_fallbackTexture.defaultBuffer.Get(), &srvDesc, m_fallbackTexture.cpuHandle);
+
+        WaitForGPU();
+    }
 
     // Root signature
     {
@@ -365,11 +526,12 @@ void app::LoadAssets() {
         }
 
         CD3DX12_DESCRIPTOR_RANGE1 srvRange[1]{};
-        srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+        srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, static_cast<INT>(FTextureType::FTextureType_MAX), 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
 
-        CD3DX12_ROOT_PARAMETER1 rp[2]{};
+        CD3DX12_ROOT_PARAMETER1 rp[3]{};
         rp[0].InitAsConstantBufferView(0, 0);
-        rp[1].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
+        rp[1].InitAsConstantBufferView(1, 0);
+        rp[2].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
 
         D3D12_STATIC_SAMPLER_DESC sampler{};
         sampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
@@ -398,19 +560,52 @@ void app::LoadAssets() {
             throw std::runtime_error("Failed to serialize root signature");
         }
         ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+        m_rootSignature->SetName(L"app::m_rootSignature");
     }
 
     // Create the constant buffer memory and map the resource
     {
-        const D3D12_HEAP_PROPERTIES uploadHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        size_t cbSize = ((UINT64)m_maxObjects) * FrameCount * sizeof(PaddedConstantBuffer);
+        // Per frame 
+        {
+            const D3D12_HEAP_PROPERTIES uploadHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+            const size_t cbSize = FrameCount * sizeof(PaddedFrameConstants);
 
-        const D3D12_RESOURCE_DESC heapDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
-        ThrowIfFailed(m_device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &heapDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(m_perFrameConstants.ReleaseAndGetAddressOf())));
-        CD3DX12_RANGE readRange(0, 0);
-        ThrowIfFailed(m_perFrameConstants->Map(0, &readRange, reinterpret_cast<void**>(&m_constantDataCpuAddr)));
+            const D3D12_RESOURCE_DESC heapDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &uploadHeapProperties,
+                D3D12_HEAP_FLAG_NONE,
+                &heapDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(m_frameConstantsGpuResource.ReleaseAndGetAddressOf()))
+            );
+            m_frameConstantsGpuResource->SetName(L"app::m_frameConstantsGpuResource");
+            CD3DX12_RANGE readRange(0, 0);
+            ThrowIfFailed(m_frameConstantsGpuResource->Map(0, &readRange, reinterpret_cast<void**>(&m_frameConstantsCpuAddr)));
 
-        m_constantDataGpuVirtualAddr = m_perFrameConstants->GetGPUVirtualAddress();
+            m_frameConstantsGpuVirtualAddr = m_frameConstantsGpuResource->GetGPUVirtualAddress();
+        }
+
+        // Per mesh
+        {
+            const D3D12_HEAP_PROPERTIES uploadHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+            const size_t cbSize = c_maxObjects * sizeof(PaddedMeshConstants);
+
+            const D3D12_RESOURCE_DESC heapDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &uploadHeapProperties,
+                D3D12_HEAP_FLAG_NONE,
+                &heapDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(m_meshConstantsGpuResource.ReleaseAndGetAddressOf()))
+            );
+            m_meshConstantsGpuResource->SetName(L"app::m_meshConstantsGpuResource");
+            CD3DX12_RANGE readRange(0, 0);
+            ThrowIfFailed(m_meshConstantsGpuResource->Map(0, &readRange, reinterpret_cast<void**>(&m_meshConstantsCpuAddr)));
+
+            m_meshConstantsGpuVirtualAddr = m_meshConstantsGpuResource->GetGPUVirtualAddress();
+        }
     }
 
     // Create the pipeline state, which includes compiling and loading shaders.
@@ -470,115 +665,25 @@ void app::LoadAssets() {
             desc.SampleMask = UINT_MAX;
             desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
             ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_pipeline)));
+            m_pipeline->SetName(L"app::m_pipeline");
         }
     }
 
-    // Default texture
+    m_model = Model(m_device.Get(), m_wicFactory.Get());
+    m_model.m_rotation = { 0.f, 0.f, 0.f };
     {
-        const UINT width = 64;
-        const UINT height = 64;
-        const UINT squareSize = width / 8;
-
-        D3D12_RESOURCE_DESC desc{};
-        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        desc.Width = width;
-        desc.Height = height;
-        desc.DepthOrArraySize = 1;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-        desc.SampleDesc.Count = 1;
-        desc.SampleDesc.Quality = 0;
-        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeapProp(D3D12_HEAP_TYPE_DEFAULT);
-        ThrowIfFailed(m_device->CreateCommittedResource(&defaultHeapProp, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_fallbackTexture)));
-
-        const UINT rowPitch = width * 4;
-        const UINT dataSize = rowPitch * height;
-        CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
-        ThrowIfFailed(m_device->CreateCommittedResource(&uploadHeapProp, D3D12_HEAP_FLAG_NONE, &uploadDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_fallbackTextureUpload)));
-
-        uint8_t* mappedData = nullptr;
-        ThrowIfFailed(m_fallbackTextureUpload->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
-
-        for (UINT y = 0; y < height; y++) {
-            uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * rowPitch);
-            for (UINT x = 0; x < width; x++) {
-                bool isBlack = ((x / squareSize) + (y / squareSize)) % 2 == 0;
-                row[x] = isBlack ? 0xFF000000 : 0xFFFFFFFF;
-            }
-        }
-        m_fallbackTextureUpload->Unmap(0, nullptr);
-
-        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
-        srcLoc.pResource = m_fallbackTextureUpload.Get();
-        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        srcLoc.PlacedFootprint.Footprint.Width = width;
-        srcLoc.PlacedFootprint.Footprint.Height = height;
-        srcLoc.PlacedFootprint.Footprint.Depth = 1;
-        srcLoc.PlacedFootprint.Footprint.Format = desc.Format;
-        srcLoc.PlacedFootprint.Footprint.RowPitch = rowPitch;
-
-        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
-        dstLoc.pResource = m_fallbackTexture.Get();
-        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        dstLoc.SubresourceIndex = 0;
-
-        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
-        m_commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-
-        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_fallbackTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        m_commandList->ResourceBarrier(1, &barrier);
-
         ThrowIfFailed(m_commandList->Close());
-        ID3D12CommandList* ppCmdLists[] = { m_commandList.Get() };
-        m_commandQueue->ExecuteCommandLists(_countof(ppCmdLists), ppCmdLists);
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+
+        m_model.Load(GetAssetFullPath(L"res/lowpoly_ramen_bowl.glb"), m_commandList.Get());
+
+        m_model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
     }
 
     WaitForGPU();
 
-
-
-    // SRV Creation
-    {
-        // Shader Resource Views descriptor heaps
-        D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
-        srvHeapDesc.NumDescriptors = static_cast<UINT>(m_model.GetMeshes().size() + 100); // 1 texture for every meshes
-        srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap)));
-
-        m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-        CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(m_srvHeap->GetCPUDescriptorHandleForHeapStart());
-        UINT createdSRVcount = 0;
-        for (const auto& mesh : m_model.GetMeshes())
-        {
-            ID3D12Resource* texResource = mesh.defaultDiffuseTexture
-                ? mesh.defaultDiffuseTexture.Get()
-                : m_fallbackTexture.Get();
-
-            D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
-            desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            desc.Texture2D.MipLevels = 1;
-            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-
-            m_device->CreateShaderResourceView(texResource, &desc, srvHandle);
-            srvHandle.Offset(1, m_srvDescriptorSize);
-
-            createdSRVcount++;
-        }
-
-        for (UINT i = createdSRVcount; i < srvHeapDesc.NumDescriptors; i++)
-        {
-            m_freeSRVindices.push_back(i);
-        }
-    }
-
-    m_fallbackTextureUpload.Reset();
+    m_model.ResetUploadHeaps();
+    m_fallbackTexture.uploadBuffer.Reset();
 }
 void app::PopulateCommandList()
 {
@@ -586,8 +691,8 @@ void app::PopulateCommandList()
 
     ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipeline.Get()));
 
-    ID3D12DescriptorHeap* ppHeaps[] = { m_srvHeap.Get() };
-    m_commandList->SetDescriptorHeaps(1, ppHeaps);
+    ID3D12DescriptorHeap* ppModelHeap[] = { im_modelSrvHeap.Get() };
+    m_commandList->SetDescriptorHeaps(1, ppModelHeap);
 
     m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
     m_commandList->RSSetViewports(1, &m_viewport);
@@ -609,19 +714,36 @@ void app::PopulateCommandList()
 
     m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    UINT constantBufferIndex = (m_frameIndex % FrameCount) * m_maxObjects;
-    auto baseGpuAddr = m_constantDataGpuVirtualAddr + sizeof(PaddedConstantBuffer) * constantBufferIndex;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+    UINT bufferIndex = (m_frameIndex % FrameCount);
+    auto frameConstantGpuAddrBase = m_frameConstantsGpuVirtualAddr + sizeof(PaddedFrameConstants) * bufferIndex;
 
-    ConstantBuffer cbParams{};
+    frameConstants frameCB{};
+    DirectX::XMStoreFloat4x4(&frameCB.viewMatrix, DirectX::XMMatrixTranspose(m_viewMatrix));
+    DirectX::XMStoreFloat4x4(&frameCB.projectionMatrix, DirectX::XMMatrixTranspose(m_projectionMatrix));
+    DirectX::XMStoreFloat4(&frameCB.lightDir, m_lightDir);
+    DirectX::XMStoreFloat4(&frameCB.lightColor, m_lightColor);
 
-    DirectX::XMStoreFloat4x4(&cbParams.viewMatrix, DirectX::XMMatrixTranspose(m_viewMatrix));
-    DirectX::XMStoreFloat4x4(&cbParams.projectionMatrix, DirectX::XMMatrixTranspose(m_projectionMatrix));
-    DirectX::XMStoreFloat4(&cbParams.lightDir, m_lightDir);
-    DirectX::XMStoreFloat4(&cbParams.lightColor, m_lightColor);
+    memcpy(&m_frameConstantsCpuAddr[0].constant, &frameCB, sizeof(frameConstants));
 
-    m_model.RotateAdd({ 0.f, 5.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
-    m_model.Draw({ m_commandList.Get(), srvGPUHandle, baseGpuAddr, m_constantDataCpuAddr, cbParams, constantBufferIndex, m_srvDescriptorSize });
+    m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
+
+    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(im_modelSrvHeap->GetGPUDescriptorHandleForHeapStart());
+    m_model.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+
+    ID3D12DescriptorHeap* ppImGuiHeap[] = { im_imGuiSrvHeap.Get() };
+    m_commandList->SetDescriptorHeaps(1, ppImGuiHeap);
+
+    ImGui::Begin("Model");
+    {
+        const std::vector<Mesh>& meshes = m_model.GetMeshes();
+        for (size_t meshIndex = 0; meshIndex < meshes.size(); meshIndex++)
+        {
+            const Mesh& mesh = meshes[meshIndex];
+
+            ImGui::LabelText(FString::format("Mesh %d", meshIndex).c_str(), "Vertices: %u -- Indices: %u", mesh.vertexCount, mesh.indexCount);
+        }
+    }
+    ImGui::End();
 
     ImGui::Render();
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
@@ -807,45 +929,77 @@ void app::ToggleFullScreen()
     app::OnResize(windowWidth, windowHeight);
 }
 
-void SrvDescriptorAllocFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle)
+void IApp::modelSrvAlloc(D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle, int allocAmount)
 {
-    app* userData = static_cast<app*>(info->UserData);
-    if (userData->GetFreeSRVindices().empty())
-    {
+    if (allocAmount <= 0) {
+        g_FError("Invalid allocation amount");
+        *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+        *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+        return;
+    }
+
+    if (im_freeModelSRVindices.size() < static_cast<size_t>(allocAmount)) {
         g_FError("No free SRV descriptors available");
         *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         return;
     }
 
+    std::sort(im_freeModelSRVindices.begin(), im_freeModelSRVindices.end());
 
-    INT idx = userData->GetFreeSRVindices().back();
-    userData->GetFreeSRVindices().pop_back();
+    int baseIdx = -1;
+    size_t eraseStartPos = -1;
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-    *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, userData->GetSRVdescriptorSize());
+    for (size_t i = 0u; i <= im_freeModelSRVindices.size() - static_cast<size_t>(allocAmount); ++i) {
+        int start = im_freeModelSRVindices[i];
+        bool isContiguous = true;
+        for (int j = 1; j < allocAmount; ++j) {
+            if (im_freeModelSRVindices[i + static_cast<size_t>(j)] != start + j) {
+                isContiguous = false;
+                break;
+            }
+        }
+        if (isContiguous) {
+            baseIdx = start;
+            eraseStartPos = i;
+            break;
+        }
+    }
 
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-    *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->GetSRVdescriptorSize());
-}
-void SrvDescriptorFreeFn(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
+    if (baseIdx == -1) {
+        g_FError("No contiguous SRV index list found");
+        *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+        *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+        return;
+    }
+
+    im_freeModelSRVindices.erase(
+        im_freeModelSRVindices.begin() + eraseStartPos,
+        im_freeModelSRVindices.begin() + eraseStartPos + static_cast<size_t>(allocAmount)
+    );
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(im_modelSrvHeap->GetCPUDescriptorHandleForHeapStart(), baseIdx, im_modelSrvDescriptorSize);
+    *out_cpu_desc_handle = cpuHandle;
+
+    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(im_modelSrvHeap->GetGPUDescriptorHandleForHeapStart(), baseIdx, im_modelSrvDescriptorSize);
+    *out_gpu_desc_handle = gpuHandle;
+};
+void IApp::modelSrvFree(D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
 {
-    app* userData = static_cast<app*>(info->UserData);
-
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(im_modelSrvHeap->GetCPUDescriptorHandleForHeapStart());
     ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
-    if (offset % userData->GetSRVdescriptorSize() != 0 || offset < 0)
+    if (offset % im_modelSrvDescriptorSize != 0 || offset < 0)
     {
         g_FError("Invalid SRV descriptor handle to free!");
         return;
     }
-
-    INT idx = static_cast<INT>(offset / userData->GetSRVdescriptorSize());
-    if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
+    
+    INT idx = static_cast<INT>(offset / im_modelSrvDescriptorSize);
+    if (idx >= static_cast<INT>(im_modelSrvHeap->GetDesc().NumDescriptors))
     {
         g_FError("SRV descriptor index out of bounds!");
         return;
     }
 
-    userData->GetFreeSRVindices().push_back(idx);
-}
+    im_freeModelSRVindices.push_back(idx);
+};

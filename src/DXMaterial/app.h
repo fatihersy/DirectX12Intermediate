@@ -13,11 +13,6 @@ public:
     app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow);
     ~app();
 
-    static app* GetInstance() {
-        assert( s_instance != nullptr );
-        return s_instance;
-    };
-
     void Run();
 
     void OnInit() override;
@@ -27,14 +22,10 @@ public:
     void OnResize(UINT width, UINT height) override;
     void ToggleFullScreen() override;
 
-    inline UINT GetSRVdescriptorSize() { return m_srvDescriptorSize; }
-    inline std::vector<INT>& GetFreeSRVindices() { return m_freeSRVindices; }
-
 private:
-    static app* s_instance;
-
     ComPtr<IWICImagingFactory2> m_wicFactory;
     static const UINT FrameCount = 2;
+    const UINT c_maxObjects = 100;
 
     CD3DX12_VIEWPORT m_viewport;
     CD3DX12_RECT m_scissorRect;
@@ -47,28 +38,27 @@ private:
     ComPtr<ID3D12RootSignature> m_rootSignature;
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-    ComPtr<ID3D12DescriptorHeap> m_srvHeap;
     ComPtr<ID3D12PipelineState> m_pipeline;
     ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
-    ComPtr<ID3D12Resource2> m_fallbackTexture;
-    ComPtr<ID3D12Resource2> m_fallbackTextureUpload;
+    FTexture m_fallbackTexture;
 
     Model m_model;
 
-    std::vector<INT> m_freeSRVindices;
-    ComPtr<ID3D12Resource2> m_perFrameConstants;
     UINT m_rtvDescriptorSize;
-    UINT m_srvDescriptorSize;
-    D3D12_GPU_VIRTUAL_ADDRESS m_constantDataGpuVirtualAddr;
-    PaddedConstantBuffer* m_constantDataCpuAddr;
+    ComPtr<ID3D12Resource2> m_frameConstantsGpuResource;
+    D3D12_GPU_VIRTUAL_ADDRESS m_frameConstantsGpuVirtualAddr;
+    PaddedFrameConstants* m_frameConstantsCpuAddr;
+
+    ComPtr<ID3D12Resource2> m_meshConstantsGpuResource;
+    D3D12_GPU_VIRTUAL_ADDRESS m_meshConstantsGpuVirtualAddr;
+    PaddedMeshConstants* m_meshConstantsCpuAddr;
 
     UINT m_frameIndex;
     HANDLE m_fenceEvent;
     ComPtr<ID3D12Fence1> m_fence;
     UINT64 m_fenceGeneration;
 
-    UINT m_maxObjects;
 
     void PopulateCommandList();
     void WaitForGPU();

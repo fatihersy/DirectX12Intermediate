@@ -1,24 +1,24 @@
 #pragma once
 
 #include <assimp/scene.h>
+#include "Material.h"
 
 class Mesh
 {
 public:
+    Mesh(IWICImagingFactory2* wicFactory) : material(wicFactory) {}
+    std::string name;
+
+    Material material;
     ComPtr<ID3D12Resource> defaultVertexBuffer;
     ComPtr<ID3D12Resource> defaultIndexBuffer;
-    ComPtr<ID3D12Resource> defaultDiffuseTexture;
     ComPtr<ID3D12Resource> uploadVertexBuffer;
     ComPtr<ID3D12Resource> uploadIndexBuffer;
-    ComPtr<ID3D12Resource> uploadDiffuseBuffer;
 
     D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
     D3D12_INDEX_BUFFER_VIEW indexBufferView{};
     UINT vertexCount{};
     UINT indexCount{};
-    UINT textureWidth{};
-    UINT textureHeight{};
-    UINT textureRowPitch{};
 
     DirectX::XMFLOAT3 m_position{};
     DirectX::XMFLOAT4 m_rotationQ{};
@@ -30,6 +30,7 @@ class Model
 public:
     Model();
     Model(_In_ ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory);
+    std::string m_name;
 
     DirectX::XMFLOAT3 m_position{};
     DirectX::XMFLOAT3 m_rotation{};
@@ -45,11 +46,11 @@ public:
     inline const std::vector<Mesh>& GetMeshes() { return meshes; };
 
     std::filesystem::path m_assetPath;
-    bool isOnGPU = false;
-    bool isOnCPU = false;
+    bool isOnGPU{};
+    bool isOnCPU{};
 private:
-    ID3D12Device* m_device;
     IWICImagingFactory2* m_wicFactory;
+    ID3D12Device* m_device;
     std::vector<Mesh> meshes;
     void ProcessNode(_In_ aiNode* node, _In_  const aiScene* scene, _In_ ID3D12GraphicsCommandList* cmdList);
     void ProcessMesh(_In_ aiMesh* pAiMesh, _In_ const aiScene* scene, _In_ aiNode* node, _Out_ Mesh& outMesh);

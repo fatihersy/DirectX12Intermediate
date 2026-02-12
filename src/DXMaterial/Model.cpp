@@ -42,6 +42,8 @@ bool Model::Load(const std::filesystem::path& path, ID3D12GraphicsCommandList* c
 
     m_assetPath = path;
     ProcessNode(scene->mRootNode, scene, cmdList);
+
+    isOnCPU = true;
     return true;
 }
 
@@ -55,7 +57,11 @@ void Model::ProcessNode(aiNode* node, const aiScene* scene, ID3D12GraphicsComman
 
     for (UINT i = 0; i < node->mNumMeshes; ++i) {
         aiMesh* pAiMesh = scene->mMeshes[node->mMeshes[i]];
-        Mesh& mesh = meshes.emplace_back(Mesh());
+        Mesh& mesh = meshes.emplace_back(Mesh(m_wicFactory));
+
+        mesh.name = FString::format("%s::mesh%d", m_name, i);
+        mesh.material.m_name = FString::format("%s::material", mesh.name);
+
         ProcessMesh(pAiMesh, scene, node, mesh);
     }
     for (UINT i = 0; i < node->mNumChildren; ++i) {
@@ -70,6 +76,8 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
     {
         throw std::runtime_error("At least one of the pointers are invalid");
     }
+
+    std::wstring meshName = std::wstring(outMesh.name.begin(), outMesh.name.end());
 
     std::vector<Vertex> vertices;
     std::vector<UINT> indices;
@@ -113,11 +121,6 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
         }
     }
 
-    std::string dbgStr = std::format("Mesh loaded: {} vertices, {} indices",
-        static_cast<UINT>(vertices.size()),
-        static_cast<UINT>(indices.size())
-    );
-
     outMesh.vertexCount = static_cast<UINT>(vertices.size());
     outMesh.indexCount = static_cast<UINT>(indices.size());
     const UINT vbByteSize = outMesh.vertexCount * sizeof(Vertex);
@@ -135,6 +138,8 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
         nullptr,
         IID_PPV_ARGS(&outMesh.uploadVertexBuffer)))) throw std::runtime_error("Failed to create vertex buffer");
 
+    outMesh.uploadVertexBuffer->SetName(meshName.append(L"defaultVertexBuffer").c_str());
+
     void* mappedVertexBuffer = nullptr;
     if (FAILED(outMesh.uploadVertexBuffer->Map(0u, nullptr, reinterpret_cast<void**>(&mappedVertexBuffer)))) throw std::runtime_error("Failed to map vertex upload buffer");
 
@@ -148,6 +153,8 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
         D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr,
         IID_PPV_ARGS(&outMesh.uploadIndexBuffer)))) throw std::runtime_error("Failed to create index buffer");
+
+    outMesh.uploadIndexBuffer->SetName(meshName.append(L"defaultIndexBuffer").c_str());
 
     void* mappedIndexBuffer = nullptr;
     if (FAILED(outMesh.uploadIndexBuffer->Map(0u, nullptr, reinterpret_cast<void**>(&mappedIndexBuffer)))) throw std::runtime_error("Failed to map index upload buffer");
@@ -173,6 +180,9 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
         nullptr,
         IID_PPV_ARGS(&outMesh.defaultIndexBuffer)))) throw std::runtime_error("Failed to create index buffer");
 
+    outMesh.defaultIndexBuffer->SetName(meshName.append(L"defaultIndexBuffer").c_str());
+    outMesh.defaultVertexBuffer->SetName(meshName.append(L"defaultVertexBuffer").c_str());
+
     outMesh.vertexBufferView.BufferLocation = outMesh.defaultVertexBuffer->GetGPUVirtualAddress();
     outMesh.vertexBufferView.SizeInBytes = vbByteSize;
     outMesh.vertexBufferView.StrideInBytes = sizeof(Vertex);
@@ -185,159 +195,87 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
     {
         aiMaterial* material = scene->mMaterials[pAiMesh->mMaterialIndex];
 
-        /*
-        for (unsigned int type = 0; type < AI_TEXTURE_TYPE_MAX; ++type) {
-            aiTextureType texType = static_cast<aiTextureType>(type);
-            unsigned int count = material->GetTextureCount(texType);
-            if (count > 0) {
-                g_FDebug(std::format("Found {} textures of type {}\n", count, type).c_str());
+        aiString matName;
+        if (material->Get(AI_MATKEY_NAME, matName) == AI_SUCCESS) {
+            const std::string materialName = outMesh.material.m_name;
+            outMesh.material.m_name = FString::format("%s::%s", materialName, std::string(matName.C_Str(), matName.C_Str() + matName.length).c_str());
+        }
+
+        aiColor4D baseColor;
+        if (material->Get(AI_MATKEY_COLOR_DIFFUSE, baseColor) == AI_SUCCESS) {
+            outMesh.material.m_baseColor = DirectX::XMFLOAT4(baseColor.r, baseColor.g, baseColor.b, baseColor.a);
+        }
+
+        float metallic {};
+        if (material->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == AI_SUCCESS) {
+            outMesh.material.m_metallic = metallic;
+        }
+
+        float roughness{};
+        if (material->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == AI_SUCCESS) {
+            outMesh.material.m_roughness = roughness;
+        }
+
+        float opacity{};
+        if (material->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) {
+            outMesh.material.m_opacity = opacity;
+        }
+
+        for (UINT type = 0u; type < AI_TEXTURE_TYPE_MAX; ++type) {
+            if (material->GetTextureCount(static_cast<aiTextureType>(type)) > 0) {
                 aiString path;
-                if (material->GetTexture(texType, 0, &path) == aiReturn_SUCCESS) {
-                    g_FDebug(std::format("Texture path: {}\n", path.C_Str()).c_str());
+                if (material->GetTexture(static_cast<aiTextureType>(type), 0u, &path) == aiReturn_SUCCESS) {
+                    std::string pathStr = path.C_Str();
+
+                    if (not pathStr.empty())
+                    {
+                        const aiTexture* embeddedTex = scene->GetEmbeddedTexture(path.C_Str());
+
+                        ComPtr<IWICBitmapDecoder> decoder;
+
+                        if (embeddedTex != nullptr)
+                        {
+                            if (embeddedTex->mHeight == 0)
+                            {
+                                ComPtr<IWICStream> stream;
+                                if (FAILED(m_wicFactory->CreateStream(&stream)))
+                                {
+                                    g_FError("Failed to create WIC stream\n");
+                                    continue;
+                                }
+                                if (FAILED(stream->InitializeFromMemory(reinterpret_cast<BYTE*>(embeddedTex->pcData), embeddedTex->mWidth)))
+                                {
+                                    g_FError("Failed to initialize stream from memory\n");
+                                    continue;
+                                }
+
+                                if (FAILED(m_wicFactory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder)))
+                                {
+                                    g_FError("Failed to create WIC decoder\n");
+                                    continue;
+                                }
+                            }
+                        }
+                        else {
+                            std::wstring directory = m_assetPath.parent_path().generic_wstring() + L"/" + std::wstring(pathStr.begin(), pathStr.end());
+
+                            if (FAILED(m_wicFactory->CreateDecoderFromFilename(directory.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder)))
+                            {
+                                g_FError("Failed to create decoder from file: %s\n", WStringToString(directory).c_str());
+                                continue;
+                            }
+                        }
+
+                        outMesh.material.LoadTexture(m_device, decoder.Get(), static_cast<aiTextureType>(type));
+                    }
+                    else throw std::runtime_error("Failed to get path from aiString");
                 }
+                else throw std::runtime_error("Failed to get texture from material");
             }
         }
-        */
-
-        aiString texPath;
-        if (material->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) == aiReturn_SUCCESS)
-        {
-            std::string pathStr = texPath.C_Str();
-
-            if (not pathStr.empty())
-            {
-                const aiTexture* embeddedTex = scene->GetEmbeddedTexture(texPath.C_Str());
-
-                ComPtr<IWICBitmapDecoder> decoder;
-
-                if (embeddedTex != nullptr)
-                {
-                    if (embeddedTex->mHeight == 0)
-                    {
-                        ComPtr<IWICStream> stream;
-                        if (FAILED(m_wicFactory->CreateStream(&stream)))
-                        {
-                            g_FError("Failed to create WIC stream\n");
-                            goto __material_process_end__;
-                        }
-                        if (FAILED(stream->InitializeFromMemory(reinterpret_cast<BYTE*>(embeddedTex->pcData), embeddedTex->mWidth)))
-                        {
-                            g_FError("Failed to initialize stream from memory\n");
-                            goto __material_process_end__;
-                        }
-
-                        if (FAILED(m_wicFactory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder)))
-                        {
-                            g_FError("Failed to create WIC decoder\n");
-                            goto __material_process_end__;
-                        }
-                    }
-                }
-                else {
-                    std::wstring directory = m_assetPath.parent_path().generic_wstring() + L"/" + std::wstring(pathStr.begin(), pathStr.end());
-
-                    if (FAILED(m_wicFactory->CreateDecoderFromFilename(directory.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder)))
-                    {
-                        g_FError("Failed to create decoder from file: %s\n", WStringToString(directory).c_str());
-                    }
-                }
-
-                ComPtr<IWICBitmapFrameDecode> frame;
-                if (FAILED(decoder->GetFrame(0, &frame)))
-                {
-                    g_FError("Failed to get frame from decoder\n");
-                    goto __material_process_end__;
-                }
-                if (FAILED(frame->GetSize(&outMesh.textureWidth, &outMesh.textureHeight)))
-                {
-                    g_FError("Failed to get texture dimensions\n");
-                    goto __material_process_end__;
-                }
-
-                const UINT bpp = 4;
-                const UINT alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
-                UINT rowPitch = (static_cast<UINT64>(outMesh.textureWidth) * bpp + alignment - 1) & ~(alignment - 1); // round up to the next multiple of alignment
-                UINT uploadSize = rowPitch * outMesh.textureHeight;
-                outMesh.textureRowPitch = rowPitch;
-
-                ComPtr<IWICFormatConverter> converter;
-                if (FAILED(m_wicFactory->CreateFormatConverter(&converter)))
-                {
-                    g_FError("Failed to create format converter\n");
-                    goto __material_process_end__;
-                }
-                if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.f, WICBitmapPaletteTypeCustom)))
-                {
-                    g_FError("Failed to initialize format converter\n");
-                    goto __material_process_end__;
-                }
-
-                D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
-                D3D12_HEAP_PROPERTIES uploadHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-
-                if (FAILED(m_device->CreateCommittedResource(
-                    &uploadHeapProp,
-                    D3D12_HEAP_FLAG_NONE,
-                    &uploadBufferDesc,
-                    D3D12_RESOURCE_STATE_GENERIC_READ,
-                    nullptr,
-                    IID_PPV_ARGS(&outMesh.uploadDiffuseBuffer)))) throw std::runtime_error("Failed to create texture upload buffer\n");
-
-                void* pMappedData = nullptr;
-                if (FAILED(outMesh.uploadDiffuseBuffer->Map(0, nullptr, &pMappedData)))
-                {
-                    g_FError("Failed to map texture upload buffer\n");
-                    goto __material_process_end__;
-                }
-
-                if (FAILED(converter->CopyPixels(
-                    nullptr,
-                    rowPitch,
-                    uploadSize,
-                    reinterpret_cast<BYTE*>(pMappedData)
-                )))
-                {
-                    outMesh.uploadDiffuseBuffer->Unmap(0, nullptr);
-                    g_FError("Failed to copy pixels\n");
-                    goto __material_process_end__;
-                }
-
-                outMesh.uploadDiffuseBuffer->Unmap(0, nullptr);
-
-                //g_FDebug(std::format("Texture loaded: {0}x{1}\n", outMesh.textureWidth, outMesh.textureHeight).c_str());
-            }
-        }
-        else dbgStr.append(" - No diffuse texture");
-    }
-    __material_process_end__:
-
-    if (outMesh.uploadDiffuseBuffer and outMesh.textureWidth > 0 and outMesh.textureHeight > 0)
-    {
-        D3D12_RESOURCE_DESC texDesc {};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = outMesh.textureWidth;
-        texDesc.Height = outMesh.textureHeight;
-        texDesc.DepthOrArraySize = 1;
-        texDesc.MipLevels = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.SampleDesc.Quality = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        D3D12_HEAP_PROPERTIES defaultHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
-        if (FAILED(m_device->CreateCommittedResource(
-            &defaultHeapProp,
-            D3D12_HEAP_FLAG_NONE,
-            &texDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&outMesh.defaultDiffuseTexture)))) throw std::runtime_error("Failed to create default diffuse heap");
     }
 
-    g_FDebug(dbgStr.append("\n").c_str());
-    isOnCPU = true;
+    g_FDebug("Mesh loaded: {} vertices, {} indices\n", static_cast<UINT>(vertices.size()), static_cast<UINT>(indices.size()));
 }
 
 _Use_decl_annotations_
@@ -370,14 +308,6 @@ void Model::UploadGPU(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cm
             D3D12_RESOURCE_STATE_COMMON,
             D3D12_RESOURCE_STATE_COPY_DEST
         ));
-        if (mesh.defaultDiffuseTexture)
-        {
-            barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-                mesh.defaultDiffuseTexture.Get(),
-                D3D12_RESOURCE_STATE_COMMON,
-                D3D12_RESOURCE_STATE_COPY_DEST
-            ));
-        }
     }
 
     cmdList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
@@ -399,35 +329,14 @@ void Model::UploadGPU(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cm
             D3D12_RESOURCE_STATE_COPY_DEST,
             D3D12_RESOURCE_STATE_INDEX_BUFFER
         ));
-
-        if (mesh.defaultDiffuseTexture and mesh.uploadDiffuseBuffer)
-        {
-            D3D12_TEXTURE_COPY_LOCATION srcLoc{};
-            srcLoc.pResource = mesh.uploadDiffuseBuffer.Get();
-            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-            srcLoc.PlacedFootprint.Offset = 0;
-            srcLoc.PlacedFootprint.Footprint.Format = mesh.defaultDiffuseTexture->GetDesc().Format;
-            srcLoc.PlacedFootprint.Footprint.Width = mesh.textureWidth;
-            srcLoc.PlacedFootprint.Footprint.Height = mesh.textureHeight;
-            srcLoc.PlacedFootprint.Footprint.Depth = 1;
-            srcLoc.PlacedFootprint.Footprint.RowPitch = mesh.textureRowPitch;
-
-            D3D12_TEXTURE_COPY_LOCATION dstLoc{};
-            dstLoc.pResource = mesh.defaultDiffuseTexture.Get();
-            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-            dstLoc.SubresourceIndex = 0;
-
-            cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-
-            barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-                mesh.defaultDiffuseTexture.Get(),
-                D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-            ));
-        }
     }
 
     cmdList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+
+    for (Mesh& mesh : meshes)
+    {
+        mesh.material.UploadGPU(m_device, cmdQueue, cmdList);
+    }
 
     ThrowIfFailed(cmdList->Close());
     ID3D12CommandList* ppCommandLists[] = { cmdList };
@@ -439,16 +348,6 @@ void Model::UploadGPU(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cm
 _Use_decl_annotations_
 void Model::Draw(DrawContext ctx)
 {
-    //struct DrawContext {
-    //    ID3D12GraphicsCommandList* cmdList;
-    //    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle;
-    //    D3D12_GPU_VIRTUAL_ADDRESS baseGpuAddr;
-    //    PaddedConstantBuffer* cbBufferCPU;
-    //    ConstantBuffer cbParams;
-    //    UINT frameBaseIndex;
-    //    UINT srvDescriptorSize;
-    //};
-
     if (not ctx.cmdList)
     {
         throw std::runtime_error("At least one of the pointers are invalid");
@@ -456,31 +355,34 @@ void Model::Draw(DrawContext ctx)
 
     DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
 
-    UINT textureIndex{};
     UINT meshIndex{};
-    for (const Mesh& mesh : meshes)
+    for (Mesh& mesh : meshes)
     {
         const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
         const DirectX::XMMATRIX rotQMatrix  = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
         const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
         const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation;
 
-        DirectX::XMStoreFloat4x4(&ctx.cbParams.worldMatrix, DirectX::XMMatrixTranspose(worldMatrix));
+        auto meshConstantGpuAddrBase = ctx.meshConstantsGpuVirtualAddr + sizeof(PaddedMeshConstants) * ctx.bufferIndex;
 
-        UINT slot = ctx.frameBaseIndex + meshIndex;
-        memcpy(&ctx.cbBufferCPU[slot].constant, &ctx.cbParams, sizeof(ConstantBuffer));
+        meshConstants constants{};
+        DirectX::XMStoreFloat4x4(&constants.worldMatrix, DirectX::XMMatrixTranspose(worldMatrix));
+        constants.baseColor = mesh.material.m_baseColor;
+        constants.metallic = mesh.material.m_metallic;
+        constants.roughness = mesh.material.m_roughness;
+        constants.opacity = mesh.material.m_opacity;
+        constants.textureFlags = mesh.material.m_textureFlags;
 
-        D3D12_GPU_VIRTUAL_ADDRESS meshGpuAddr = ctx.baseGpuAddr + sizeof(PaddedConstantBuffer) * meshIndex;
-        ctx.cmdList->SetGraphicsRootConstantBufferView(0, meshGpuAddr);
+        memcpy(&ctx.meshConstantsCpuAddr[meshIndex].constant, &constants, sizeof(meshConstants));
 
-        CD3DX12_GPU_DESCRIPTOR_HANDLE texHandle(ctx.srvGPUHandle, textureIndex * ctx.srvDescriptorSize);
-        ctx.cmdList->SetGraphicsRootDescriptorTable(1, texHandle);
+        ctx.cmdList->SetGraphicsRootConstantBufferView(1, meshConstantGpuAddrBase);
+
+        mesh.material.Bind(ctx.cmdList);
 
         ctx.cmdList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
         ctx.cmdList->IASetIndexBuffer(&mesh.indexBufferView);
         ctx.cmdList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
 
-        textureIndex++;
         meshIndex++;
     }
 }
@@ -508,24 +410,33 @@ void Model::RotateAdd(DirectX::XMFLOAT3 rotation)
 void Model::ResetUploadHeaps() {
     if (not isOnCPU)
     {
-        throw std::runtime_error("Upload heaps are empty");
+        g_FError("No CPU resoruce");
+        return;
     }
 
     for (Mesh& mesh : meshes)
     {
         mesh.uploadIndexBuffer.Reset();
         mesh.uploadVertexBuffer.Reset();
-        mesh.uploadDiffuseBuffer.Reset();
+        mesh.material.ResetUploadHeaps();
     }
     isOnCPU = false;
 }
 
 void Model::UnloadGPU()
 {
+    if (not isOnGPU)
+    {
+        g_FError("GPU resource is already empty");
+        return;
+    }
+
     for(Mesh& mesh : meshes)
     {
-        mesh.defaultDiffuseTexture.Reset();
         mesh.defaultIndexBuffer.Reset();
         mesh.defaultVertexBuffer.Reset();
+        mesh.material.UnloadGPU();
     }
+
+    isOnGPU = false;
 }
