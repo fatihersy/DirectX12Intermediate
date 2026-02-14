@@ -240,7 +240,7 @@ void Material::ResetUploadHeaps()
 {
     if (not m_isOnCPU)
     {
-        g_FError("No CPU resoruce");
+        g_FError("No CPU resource");
         return;
     }
 

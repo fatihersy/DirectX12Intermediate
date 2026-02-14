@@ -6,21 +6,11 @@ struct frameConstants
     DirectX::XMFLOAT4X4 projectionMatrix{};
     DirectX::XMFLOAT4 lightDir{};
     DirectX::XMFLOAT4 lightColor{};
+    DirectX::XMFLOAT3 camPos{};
+    UINT PADDING_1{};
 };
-static_assert(sizeof(frameConstants) == 160);
-
-struct meshConstants
-{
-    DirectX::XMFLOAT4X4 worldMatrix;
-    DirectX::XMFLOAT4 baseColor;
-    FLOAT metallic{};
-    FLOAT roughness{};
-    FLOAT opacity{};
-UINT PADDING_1{};
-    UINT textureFlags{};
-UINT PADDING_2[3]{};
-};
-static_assert(sizeof(meshConstants) == 112);
+static_assert(sizeof(frameConstants) % 16 == 0);
+static_assert(offsetof(frameConstants, PADDING_1) % 4 == 0);
 
 union PaddedFrameConstants
 {
@@ -28,6 +18,19 @@ union PaddedFrameConstants
     uint8_t bytes[D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT];
 };
 static_assert(sizeof(PaddedFrameConstants) == D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * 1);
+
+struct meshConstants
+{
+    DirectX::XMFLOAT4X4 worldMatrix;
+    DirectX::XMFLOAT3X4 normalMatrix;
+    DirectX::XMFLOAT4 baseColor;
+    FLOAT metallic{};
+    FLOAT roughness{};
+    FLOAT opacity{};
+    UINT textureFlags{};
+};
+static_assert(sizeof(meshConstants) % 16 == 0);
+static_assert(offsetof(meshConstants, textureFlags) % 4 == 0);
 
 union PaddedMeshConstants
 {
@@ -40,6 +43,8 @@ struct Vertex
 {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;
+    DirectX::XMFLOAT3 tangent;
+    DirectX::XMFLOAT3 bitangent;
     DirectX::XMFLOAT2 texCoord;
 };
 

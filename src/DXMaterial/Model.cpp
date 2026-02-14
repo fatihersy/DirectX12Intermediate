@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include <stdexcept>
 
+#include "IApp.h"
 #include "Model.h"
 #include "DXSampleHelper.h"
 
@@ -11,7 +12,7 @@
 Model::Model() : m_device(nullptr), m_wicFactory(nullptr) {}
 
 _Use_decl_annotations_
-Model::Model(ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory) : m_device(device), m_wicFactory(wicFactory)
+Model::Model(_In_ const char* name, ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory) : m_name(name), m_device(device), m_wicFactory(wicFactory)
 {
     if (not device or not wicFactory)
     {
@@ -32,6 +33,7 @@ bool Model::Load(const std::filesystem::path& path, ID3D12GraphicsCommandList* c
         aiProcess_Triangulate |
         aiProcess_ConvertToLeftHanded |
         aiProcess_GenSmoothNormals |
+        aiProcess_CalcTangentSpace |
         aiProcess_JoinIdenticalVertices
     );
     if (not scene or scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE or not scene->mRootNode)
@@ -57,12 +59,22 @@ void Model::ProcessNode(aiNode* node, const aiScene* scene, ID3D12GraphicsComman
 
     for (UINT i = 0; i < node->mNumMeshes; ++i) {
         aiMesh* pAiMesh = scene->mMeshes[node->mMeshes[i]];
-        Mesh& mesh = meshes.emplace_back(Mesh(m_wicFactory));
 
-        mesh.name = FString::format("%s::mesh%d", m_name, i);
+        if (IApp::GetInstance()->m_remainingMeshSlots <= 0)
+        {
+            throw std::out_of_range("No available mesh slot");
+        }
+        Mesh& mesh = meshes.emplace_back(Mesh(m_wicFactory));
+        IApp::GetInstance()->m_remainingMeshSlots--;
+        
+        mesh.name = FString::format("%s::mesh_%s", m_name, pAiMesh->mName.C_Str());
         mesh.material.m_name = FString::format("%s::material", mesh.name);
 
         ProcessMesh(pAiMesh, scene, node, mesh);
+    }
+    if (meshes.size() > IApp::GetInstance()->c_maxObjects)
+    {
+        throw std::out_of_range("Meshes got out of range");
     }
     for (UINT i = 0; i < node->mNumChildren; ++i) {
         ProcessNode(node->mChildren[i], scene, cmdList);
@@ -105,9 +117,52 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
     {
         Vertex v{};
 
-        v.position = DirectX::XMFLOAT3 { pAiMesh->mVertices[i].x, pAiMesh->mVertices[i].y, pAiMesh->mVertices[i].z };
-        v.normal   = pAiMesh->HasNormals() ? DirectX::XMFLOAT3 { pAiMesh->mNormals[i].x, pAiMesh->mNormals[i].y, pAiMesh->mNormals[i].z } : DirectX::XMFLOAT3{ 0.f, 0.f, 0.f };
-        v.texCoord = pAiMesh->mTextureCoords[0] ? DirectX::XMFLOAT2{ pAiMesh->mTextureCoords[0][i].x, pAiMesh->mTextureCoords[0][i].y   } : DirectX::XMFLOAT2{ 0.f, 0.f };
+        v.position = DirectX::XMFLOAT3 {
+            pAiMesh->mVertices[i].x,
+            pAiMesh->mVertices[i].y,
+            pAiMesh->mVertices[i].z
+        };
+
+        v.normal = pAiMesh->HasNormals() ? DirectX::XMFLOAT3 {
+            pAiMesh->mNormals[i].x,
+            pAiMesh->mNormals[i].y,
+            pAiMesh->mNormals[i].z
+        }
+        :   DirectX::XMFLOAT3 {0.f, 0.f, 0.f};
+
+        v.texCoord = pAiMesh->mTextureCoords[0] ? DirectX::XMFLOAT2 {
+            pAiMesh->mTextureCoords[0][i].x,
+            pAiMesh->mTextureCoords[0][i].y
+        }
+        :   DirectX::XMFLOAT2{ 0.f, 0.f };
+
+        v.tangent = pAiMesh->HasTangentsAndBitangents() ? DirectX::XMFLOAT3{
+            pAiMesh->mTangents[i].x,
+            pAiMesh->mTangents[i].y,
+            pAiMesh->mTangents[i].z
+        }
+        : DirectX::XMFLOAT3{ 1.f, 0.f, 0.f };
+
+        v.bitangent = pAiMesh->HasTangentsAndBitangents() ? DirectX::XMFLOAT3{
+            pAiMesh->mBitangents[i].x,
+            pAiMesh->mBitangents[i].y,
+            pAiMesh->mBitangents[i].z
+        }
+        : DirectX::XMFLOAT3{ 0.f, 1.f, 0.f };
+
+        {
+            using namespace DirectX;
+            XMVECTOR T = XMLoadFloat3(&v.tangent);
+            XMVECTOR B = XMLoadFloat3(&v.bitangent);
+            XMVECTOR N = XMLoadFloat3(&v.normal);
+            XMVECTOR det = XMVector3Dot(N, XMVector3Cross(T, B));
+            if (XMVectorGetX(XMVectorLess(det, XMVectorZero())) > 0) // Check left handedness
+            {
+                v.bitangent.x = -v.bitangent.x;
+                v.bitangent.y = -v.bitangent.y;
+                v.bitangent.z = -v.bitangent.z;
+            }
+        }
 
         vertices.push_back(v);
     }
@@ -120,6 +175,8 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
             indices.push_back(face.mIndices[j]);
         }
     }
+
+    g_FDebug("Mesh '%s' load begin with %u vertices, %u indices", outMesh.name, static_cast<UINT>(vertices.size()), static_cast<UINT>(indices.size()));
 
     outMesh.vertexCount = static_cast<UINT>(vertices.size());
     outMesh.indexCount = static_cast<UINT>(indices.size());
@@ -274,8 +331,9 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
             }
         }
     }
+    else g_FWarn("\n\t-- No Material Found");
 
-    g_FDebug("Mesh loaded: {} vertices, {} indices\n", static_cast<UINT>(vertices.size()), static_cast<UINT>(indices.size()));
+    g_FDebug("\n\t -- loaded\n");
 }
 
 _Use_decl_annotations_
@@ -363,17 +421,23 @@ void Model::Draw(DrawContext ctx)
         const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
         const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation;
 
-        auto meshConstantGpuAddrBase = ctx.meshConstantsGpuVirtualAddr + sizeof(PaddedMeshConstants) * ctx.bufferIndex;
+        const UINT slot = ctx.bufferIndex * IApp::GetInstance()->c_maxObjects + meshIndex;
+        auto meshConstantGpuAddrBase = ctx.meshConstantsGpuVirtualAddr + sizeof(PaddedMeshConstants) * slot;
 
         meshConstants constants{};
-        DirectX::XMStoreFloat4x4(&constants.worldMatrix, DirectX::XMMatrixTranspose(worldMatrix));
+        DirectX::XMStoreFloat4x4(&constants.worldMatrix, worldMatrix);
+        DirectX::XMVECTOR det;
+        DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
+        DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixTranspose(worldInverse);
+        DirectX::XMStoreFloat3x4(&constants.normalMatrix, normalMatrix);
+        
         constants.baseColor = mesh.material.m_baseColor;
         constants.metallic = mesh.material.m_metallic;
         constants.roughness = mesh.material.m_roughness;
         constants.opacity = mesh.material.m_opacity;
         constants.textureFlags = mesh.material.m_textureFlags;
 
-        memcpy(&ctx.meshConstantsCpuAddr[meshIndex].constant, &constants, sizeof(meshConstants));
+        memcpy(&ctx.meshConstantsCpuAddr[slot].constant, &constants, sizeof(meshConstants));
 
         ctx.cmdList->SetGraphicsRootConstantBufferView(1, meshConstantGpuAddrBase);
 
@@ -389,28 +453,15 @@ void Model::Draw(DrawContext ctx)
 
 void Model::RotateAdd(DirectX::XMFLOAT3 rotation)
 {
-    m_rotation.x += DirectX::XMConvertToRadians(rotation.x);
-    m_rotation.y += DirectX::XMConvertToRadians(rotation.y);
-    m_rotation.z += DirectX::XMConvertToRadians(rotation.z);
-
-    if (m_rotation.x >= DirectX::XM_2PI)
-    {
-        m_rotation.x -= DirectX::XM_2PI;
-    }
-    if (m_rotation.y >= DirectX::XM_2PI)
-    {
-        m_rotation.y -= DirectX::XM_2PI;
-    }
-    if (m_rotation.z >= DirectX::XM_2PI)
-    {
-        m_rotation.z -= DirectX::XM_2PI;
-    }
+    m_rotation.x = fmod(m_rotation.x + DirectX::XMConvertToRadians(rotation.x), DirectX::XM_2PI);
+    m_rotation.y = fmod(m_rotation.y + DirectX::XMConvertToRadians(rotation.y), DirectX::XM_2PI);
+    m_rotation.z = fmod(m_rotation.z + DirectX::XMConvertToRadians(rotation.z), DirectX::XM_2PI);
 }
 
 void Model::ResetUploadHeaps() {
     if (not isOnCPU)
     {
-        g_FError("No CPU resoruce");
+        g_FError("No CPU resource");
         return;
     }
 

@@ -3,6 +3,7 @@
   "name": "directx12intermediate",
   "version": "1.0.0",
   "dependencies": [
-    "directxtk12"
+    "directxtk12",
+    "directx-dxc"
   ]
 }

@@ -23,3 +23,8 @@ template<typename... Args>
 inline void g_FError(const char* fmt, Args&&... args) {
     g_PlatformConsoleWrite(FlogLevel::FLOG_ERROR, FString::format(fmt, std::forward<Args>(args)...));
 }
+
+template<typename... Args>
+inline void g_FWarn(const char* fmt, Args&&... args) {
+    g_PlatformConsoleWrite(FlogLevel::FLOG_WARN, FString::format(fmt, std::forward<Args>(args)...));
+}

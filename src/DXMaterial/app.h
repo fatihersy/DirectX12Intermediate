@@ -23,9 +23,12 @@ public:
     void ToggleFullScreen() override;
 
 private:
+    ComPtr<IDxcCompiler3> m_dxcCompiler;
+    ComPtr<IDxcLibrary> m_dxcLibrary;
+    ComPtr<IDxcUtils> m_dxcUtils;
+    ComPtr<IDxcValidator2> m_dxcValidator;
+    ComPtr<IDxcIncludeHandler> m_dxcIncludeHandler;
     ComPtr<IWICImagingFactory2> m_wicFactory;
-    static const UINT FrameCount = 2;
-    const UINT c_maxObjects = 100;
 
     CD3DX12_VIEWPORT m_viewport;
     CD3DX12_RECT m_scissorRect;

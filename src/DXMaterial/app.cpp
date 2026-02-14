@@ -130,7 +130,14 @@ void app::OnDestroy()
     dxgiDebug.Reset();
 }
 
-void app::OnInit() {
+void app::OnInit()
+{
+    ThrowIfFailed(DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&m_dxcLibrary)));
+    ThrowIfFailed(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&m_dxcCompiler)));
+    ThrowIfFailed(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&m_dxcUtils)));
+    ThrowIfFailed(DxcCreateInstance(CLSID_DxcValidator, IID_PPV_ARGS(&m_dxcValidator)));
+    ThrowIfFailed(m_dxcUtils->CreateDefaultIncludeHandler(&m_dxcIncludeHandler));
+
     app::LoadPipeline();
     app::LoadAssets();
 
@@ -362,8 +369,7 @@ void app::LoadAssets() {
     ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
     m_commandList->SetName(L"app::m_commandList");
 
-    // Create synchronization objects and wait until assets have been uploaded to
-    // the GPU.
+    // Create synchronization objects
     {
         ThrowIfFailed(m_device->CreateFence(m_fenceGeneration, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
         m_fence->SetName(L"app::m_fence");
@@ -373,8 +379,6 @@ void app::LoadAssets() {
         if (m_fenceEvent == nullptr) {
             ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
         }
-
-        WaitForGPU();
     }
 
     // SRV Descriptor Heaps
@@ -513,6 +517,10 @@ void app::LoadAssets() {
         srvDesc.Format = desc.Format;
         m_device->CreateShaderResourceView(m_fallbackTexture.defaultBuffer.Get(), &srvDesc, m_fallbackTexture.cpuHandle);
 
+        ThrowIfFailed(m_commandList->Close());
+        ID3D12CommandList *const ppCmdList[] = {m_commandList.Get()};
+        m_commandQueue->ExecuteCommandLists(1, ppCmdList);
+
         WaitForGPU();
     }
 
@@ -534,7 +542,7 @@ void app::LoadAssets() {
         rp[2].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
 
         D3D12_STATIC_SAMPLER_DESC sampler{};
-        sampler.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
         sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
         sampler.MipLODBias = 0;
         sampler.MaxAnisotropy = 0;
@@ -589,7 +597,7 @@ void app::LoadAssets() {
         // Per mesh
         {
             const D3D12_HEAP_PROPERTIES uploadHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-            const size_t cbSize = c_maxObjects * sizeof(PaddedMeshConstants);
+            const size_t cbSize = static_cast<size_t>(FrameCount) * c_maxObjects * sizeof(PaddedMeshConstants);
 
             const D3D12_RESOURCE_DESC heapDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
             ThrowIfFailed(m_device->CreateCommittedResource(
@@ -610,50 +618,130 @@ void app::LoadAssets() {
 
     // Create the pipeline state, which includes compiling and loading shaders.
     {
-        UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-        ComPtr<ID3D10Blob> vertexShader, pixelShader;
-        // Vertex Shader
+        ComPtr<IDxcBlob> vertexShader;
+        ComPtr<IDxcBlob> pixelShader;
+        ComPtr<IDxcOperationResult> opResult;
+        HRESULT hr{};
+
+        auto validateOpResult = [](IDxcLibrary* library, HRESULT hr, IDxcOperationResult* opResult)
         {
-            ComPtr<ID3D10Blob> error;
-            HRESULT hr = D3DCompileFromFile((m_assetsPath + L"shader.hlsl").c_str(), nullptr, nullptr, "mainVS", "vs_5_0", compileFlags, 0, &vertexShader, &error);
-            if (FAILED(hr)) {
-                if (error) {
-                    const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-                    g_FError(errorMsg);
+            if (FAILED(hr)) throw std::runtime_error("Cannot validate");
+
+            ComPtr<IDxcBlobEncoding> errorBlob;
+            if (SUCCEEDED(opResult->GetErrorBuffer(&errorBlob))) {
+                ComPtr<IDxcBlobEncoding> errorBlobUtf8;
+                if (errorBlob.Get() && errorBlob->GetBufferSize() > 0)
+                {
+                    ThrowIfFailed(library->GetBlobAsUtf8(errorBlob.Get(), &errorBlobUtf8));
+                    const char * errstr = reinterpret_cast<const char*>(errorBlobUtf8->GetBufferPointer());
+                    size_t errlen = errorBlobUtf8->GetBufferSize();
+                    if (errorBlobUtf8) g_FError("%s", std::string(errstr, errlen));
                 }
-                ThrowIfFailed(hr);
             }
-        }
-        // Pixel Shader
+        };
+
+        // Shader Compile
         {
-            ComPtr<ID3D10Blob> error;
-            HRESULT hr = D3DCompileFromFile(GetAssetFullPath(L"shader.hlsl").c_str(), nullptr, nullptr, "mainPS", "ps_5_0", compileFlags, 0, &pixelShader, &error);
-            if (FAILED(hr)) {
-                if (error) {
-                    const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-                    g_FError(errorMsg);
-                }
+            ComPtr<IDxcBlobEncoding> vertexSource;
+            ComPtr<IDxcBlobEncoding> pixelSource;
+
+            ThrowIfFailed(m_dxcUtils->LoadFile((m_assetsPath + L"VS.hlsl").c_str(), nullptr, &vertexSource));
+            ThrowIfFailed(m_dxcUtils->LoadFile((m_assetsPath + L"PS.hlsl").c_str(), nullptr, &pixelSource));
+
+            // Vertex Shader
+            {
+                DxcBuffer vertexBuffer{};
+                vertexBuffer.Encoding = DXC_CP_ACP;
+                vertexBuffer.Ptr = vertexSource->GetBufferPointer();
+                vertexBuffer.Size = vertexSource->GetBufferSize();
+
+                LPCWSTR args[] = {
+                    L"-E", L"mainVS",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                };
+
+                ComPtr<IDxcResult> compileResult;
+                ThrowIfFailed(m_dxcCompiler->Compile(&vertexBuffer, args, _countof(args), m_dxcIncludeHandler.Get(), IID_PPV_ARGS(&compileResult)));
+
+                ComPtr<IDxcBlobUtf8> error;
+                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
+
+                if (error && error->GetStringLength() > 0)
+                    g_FError("Vertex Shader: %s", std::string(error->GetStringPointer(), error->GetStringLength()));
+
+                compileResult->GetStatus(&hr);
                 ThrowIfFailed(hr);
+
+                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&vertexShader), nullptr));
             }
+
+            // Pixel Shader
+            {
+                DxcBuffer pixelBuffer{};
+                pixelBuffer.Encoding = DXC_CP_ACP;
+                pixelBuffer.Ptr = pixelSource->GetBufferPointer();
+                pixelBuffer.Size = pixelSource->GetBufferSize();
+
+                LPCWSTR args[] = {
+                    L"-E", L"mainPS",
+                    L"-T", L"ps_6_0",
+                    L"-Zi",
+                    L"-Od"
+                };
+
+                ComPtr<IDxcResult> compileResult;
+                ThrowIfFailed(m_dxcCompiler->Compile(&pixelBuffer, args, _countof(args), m_dxcIncludeHandler.Get(), IID_PPV_ARGS(&compileResult)));
+
+                ComPtr<IDxcBlobUtf8> error;
+                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
+
+                if (error && error->GetStringLength() > 0)
+                    g_FError("Pixel Shader: %s", std::string(error->GetStringPointer(), error->GetStringLength()));
+
+                compileResult->GetStatus(&hr);
+                ThrowIfFailed(hr);
+
+                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&pixelShader), nullptr));
+            }
+
+            hr = m_dxcValidator->Validate(vertexShader.Get(), DxcValidatorFlags_Default, &opResult);
+            validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
+            hr = m_dxcValidator->Validate(pixelShader.Get(), DxcValidatorFlags_Default, &opResult);
+            validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
         }
 
         D3D12_INPUT_ELEMENT_DESC inputElements[] = {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"POSITION",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"NORMAL",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TANGENT",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD",  0, DXGI_FORMAT_R32G32_FLOAT,    0, 48, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         };
 
         // Create the pipeline state objects, which includes compiling and loading
         // shaders.
         {
+            D3D12_RENDER_TARGET_BLEND_DESC blendDesc{};
+            blendDesc.BlendEnable = TRUE;
+            blendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+            blendDesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+            blendDesc.BlendOp = D3D12_BLEND_OP_ADD;
+            blendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
+            blendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
+            blendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
             D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
             desc.InputLayout = { inputElements, _countof(inputElements) };
             desc.pRootSignature = m_rootSignature.Get();
-            desc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-            desc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+            desc.VS = CD3DX12_SHADER_BYTECODE(vertexShader->GetBufferPointer(), vertexShader->GetBufferSize());
+            desc.PS = CD3DX12_SHADER_BYTECODE(pixelShader->GetBufferPointer(), pixelShader->GetBufferSize());
             desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
             desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
             desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+            desc.BlendState.RenderTarget[0] = blendDesc;
             desc.DepthStencilState.DepthEnable = TRUE;
             desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
             desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
@@ -669,18 +757,17 @@ void app::LoadAssets() {
         }
     }
 
-    m_model = Model(m_device.Get(), m_wicFactory.Get());
+    m_model = Model("Ramen Bowl", m_device.Get(), m_wicFactory.Get());
     m_model.m_rotation = { 0.f, 0.f, 0.f };
+    m_model.m_scale = { 10.f, 10.f, 10.f };
     {
-        ThrowIfFailed(m_commandList->Close());
         ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
 
         m_model.Load(GetAssetFullPath(L"res/lowpoly_ramen_bowl.glb"), m_commandList.Get());
 
         m_model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        WaitForGPU();
     }
-
-    WaitForGPU();
 
     m_model.ResetUploadHeaps();
     m_fallbackTexture.uploadBuffer.Reset();
@@ -718,12 +805,13 @@ void app::PopulateCommandList()
     auto frameConstantGpuAddrBase = m_frameConstantsGpuVirtualAddr + sizeof(PaddedFrameConstants) * bufferIndex;
 
     frameConstants frameCB{};
-    DirectX::XMStoreFloat4x4(&frameCB.viewMatrix, DirectX::XMMatrixTranspose(m_viewMatrix));
-    DirectX::XMStoreFloat4x4(&frameCB.projectionMatrix, DirectX::XMMatrixTranspose(m_projectionMatrix));
+    DirectX::XMStoreFloat4x4(&frameCB.viewMatrix, m_viewMatrix);
+    DirectX::XMStoreFloat4x4(&frameCB.projectionMatrix, m_projectionMatrix);
     DirectX::XMStoreFloat4(&frameCB.lightDir, m_lightDir);
     DirectX::XMStoreFloat4(&frameCB.lightColor, m_lightColor);
-
-    memcpy(&m_frameConstantsCpuAddr[0].constant, &frameCB, sizeof(frameConstants));
+    XMStoreFloat3(&frameCB.camPos, m_camEye);
+    
+    memcpy(&m_frameConstantsCpuAddr[bufferIndex].constant, &frameCB, sizeof(frameConstants));
 
     m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
 
@@ -740,7 +828,7 @@ void app::PopulateCommandList()
         {
             const Mesh& mesh = meshes[meshIndex];
 
-            ImGui::LabelText(FString::format("Mesh %d", meshIndex).c_str(), "Vertices: %u -- Indices: %u", mesh.vertexCount, mesh.indexCount);
+            ImGui::LabelText(mesh.name.c_str(), "Vertices: %u -- Indices: %u", mesh.vertexCount, mesh.indexCount);
         }
     }
     ImGui::End();

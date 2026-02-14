@@ -218,7 +218,24 @@ void platform::PlatformConsoleWrite(FlogLevel level, const std::string_view& mes
     GetConsoleScreenBufferInfo(hConsole, &csbi);
     WORD originalColor = csbi.wAttributes;
 
-    SetConsoleTextAttribute(hConsole, static_cast<WORD>(isError ? FConsoleColor::Red : FConsoleColor::Green));
+    WORD newColor = static_cast<WORD>(FConsoleColor::Red);
+
+    switch (level)
+    {
+    case FlogLevel::FLOG_FATAL:  break;
+    case FlogLevel::FLOG_ERROR: break;
+    case FlogLevel::FLOG_WARN: newColor = static_cast<WORD>(FConsoleColor::Yellow);
+        break;
+    case FlogLevel::FLOG_INFO: newColor = static_cast<WORD>(FConsoleColor::Blue);
+        break;
+    case FlogLevel::FLOG_DEBUG: newColor = static_cast<WORD>(FConsoleColor::White);
+        break;
+    case FlogLevel::FLOG_TRACE: newColor = static_cast<WORD>(FConsoleColor::White);
+        break;
+    default: break;
+    }
+
+    SetConsoleTextAttribute(hConsole, newColor);
 
     DWORD charsWritten;
     WriteConsoleA(hConsole, message.data(), static_cast<DWORD>(message.length()), &charsWritten, NULL);

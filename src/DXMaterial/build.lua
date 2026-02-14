@@ -29,7 +29,7 @@ mox_link_vcpkg("DirectXTK12")
 links {
     "d3d12.lib",
     "dxgi.lib",
-    "d3dcompiler.lib",
+    "dxcompiler.lib",
     "dxguid.lib",
     "winmm.lib",
     "comctl32.lib",
@@ -44,6 +44,7 @@ pchsource "stdafx.cpp"
 filter "configurations:*"
     linkoptions { 
         "/DELAYLOAD:d3d12.dll", 
+        "/DELAYLOAD:dxcompiler.dll", 
         "/SUBSYSTEM:WINDOWS",
     }
 filter {} 
@@ -56,7 +57,14 @@ filter "configurations:Release"
     linkoptions { "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF" }
 filter {}
 
-filter "files:shader.hlsl"
+filter "files:VS.hlsl"
+    buildaction "CustomBuild"
+    buildoutputs { "%{wks.location}/app/%{file.name}" }
+    buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
+    linkbuildoutputs "false"
+filter {}
+
+filter "files:PS.hlsl"
     buildaction "CustomBuild"
     buildoutputs { "%{wks.location}/app/%{file.name}" }
     buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }

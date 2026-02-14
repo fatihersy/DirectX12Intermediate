@@ -37,3 +37,6 @@
 # App
 /app/res
 /app/shader.hlsl
+/app/imgui.ini
+/app/PS.hlsl
+/app/VS.hlsl

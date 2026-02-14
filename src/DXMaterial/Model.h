@@ -6,7 +6,7 @@
 class Mesh
 {
 public:
-    Mesh(IWICImagingFactory2* wicFactory) : material(wicFactory) {}
+    Mesh(IWICImagingFactory2 * wicFactory) : material(wicFactory) {}
     std::string name;
 
     Material material;
@@ -29,7 +29,7 @@ class Model
 {
 public:
     Model();
-    Model(_In_ ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory);
+    Model(_In_ const char* name, _In_ ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory);
     std::string m_name;
 
     DirectX::XMFLOAT3 m_position{};
