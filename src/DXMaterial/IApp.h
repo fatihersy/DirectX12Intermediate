@@ -33,7 +33,7 @@ public:
     CD3DX12_CPU_DESCRIPTOR_HANDLE im_fallbackTextureCpuHandle{};
 
     static const UINT FrameCount = 2;
-    const INT c_maxObjects = 100;
+    const INT c_maxObjects = 110;
     INT m_remainingMeshSlots = c_maxObjects;
 
     protected:

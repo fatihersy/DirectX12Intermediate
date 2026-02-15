@@ -1,9 +1,10 @@
 #include "stdafx.h"
 #include <stdexcept>
 
+#include "DXSampleHelper.h"
 #include "IApp.h"
 #include "Model.h"
-#include "DXSampleHelper.h"
+#include "Primitives.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -461,7 +462,7 @@ void Model::RotateAdd(DirectX::XMFLOAT3 rotation)
 void Model::ResetUploadHeaps() {
     if (not isOnCPU)
     {
-        g_FError("No CPU resource");
+        g_FError("No CPU resource\n");
         return;
     }
 
@@ -490,4 +491,137 @@ void Model::UnloadGPU()
     }
 
     isOnGPU = false;
+}
+
+bool Model::_As(const char* name, ID3D12GraphicsCommandList* cmdList, EPrimitive type, void* pDesc) {
+    if (not name or not pDesc or type <= EPrimitive::PRIMITIVE_TYPE_NONE or type >= EPrimitive::PRIMITIVE_TYPE_MAX)
+    return false;
+
+    this->UnloadGPU();
+    this->ResetUploadHeaps();
+    std::vector<Vertex> vertices;
+    std::vector<UINT> indices;
+
+    switch (type)
+    {
+        case EPrimitive::PRIMITIVE_TYPE_SPHERE: {
+            const SSphere* desc = reinterpret_cast<const SSphere*>(pDesc);
+            Primitives::CreateSphere(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
+            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
+            return true;
+        }
+        case EPrimitive::PRIMITIVE_TYPE_CUBE: {
+            const SCube* desc = reinterpret_cast<const SCube*>(pDesc);
+            Primitives::CreateCube(desc->width, desc->height, desc->depth, vertices, indices);
+            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
+            return true;
+        }
+        case EPrimitive::PRIMITIVE_TYPE_PLANE: {
+            const SPlane* desc = reinterpret_cast<const SPlane*>(pDesc);
+            Primitives::CreatePlane(desc->width, desc->depth, desc->widthSubdivisions, desc->depthSubdivisions, vertices, indices);
+            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
+            return true;
+        }
+        case EPrimitive::PRIMITIVE_TYPE_CYLINDER: {
+            const SCylinder* desc = reinterpret_cast<const SCylinder*>(pDesc);
+            Primitives::CreateCylinder(desc->topRadius, desc->bottomRadius, desc->height, desc->sliceCount, desc->stackCount, vertices, indices);
+            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
+            return true;
+        }
+        case EPrimitive::PRIMITIVE_TYPE_CONE: {
+            const SCone* desc = reinterpret_cast<const SCone*>(pDesc);
+            Primitives::CreateCone(desc->bottomRadius, desc->height, desc->sliceCount, desc->stackCount, vertices, indices);
+            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
+            return true;
+        }
+        default: return false;
+    }
+}
+
+Mesh& Model::CreateMeshFromMemory(const char* name, ID3D12GraphicsCommandList* cmdList, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices)
+{
+    IApp* appInfo = IApp::GetInstance();
+
+    if (not appInfo or not name or not cmdList or appInfo->m_remainingMeshSlots <= 0 or inVertices.empty() or inIndices.empty()) {
+        throw std::invalid_argument("Invalid parameter");
+    }
+
+    Mesh& mesh = meshes.emplace_back(Mesh(m_wicFactory));
+    mesh.name = FString::format("%s::%s", m_name, name) ;
+    mesh.material.m_name = FString::format("%s::native", mesh.name);
+    std::wstring meshName = std::wstring(mesh.name.begin(), mesh.name.end());
+
+    mesh.vertexCount = static_cast<UINT>(inVertices.size());
+    mesh.indexCount = static_cast<UINT>(inIndices.size());
+    const size_t vbSize = inVertices.size() * sizeof(Vertex);
+    const size_t ibSize = inIndices.size() * sizeof(UINT);
+
+    D3D12_RESOURCE_DESC vbDesc = CD3DX12_RESOURCE_DESC::Buffer(vbSize);
+    D3D12_RESOURCE_DESC ibDesc = CD3DX12_RESOURCE_DESC::Buffer(ibSize);
+
+    D3D12_HEAP_PROPERTIES uploadHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &uploadHeapProp,
+        D3D12_HEAP_FLAG_NONE,
+        &vbDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&mesh.uploadVertexBuffer)
+    ));
+    mesh.uploadVertexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "uploadVertexBuffer").c_str());
+
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &uploadHeapProp,
+        D3D12_HEAP_FLAG_NONE,
+        &ibDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&mesh.uploadIndexBuffer)
+    ));
+    mesh.uploadIndexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "uploadIndexBuffer").c_str());
+
+    void* mappedVertexBuffer = nullptr;
+    ThrowIfFailed(mesh.uploadVertexBuffer->Map(0u, nullptr, reinterpret_cast<void**>(&mappedVertexBuffer)));
+    memcpy(mappedVertexBuffer, inVertices.data(), vbSize);
+    mesh.uploadVertexBuffer->Unmap(0, nullptr);
+
+    void* mappedIndexBuffer = nullptr;
+    ThrowIfFailed(mesh.uploadIndexBuffer->Map(0u, nullptr, reinterpret_cast<void**>(&mappedIndexBuffer)));
+    memcpy(mappedIndexBuffer, inIndices.data(), ibSize);
+    mesh.uploadIndexBuffer->Unmap(0, nullptr);
+
+    D3D12_HEAP_PROPERTIES defaultHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &defaultHeapProp,
+        D3D12_HEAP_FLAG_NONE,
+        &vbDesc,
+        D3D12_RESOURCE_STATE_COMMON,
+        nullptr,
+        IID_PPV_ARGS(&mesh.defaultVertexBuffer)
+    ));
+    mesh.defaultVertexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "defaultVertexBuffer").c_str());
+
+    mesh.vertexBufferView.BufferLocation = mesh.defaultVertexBuffer->GetGPUVirtualAddress();
+    mesh.vertexBufferView.SizeInBytes = static_cast<UINT>(vbSize);
+    mesh.vertexBufferView.StrideInBytes = sizeof(Vertex);
+
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &defaultHeapProp,
+        D3D12_HEAP_FLAG_NONE,
+        &ibDesc,
+        D3D12_RESOURCE_STATE_COMMON,
+        nullptr,
+        IID_PPV_ARGS(&mesh.defaultIndexBuffer)
+    ));
+    mesh.defaultIndexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "defaultIndexBuffer").c_str());
+
+    mesh.indexBufferView.BufferLocation = mesh.defaultIndexBuffer->GetGPUVirtualAddress();
+    mesh.indexBufferView.SizeInBytes = static_cast<UINT>(ibSize);
+    mesh.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+
+    isOnCPU = true;
+    appInfo->m_remainingMeshSlots--;
+    return mesh;
 }

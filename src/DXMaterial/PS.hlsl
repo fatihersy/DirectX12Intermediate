@@ -219,7 +219,7 @@ float4 mainPS(PSInput input) : SV_TARGET
     float3 Lo = (diffuse + specular) * radiance * NdotL;
 
     // Simple ambient (approximates IBL; multiply by AO for occlusion).
-    float3 ambient = float3(0.03f, 0.03f, 0.03f) * albedo.rgb * ao; // Low ambient; tune for scene.
+    float3 ambient = float3(0.1f, 0.1f, 0.1f) * albedo.rgb * ao; // Low ambient; tune for scene.
 
     // Total color: Ambient + direct lights.
     float3 color = ambient + Lo;

@@ -93,8 +93,11 @@ void app::OnDestroy()
     m_frameConstantsGpuResource.Reset();
     m_meshConstantsGpuResource.Reset();
 
-
-    m_model.UnloadGPU();
+    m_modelSphere.UnloadGPU();
+    m_modelCube.UnloadGPU();
+    m_modelPlane.UnloadGPU();
+    m_modelCylinder.UnloadGPU();
+    m_modelCone.UnloadGPU();
 
     im_modelSrvHeap.Reset();
     im_imGuiSrvHeap.Reset();
@@ -219,7 +222,7 @@ void app::OnUpdate() {
     ImGui_ImplDX12_NewFrame();
     ImGui::NewFrame();
 
-    m_model.RotateAdd({ 0.f, 5.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
+    //m_model.RotateAdd({ 0.f, 5.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
 
     app::UpdateKeyBindings();
     app::UpdateMouseBindings();
@@ -757,19 +760,93 @@ void app::LoadAssets() {
         }
     }
 
-    m_model = Model("Ramen Bowl", m_device.Get(), m_wicFactory.Get());
-    m_model.m_rotation = { 0.f, 0.f, 0.f };
-    m_model.m_scale = { 10.f, 10.f, 10.f };
+    //m_model = Model("Ramen Bowl", m_device.Get(), m_wicFactory.Get());
+    //m_model.m_rotation = { 0.f, 0.f, 0.f };
+    //m_model.m_scale = { 10.f, 10.f, 10.f };
     {
         ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
 
-        m_model.Load(GetAssetFullPath(L"res/lowpoly_ramen_bowl.glb"), m_commandList.Get());
+        //m_model.Load(GetAssetFullPath(L"res/aston_martin_v8_vantage_v600_limited_edition_1998.glb"), m_commandList.Get());
+        {
+            m_modelSphere = Model("Sphere", m_device.Get(), m_wicFactory.Get());
+            PrimitiveTraits<SSphere> desc(SSphere{
+                .radius = 10.f,
+                .sliceCount = 40,
+                .stackCount = 40
+            });
+            m_modelSphere.As<SSphere>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+        }
 
-        m_model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        {
+            m_modelCube = Model("Cube", m_device.Get(), m_wicFactory.Get());
+            PrimitiveTraits<SCube> desc(SCube{
+                .width = 5.f,
+                .height = 5.f,
+                .depth = 5.f
+            });
+            m_modelCube.As<SCube>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+        }
+
+        {
+            m_modelPlane = Model("Plane", m_device.Get(), m_wicFactory.Get());
+            PrimitiveTraits<SPlane> desc(SPlane{
+                .width = 10.f,
+                .depth = 10.f,
+                .widthSubdivisions = 5,
+                .depthSubdivisions = 5
+            });
+            m_modelPlane.As<SPlane>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+        }
+
+        {
+            m_modelCylinder = Model("Cylinder", m_device.Get(), m_wicFactory.Get());
+            PrimitiveTraits<SCylinder> desc(SCylinder{
+                .topRadius = 5.f,
+                .bottomRadius = 5.f,
+                .height = 10.f,
+                .sliceCount = 40,
+                .stackCount = 40
+            });
+            m_modelCylinder.As<SCylinder>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+        }
+
+        {
+            m_modelCone = Model("Cone", m_device.Get(), m_wicFactory.Get());
+            PrimitiveTraits<SCone> desc(SCone{
+                .bottomRadius = 5.f,
+                .height = 10.f,
+                .sliceCount = 40,
+                .stackCount = 40
+            });
+            m_modelCone.As<SCone>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+        }
+
+        m_modelSphere.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        WaitForGPU();
+
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+        m_modelCube.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        WaitForGPU();
+
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+        m_modelPlane.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        WaitForGPU();
+
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+        m_modelCylinder.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        WaitForGPU();
+
+        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+        m_modelCone.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
         WaitForGPU();
     }
 
-    m_model.ResetUploadHeaps();
+    m_modelSphere.ResetUploadHeaps();
+    m_modelCube.ResetUploadHeaps();
+    m_modelPlane.ResetUploadHeaps();
+    m_modelCylinder.ResetUploadHeaps();
+    m_modelCone.ResetUploadHeaps();
+
     m_fallbackTexture.uploadBuffer.Reset();
 }
 void app::PopulateCommandList()
@@ -816,22 +893,26 @@ void app::PopulateCommandList()
     m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
 
     CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(im_modelSrvHeap->GetGPUDescriptorHandleForHeapStart());
-    m_model.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+    //m_modelSphere.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+    //m_modelCube.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+    //m_modelPlane.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+    //m_modelCylinder.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+    m_modelCone.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
 
     ID3D12DescriptorHeap* ppImGuiHeap[] = { im_imGuiSrvHeap.Get() };
     m_commandList->SetDescriptorHeaps(1, ppImGuiHeap);
 
-    ImGui::Begin("Model");
-    {
-        const std::vector<Mesh>& meshes = m_model.GetMeshes();
-        for (size_t meshIndex = 0; meshIndex < meshes.size(); meshIndex++)
-        {
-            const Mesh& mesh = meshes[meshIndex];
-
-            ImGui::LabelText(mesh.name.c_str(), "Vertices: %u -- Indices: %u", mesh.vertexCount, mesh.indexCount);
-        }
-    }
-    ImGui::End();
+    //ImGui::Begin("Model");
+    //{
+    //    const std::vector<Mesh>& meshes = m_model.GetMeshes();
+    //    for (size_t meshIndex = 0; meshIndex < meshes.size(); meshIndex++)
+    //    {
+    //        const Mesh& mesh = meshes[meshIndex];
+    //
+    //        ImGui::LabelText(mesh.name.c_str(), "Vertices: %u -- Indices: %u", mesh.vertexCount, mesh.indexCount);
+    //    }
+    //}
+    //ImGui::End();
 
     ImGui::Render();
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());

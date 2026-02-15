@@ -22,7 +22,7 @@ public:
 
     DirectX::XMFLOAT3 m_position{};
     DirectX::XMFLOAT4 m_rotationQ{};
-    DirectX::XMFLOAT3 m_scale{};
+    DirectX::XMFLOAT3 m_scale{1.f, 1.f, 1.f};
 };
 
 class Model
@@ -34,7 +34,7 @@ public:
 
     DirectX::XMFLOAT3 m_position{};
     DirectX::XMFLOAT3 m_rotation{};
-    DirectX::XMFLOAT3 m_scale{1.f, 1.f, 1.f};
+    DirectX::XMFLOAT3 m_scale{5.f, 5.f, 5.f};
 
     void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Draw(_In_ DrawContext ctx);
@@ -48,12 +48,22 @@ public:
     std::filesystem::path m_assetPath;
     bool isOnGPU{};
     bool isOnCPU{};
+
+    template<typename T> requires IsPrimitiveMesh<T>
+    inline bool As(ID3D12GraphicsCommandList* cmdList, PrimitiveTraits<T>& desc) {
+        return _As("self", cmdList, PrimitiveTraits<T>::type, &desc);
+    }
+
 private:
     IWICImagingFactory2* m_wicFactory;
     ID3D12Device* m_device;
     std::vector<Mesh> meshes;
+
     void ProcessNode(_In_ aiNode* node, _In_  const aiScene* scene, _In_ ID3D12GraphicsCommandList* cmdList);
     void ProcessMesh(_In_ aiMesh* pAiMesh, _In_ const aiScene* scene, _In_ aiNode* node, _Out_ Mesh& outMesh);
+
+    Mesh& CreateMeshFromMemory(const char* name, ID3D12GraphicsCommandList* cmdList, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices);
+    bool _As(const char* name, ID3D12GraphicsCommandList* cmdList, EPrimitive type, void* pDesc);
 
     inline aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node) {
         aiMatrix4x4 transform = node->mTransformation;
