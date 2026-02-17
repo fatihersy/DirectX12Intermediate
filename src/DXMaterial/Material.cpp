@@ -223,7 +223,7 @@ void Material::UnloadGPU()
 {
     if (not m_isOnGPU)
     {
-        g_FError("GPU resource is already empty");
+        g_FError("GPU resource is already empty\n");
         return;
     }
 
@@ -240,7 +240,7 @@ void Material::ResetUploadHeaps()
 {
     if (not m_isOnCPU)
     {
-        g_FError("No CPU resource");
+        g_FError("No CPU resource\n");
         return;
     }
 

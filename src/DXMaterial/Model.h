@@ -32,32 +32,63 @@ public:
     Model(_In_ const char* name, _In_ ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory);
     std::string m_name;
 
-    DirectX::XMFLOAT3 m_position{};
-    DirectX::XMFLOAT3 m_rotation{};
-    DirectX::XMFLOAT3 m_scale{5.f, 5.f, 5.f};
-
     void RotateAdd(DirectX::XMFLOAT3 rotation);
-    void Draw(_In_ DrawContext ctx);
+    void Move(DirectX::XMFLOAT3 vector, double delta);
+    void SetPosition(DirectX::XMFLOAT3 position);
+    inline void SetMetallic(float value) {
+        if (not meshes.empty())
+            meshes[0].material.m_metallic = value;
+    }
+    inline void SetRoughness(float value) {
+        if (not meshes.empty())
+            meshes[0].material.m_roughness = value;
+    }
+    inline void SetOpacity(float value) {
+        if (not meshes.empty())
+            meshes[0].material.m_opacity = value;
+    }
+
+    inline DirectX::XMFLOAT3 GetPosition() const { return m_position; }
+    inline const std::vector<Mesh>& GetMeshes() { return meshes; };
+    inline float GetMetallic() const {
+        if (not meshes.empty())
+            return meshes[0].material.m_metallic;
+        else return -1;
+    }
+    inline float GetRoughness() const {
+        if (not meshes.empty())
+            return meshes[0].material.m_roughness;
+        else return -1;
+    }
+    inline float GetOpacity() const {
+        if (not meshes.empty())
+            return meshes[0].material.m_opacity;
+        else return -1;
+    }
 
     bool Load(_In_ const std::filesystem::path& path, _In_ ID3D12GraphicsCommandList* cmdList);
     void UploadGPU(_In_ ID3D12GraphicsCommandList* cmdList, _In_ ID3D12CommandQueue* cmdQueue);
     void UnloadGPU();
     void ResetUploadHeaps();
-    inline const std::vector<Mesh>& GetMeshes() { return meshes; };
-
-    std::filesystem::path m_assetPath;
-    bool isOnGPU{};
-    bool isOnCPU{};
 
     template<typename T> requires IsPrimitiveMesh<T>
     inline bool As(ID3D12GraphicsCommandList* cmdList, PrimitiveTraits<T>& desc) {
         return _As("self", cmdList, PrimitiveTraits<T>::type, &desc);
     }
 
+    void Draw(_In_ DrawContext ctx);
+
+    std::filesystem::path m_assetPath;
+    bool isOnGPU{};
+    bool isOnCPU{};
+
 private:
     IWICImagingFactory2* m_wicFactory;
     ID3D12Device* m_device;
     std::vector<Mesh> meshes;
+    DirectX::XMFLOAT3 m_position{};
+    DirectX::XMFLOAT3 m_rotation{};
+    DirectX::XMFLOAT3 m_scale{ 1.f, 1.f, 1.f };
 
     void ProcessNode(_In_ aiNode* node, _In_  const aiScene* scene, _In_ ID3D12GraphicsCommandList* cmdList);
     void ProcessMesh(_In_ aiMesh* pAiMesh, _In_ const aiScene* scene, _In_ aiNode* node, _Out_ Mesh& outMesh);

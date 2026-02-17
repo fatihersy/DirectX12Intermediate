@@ -53,6 +53,7 @@ struct DrawContext {
     CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle;
     UINT srvDescriptorSize;
     UINT bufferIndex;
+    UINT& bufferOffset;
     D3D12_GPU_VIRTUAL_ADDRESS meshConstantsGpuVirtualAddr;
     PaddedMeshConstants* meshConstantsCpuAddr;
 };

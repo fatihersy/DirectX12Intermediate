@@ -4,7 +4,7 @@
 _Use_decl_annotations_
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 {
-    app app(1280, 720, L"Hello World", hInstance, nCmdShow);
+    app app(1366, 768, L"Hello World", hInstance, nCmdShow);
 
     app.OnInit();
 

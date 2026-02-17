@@ -413,6 +413,7 @@ void Model::Draw(DrawContext ctx)
     }
 
     DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
+    DirectX::XMMATRIX globalPosition = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&m_position));
 
     UINT meshIndex{};
     for (Mesh& mesh : meshes)
@@ -420,9 +421,9 @@ void Model::Draw(DrawContext ctx)
         const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
         const DirectX::XMMATRIX rotQMatrix  = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
         const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
-        const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation;
+        const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation * globalPosition;
 
-        const UINT slot = ctx.bufferIndex * IApp::GetInstance()->c_maxObjects + meshIndex;
+        const UINT slot = ctx.bufferIndex * IApp::GetInstance()->c_maxObjects + ctx.bufferOffset + meshIndex;
         auto meshConstantGpuAddrBase = ctx.meshConstantsGpuVirtualAddr + sizeof(PaddedMeshConstants) * slot;
 
         meshConstants constants{};
@@ -459,6 +460,25 @@ void Model::RotateAdd(DirectX::XMFLOAT3 rotation)
     m_rotation.z = fmod(m_rotation.z + DirectX::XMConvertToRadians(rotation.z), DirectX::XM_2PI);
 }
 
+void Model::Move(DirectX::XMFLOAT3 vector, double delta)
+{
+    delta = std::clamp(
+        delta,
+        static_cast<double>(std::numeric_limits<float>::lowest()),
+        static_cast<double>(std::numeric_limits<float>::max())
+    );
+
+    m_position.x += static_cast<float>(static_cast<double>(vector.x) * delta);
+    m_position.y += static_cast<float>(static_cast<double>(vector.y) * delta);
+    m_position.z += static_cast<float>(static_cast<double>(vector.z) * delta);
+}
+void Model::SetPosition(DirectX::XMFLOAT3 position)
+{
+    m_position.x = position.x;
+    m_position.y = position.y;
+    m_position.z = position.z;
+}
+
 void Model::ResetUploadHeaps() {
     if (not isOnCPU)
     {
@@ -479,7 +499,7 @@ void Model::UnloadGPU()
 {
     if (not isOnGPU)
     {
-        g_FError("GPU resource is already empty");
+        g_FError("GPU resource is already empty\n");
         return;
     }
 

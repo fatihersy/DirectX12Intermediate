@@ -46,11 +46,7 @@ private:
 
     FTexture m_fallbackTexture;
 
-    Model m_modelSphere;
-    Model m_modelCube;
-    Model m_modelPlane;
-    Model m_modelCylinder;
-    Model m_modelCone;
+    std::array<Model, 36u> m_sphere;
 
     UINT m_rtvDescriptorSize;
     ComPtr<ID3D12Resource2> m_frameConstantsGpuResource;

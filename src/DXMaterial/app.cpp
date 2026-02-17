@@ -25,7 +25,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_fenceEvent(nullptr),
     m_fenceGeneration{},
     m_aspectRatio{},
-    m_camEye({ 0.f, 10.25f, 20.5f, 0.f }),
+    m_camEye({ 0.f, 0.f, 100.f, 0.f }),
     m_camFwd({ 0.f, 0.f, -1.f, 0.f }),
     m_camUp({ 0.f, 1.f, 0.f, 0.f }),
     m_camYaw{},
@@ -93,11 +93,9 @@ void app::OnDestroy()
     m_frameConstantsGpuResource.Reset();
     m_meshConstantsGpuResource.Reset();
 
-    m_modelSphere.UnloadGPU();
-    m_modelCube.UnloadGPU();
-    m_modelPlane.UnloadGPU();
-    m_modelCylinder.UnloadGPU();
-    m_modelCone.UnloadGPU();
+    std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model) {
+        model.UnloadGPU();
+    });
 
     im_modelSrvHeap.Reset();
     im_imGuiSrvHeap.Reset();
@@ -165,7 +163,7 @@ void app::OnInit()
             app* userData = static_cast<app*>(info->UserData);
             if (userData->im_freeImGuiSRVindices.empty())
             {
-                g_FError("No free SRV descriptors available");
+                g_FError("No free SRV descriptors available\n");
                 *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
                 *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
                 return;
@@ -189,14 +187,14 @@ void app::OnInit()
             ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
             if (offset % userData->im_imGuiSrvDescriptorSize != 0 || offset < 0)
             {
-                g_FError("Invalid SRV descriptor handle to free!");
+                g_FError("Invalid SRV descriptor handle to free!\n");
                 return;
             }
 
             INT idx = static_cast<INT>(offset / userData->im_imGuiSrvDescriptorSize);
             if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
             {
-                g_FError("SRV descriptor index out of bounds!");
+                g_FError("SRV descriptor index out of bounds!\n");
                 return;
             }
 
@@ -638,7 +636,7 @@ void app::LoadAssets() {
                     ThrowIfFailed(library->GetBlobAsUtf8(errorBlob.Get(), &errorBlobUtf8));
                     const char * errstr = reinterpret_cast<const char*>(errorBlobUtf8->GetBufferPointer());
                     size_t errlen = errorBlobUtf8->GetBufferSize();
-                    if (errorBlobUtf8) g_FError("%s", std::string(errstr, errlen));
+                    if (errorBlobUtf8) g_FError("%s\n", std::string(errstr, errlen));
                 }
             }
         };
@@ -672,7 +670,7 @@ void app::LoadAssets() {
                 ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
 
                 if (error && error->GetStringLength() > 0)
-                    g_FError("Vertex Shader: %s", std::string(error->GetStringPointer(), error->GetStringLength()));
+                    g_FError("Vertex Shader: %s\n", std::string(error->GetStringPointer(), error->GetStringLength()));
 
                 compileResult->GetStatus(&hr);
                 ThrowIfFailed(hr);
@@ -701,7 +699,7 @@ void app::LoadAssets() {
                 ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
 
                 if (error && error->GetStringLength() > 0)
-                    g_FError("Pixel Shader: %s", std::string(error->GetStringPointer(), error->GetStringLength()));
+                    g_FError("Pixel Shader: %s\n", std::string(error->GetStringPointer(), error->GetStringLength()));
 
                 compileResult->GetStatus(&hr);
                 ThrowIfFailed(hr);
@@ -760,92 +758,45 @@ void app::LoadAssets() {
         }
     }
 
-    //m_model = Model("Ramen Bowl", m_device.Get(), m_wicFactory.Get());
-    //m_model.m_rotation = { 0.f, 0.f, 0.f };
-    //m_model.m_scale = { 10.f, 10.f, 10.f };
+    const float stride = 11.f;
+    const float gridStartPosX = 5.f * stride / -2.f;
+    const float gridStartPosY = 5.f * stride / -2.f;
+
+    int32_t idx{};
+    std::for_each(m_sphere.begin(), m_sphere.end(), [&](Model& model)
     {
+        const int32_t col = idx % 6;
+        const int32_t row = idx / 6;
+        const float metallic = col * .2f;
+        const float roughness = row * .2f;
+
+        const float posX = -col * stride - gridStartPosX;
+        const float posY =  row * stride + gridStartPosY;
+
+        model = Model(FString::format("Sphere%d", idx).c_str(), m_device.Get(), m_wicFactory.Get());
+
+        PrimitiveTraits<SSphere> desc(SSphere{
+            .radius = 5.f,
+            .sliceCount = 20,
+            .stackCount = 20
+        });
+        model.As<SSphere>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+
+        model.SetPosition({ posX, posY, 0.f });
+        model.SetMetallic(metallic);
+        model.SetRoughness(roughness);
+        idx++;
+    });
+    
+    std::for_each(m_sphere.begin(), m_sphere.end(), [this](Model& model) {
         ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
-
-        //m_model.Load(GetAssetFullPath(L"res/aston_martin_v8_vantage_v600_limited_edition_1998.glb"), m_commandList.Get());
-        {
-            m_modelSphere = Model("Sphere", m_device.Get(), m_wicFactory.Get());
-            PrimitiveTraits<SSphere> desc(SSphere{
-                .radius = 10.f,
-                .sliceCount = 40,
-                .stackCount = 40
-            });
-            m_modelSphere.As<SSphere>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
-        }
-
-        {
-            m_modelCube = Model("Cube", m_device.Get(), m_wicFactory.Get());
-            PrimitiveTraits<SCube> desc(SCube{
-                .width = 5.f,
-                .height = 5.f,
-                .depth = 5.f
-            });
-            m_modelCube.As<SCube>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
-        }
-
-        {
-            m_modelPlane = Model("Plane", m_device.Get(), m_wicFactory.Get());
-            PrimitiveTraits<SPlane> desc(SPlane{
-                .width = 10.f,
-                .depth = 10.f,
-                .widthSubdivisions = 5,
-                .depthSubdivisions = 5
-            });
-            m_modelPlane.As<SPlane>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
-        }
-
-        {
-            m_modelCylinder = Model("Cylinder", m_device.Get(), m_wicFactory.Get());
-            PrimitiveTraits<SCylinder> desc(SCylinder{
-                .topRadius = 5.f,
-                .bottomRadius = 5.f,
-                .height = 10.f,
-                .sliceCount = 40,
-                .stackCount = 40
-            });
-            m_modelCylinder.As<SCylinder>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
-        }
-
-        {
-            m_modelCone = Model("Cone", m_device.Get(), m_wicFactory.Get());
-            PrimitiveTraits<SCone> desc(SCone{
-                .bottomRadius = 5.f,
-                .height = 10.f,
-                .sliceCount = 40,
-                .stackCount = 40
-            });
-            m_modelCone.As<SCone>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
-        }
-
-        m_modelSphere.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+        model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
         WaitForGPU();
+    });
 
-        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
-        m_modelCube.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
-        WaitForGPU();
-
-        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
-        m_modelPlane.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
-        WaitForGPU();
-
-        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
-        m_modelCylinder.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
-        WaitForGPU();
-
-        ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
-        m_modelCone.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
-        WaitForGPU();
-    }
-
-    m_modelSphere.ResetUploadHeaps();
-    m_modelCube.ResetUploadHeaps();
-    m_modelPlane.ResetUploadHeaps();
-    m_modelCylinder.ResetUploadHeaps();
-    m_modelCone.ResetUploadHeaps();
+    std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model) {
+        model.ResetUploadHeaps();
+    });
 
     m_fallbackTexture.uploadBuffer.Reset();
 }
@@ -893,26 +844,46 @@ void app::PopulateCommandList()
     m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
 
     CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(im_modelSrvHeap->GetGPUDescriptorHandleForHeapStart());
-    //m_modelSphere.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
-    //m_modelCube.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
-    //m_modelPlane.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
-    //m_modelCylinder.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
-    m_modelCone.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+
+    UINT bufferOffset{};
+    std::for_each(m_sphere.begin(), m_sphere.end(), [this, &srvGPUHandle, &bufferIndex, &bufferOffset](Model& model) {
+        model.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, bufferOffset, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+        bufferOffset += static_cast<UINT>(model.GetMeshes().size());
+    });
 
     ID3D12DescriptorHeap* ppImGuiHeap[] = { im_imGuiSrvHeap.Get() };
     m_commandList->SetDescriptorHeaps(1, ppImGuiHeap);
 
-    //ImGui::Begin("Model");
-    //{
-    //    const std::vector<Mesh>& meshes = m_model.GetMeshes();
-    //    for (size_t meshIndex = 0; meshIndex < meshes.size(); meshIndex++)
-    //    {
-    //        const Mesh& mesh = meshes[meshIndex];
-    //
-    //        ImGui::LabelText(mesh.name.c_str(), "Vertices: %u -- Indices: %u", mesh.vertexCount, mesh.indexCount);
-    //    }
-    //}
-    //ImGui::End();
+    ImGui::Begin("Model");
+    {
+        std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model)
+            {
+                // Use CollapsingHeader to make each sphere a collapsible child section
+                if (ImGui::CollapsingHeader(model.m_name.c_str()))
+                {
+                    DirectX::XMFLOAT3 pos = model.GetPosition();
+                    if (ImGui::DragFloat3("Position", &pos.x, 0.1f, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max()))
+                    {
+                        model.SetPosition(pos);
+                    }
+
+                    float metallic = model.GetMetallic();
+                    if (ImGui::SliderFloat("Metallic", &metallic, 0.0f, 1.0f))
+                    {
+                        model.SetMetallic(metallic);
+                    }
+                    model.SetMetallic(metallic);
+
+                    float roughness = model.GetRoughness();
+                    if (ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f))
+                    {
+                        model.SetRoughness(roughness);
+                    }
+                    model.SetRoughness(roughness);
+                }
+            });
+    }
+    ImGui::End();
 
     ImGui::Render();
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
@@ -1101,14 +1072,14 @@ void app::ToggleFullScreen()
 void IApp::modelSrvAlloc(D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle, int allocAmount)
 {
     if (allocAmount <= 0) {
-        g_FError("Invalid allocation amount");
+        g_FError("Invalid allocation amount\n");
         *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         return;
     }
 
     if (im_freeModelSRVindices.size() < static_cast<size_t>(allocAmount)) {
-        g_FError("No free SRV descriptors available");
+        g_FError("No free SRV descriptors available\n");
         *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         return;
@@ -1136,7 +1107,7 @@ void IApp::modelSrvAlloc(D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12
     }
 
     if (baseIdx == -1) {
-        g_FError("No contiguous SRV index list found");
+        g_FError("No contiguous SRV index list found\n");
         *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
         return;
