@@ -36,11 +36,6 @@ platform::platform(UINT width, UINT height, std::wstring title, HINSTANCE hInsta
 
     if (AllocConsole())
     {
-        FILE* dummyFile;
-        freopen_s(&dummyFile, "CONOUT$", "w", stdout);
-        freopen_s(&dummyFile, "CONOUT$", "w", stderr);
-        freopen_s(&dummyFile, "CONIN$", "r", stdin);
-
         SetConsoleTitle(L"Debug Console");
 
         HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);

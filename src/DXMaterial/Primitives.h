@@ -343,6 +343,96 @@ public:
         CreateCylinder(0.0f, bottomRadius, height, sliceCount, stackCount, outVertices, outIndices);
     }
 
+    static void CreateDome(
+        float radius,
+        UINT sliceCount,
+        UINT stackCount,
+        std::vector<Vertex>& outVertices,
+        std::vector<UINT>& outIndices)
+    {
+        outVertices.clear();
+        outIndices.clear();
+
+        // Top pole vertex
+        Vertex topVertex;
+        topVertex.position = DirectX::XMFLOAT3(0.0f, radius, 0.0f);
+        topVertex.normal = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
+        topVertex.tangent = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
+        topVertex.bitangent = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f);
+        topVertex.texCoord = DirectX::XMFLOAT2(0.5f, 0.0f); // Adjusted for dome UV range
+        outVertices.push_back(topVertex);
+
+        float phiStep = DirectX::XM_PI / (2.0f * stackCount); // Half the sphere for hemisphere
+        float thetaStep = 2.0f * DirectX::XM_PI / sliceCount;
+
+        // Generate vertices for each stack ring in the upper hemisphere
+        for (UINT i = 1; i <= stackCount; ++i)
+        {
+            float phi = i * phiStep;
+
+            for (UINT j = 0; j <= sliceCount; ++j)
+            {
+                float theta = j * thetaStep;
+
+                Vertex v;
+
+                // Spherical to Cartesian
+                v.position.x = radius * sinf(phi) * cosf(theta);
+                v.position.y = radius * cosf(phi);
+                v.position.z = radius * sinf(phi) * sinf(theta);
+
+                // Normal for sphere is normalized position
+                DirectX::XMVECTOR P = DirectX::XMLoadFloat3(&v.position);
+                DirectX::XMStoreFloat3(&v.normal, DirectX::XMVector3Normalize(P));
+
+                // Tangent
+                DirectX::XMFLOAT3 tangent;
+                tangent.x = -radius * sinf(phi) * sinf(theta);
+                tangent.y = 0.0f;
+                tangent.z = radius * sinf(phi) * cosf(theta);
+                DirectX::XMVECTOR T = DirectX::XMLoadFloat3(&tangent);
+                DirectX::XMStoreFloat3(&v.tangent, DirectX::XMVector3Normalize(T));
+
+                // Bitangent
+                DirectX::XMVECTOR N = DirectX::XMLoadFloat3(&v.normal);
+                T = DirectX::XMLoadFloat3(&v.tangent);
+                DirectX::XMVECTOR B = DirectX::XMVector3Cross(N, T);
+                DirectX::XMStoreFloat3(&v.bitangent, DirectX::XMVector3Normalize(B));
+
+                // UV coordinates (scale y to 0-1 for dome: top 0, horizon 1)
+                v.texCoord.x = theta / (2.0f * DirectX::XM_PI);
+                v.texCoord.y = phi / (DirectX::XM_PI / 2.0f);
+
+                outVertices.push_back(v);
+            }
+        }
+
+        // Top cap indices
+        for (UINT i = 1; i <= sliceCount; ++i)
+        {
+            outIndices.push_back(0);
+            outIndices.push_back(i + 1);
+            outIndices.push_back(i);
+        }
+
+        // Interior stack indices
+        UINT baseIndex = 1;
+        UINT ringVertexCount = sliceCount + 1;
+        for (UINT i = 0; i < stackCount - 1; ++i)
+        {
+            for (UINT j = 0; j < sliceCount; ++j)
+            {
+                outIndices.push_back(baseIndex + i * ringVertexCount + j);
+                outIndices.push_back(baseIndex + i * ringVertexCount + j + 1);
+                outIndices.push_back(baseIndex + (i + 1) * ringVertexCount + j);
+
+                outIndices.push_back(baseIndex + (i + 1) * ringVertexCount + j);
+                outIndices.push_back(baseIndex + i * ringVertexCount + j + 1);
+                outIndices.push_back(baseIndex + (i + 1) * ringVertexCount + j + 1);
+            }
+        }
+    }
+
 private:
     static void BuildCylinderCap(
         float radius,

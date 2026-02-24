@@ -77,6 +77,7 @@ public:
     }
 
     void Draw(_In_ DrawContext ctx);
+    void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
 
     std::filesystem::path m_assetPath;
     bool isOnGPU{};

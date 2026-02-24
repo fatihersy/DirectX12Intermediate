@@ -19,6 +19,8 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_rtvDescriptorSize{},
     m_frameConstantsGpuVirtualAddr{},
     m_meshConstantsGpuVirtualAddr{},
+    m_skyDomeConstantsGpuVirtualAddr{},
+    m_skyDomeConstantsCpuAddr(nullptr),
     m_frameConstantsCpuAddr(nullptr),
     m_meshConstantsCpuAddr(nullptr),
     m_frameIndex{},
@@ -32,7 +34,10 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_camPitch{},
     m_camSpeed(10.f),
     m_lookSensitivity(.1f),
-    m_viewMatrix{}
+    m_viewMatrix{},
+    m_isSkyDomeDirty(true),
+    m_skyDomeConstantsUpload{},
+    m_skyDomeConstantsDefault{}
 {
     s_instance = this;
 
@@ -49,7 +54,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
 
     m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
-    m_projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, .01f, 500.f);
+    m_projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, .01f, 20000.f);
 
     m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.0f);
     //m_lightDir = DirectX::XMVectorSet(-0.577f, 0.577f, -0.577f, 0.0f);
@@ -61,6 +66,17 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_keyboard = std::make_unique<DirectX::Keyboard>();
     m_mouse = std::make_unique<DirectX::Mouse>();
     m_mouse->SetWindow(plat.GetHWND());
+
+    m_skyDomeConstantsUpload.BetaR = { 5.802e-6f, 13.558e-6f, 33.1e-6f };
+    m_skyDomeConstantsUpload.BetaMScatter = 3.996e-6f;
+    m_skyDomeConstantsUpload.BetaMExtinct = 3.996e-6f / 0.9f;
+    m_skyDomeConstantsUpload.MieG = 0.8f;
+    m_skyDomeConstantsUpload.HR = 8000.0f;
+    m_skyDomeConstantsUpload.HM = 1200.0f;
+    m_skyDomeConstantsUpload.Rg = 6360000.0f;
+    m_skyDomeConstantsUpload.Rt = 6420000.0f;
+    m_skyDomeConstantsUpload.SunIntensity = 20.0f;
+    DirectX::XMStoreFloat3(&m_skyDomeConstantsUpload.SunDir, DirectX::XMVector3Normalize(DirectX::XMVectorNegate(m_lightDir)));
 }
 app::~app() {
     s_instance = nullptr;
@@ -84,8 +100,18 @@ void app::OnDestroy()
 
     for (UINT i = 0; i < FrameCount; i++) m_commandAllocators[i].Reset();
     
-    m_pipeline.Reset();
-    m_rootSignature.Reset();
+    if (m_skyDomeConstantsGpuResource) m_skyDomeConstantsGpuResource->Unmap(0, nullptr);
+    m_skyDomeConstantsCpuAddr = nullptr;
+
+    m_skyDome.UnloadGPU();
+    m_skyDomePipelineRoot.Reset();
+    m_skyDomePipelineGraphics.Reset();
+    m_skyDomePipelineTransmittance.Reset();
+    m_skyDomePipelineScattering.Reset();
+    m_skyDomeDescHeap.Reset();
+    m_skyDomeConstantsGpuResource.Reset();
+    m_trasmittanceLUT.Reset();
+    m_scatteringLUT.Reset();
 
     if (m_fallbackTexture.uploadBuffer) m_fallbackTexture.uploadBuffer.Reset();
     if (m_fallbackTexture.defaultBuffer) m_fallbackTexture.defaultBuffer.Reset();
@@ -220,7 +246,11 @@ void app::OnUpdate() {
     ImGui_ImplDX12_NewFrame();
     ImGui::NewFrame();
 
-    //m_model.RotateAdd({ 0.f, 5.f * static_cast<FLOAT>(m_timer.GetElapsedSeconds()), 0.f });
+    DirectX::XMFLOAT3 fcamEye{};
+    DirectX::XMStoreFloat3(&fcamEye, m_camEye);
+    m_skyDome.SetPosition(fcamEye);
+
+    DirectX::XMStoreFloat3(&m_skyDomeConstantsUpload.SunDir, DirectX::XMVector3Normalize(DirectX::XMVectorNegate(m_lightDir)));
 
     app::UpdateKeyBindings();
     app::UpdateMouseBindings();
@@ -382,9 +412,9 @@ void app::LoadAssets() {
         }
     }
 
-    // SRV Descriptor Heaps
+    // Descriptor Heaps
     {
-        // Model SRV Descriptor
+        // Model Descriptor
         {
             D3D12_DESCRIPTOR_HEAP_DESC desc{};
             desc.NumDescriptors = static_cast<UINT>(c_maxObjects * static_cast<UINT>(FTextureType::FTextureType_MAX));
@@ -397,7 +427,7 @@ void app::LoadAssets() {
             for (UINT i{}; i < desc.NumDescriptors; i++) im_freeModelSRVindices.push_back(i);
         }
 
-        // ImGui SRV Descriptor
+        // ImGui Descriptor
         {
             D3D12_DESCRIPTOR_HEAP_DESC desc{};
             desc.NumDescriptors = 100u;
@@ -408,6 +438,17 @@ void app::LoadAssets() {
             im_imGuiSrvHeap->SetName(L"IApp::im_imGuiSrvHeap");
 
             for (UINT i{}; i < desc.NumDescriptors; i++) im_freeImGuiSRVindices.push_back(i);
+        }
+
+        // Sky Dome Descriptor
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC desc{};
+            desc.NumDescriptors = 4u;
+            desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_skyDomeDescHeap)));
+            m_skyDomeDescHeapSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            m_skyDomeDescHeap->SetName(L"IApp::m_skyDomeDescHeap");
         }
     }
 
@@ -519,60 +560,110 @@ void app::LoadAssets() {
         m_device->CreateShaderResourceView(m_fallbackTexture.defaultBuffer.Get(), &srvDesc, m_fallbackTexture.cpuHandle);
 
         ThrowIfFailed(m_commandList->Close());
-        ID3D12CommandList *const ppCmdList[] = {m_commandList.Get()};
+        ID3D12CommandList* const ppCmdList[] = { m_commandList.Get() };
         m_commandQueue->ExecuteCommandLists(1, ppCmdList);
 
         WaitForGPU();
     }
 
-    // Root signature
+    // Root signatures
+    {}
     {
-        D3D12_FEATURE_DATA_ROOT_SIGNATURE rootSignature{};
-        rootSignature.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+        // Model Pipeline Root
+        {
+            D3D12_FEATURE_DATA_ROOT_SIGNATURE rsData{};
+            rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
 
-        if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &rootSignature, sizeof(rootSignature)))) {
-            rootSignature.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
-        }
-
-        CD3DX12_DESCRIPTOR_RANGE1 srvRange[1]{};
-        srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, static_cast<INT>(FTextureType::FTextureType_MAX), 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-
-        CD3DX12_ROOT_PARAMETER1 rp[3]{};
-        rp[0].InitAsConstantBufferView(0, 0);
-        rp[1].InitAsConstantBufferView(1, 0);
-        rp[2].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
-
-        D3D12_STATIC_SAMPLER_DESC sampler{};
-        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        sampler.MipLODBias = 0;
-        sampler.MaxAnisotropy = 0;
-        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-        sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-        sampler.MinLOD = 0.f;
-        sampler.MaxLOD = D3D12_FLOAT32_MAX;
-        sampler.ShaderRegister = 0;
-        sampler.RegisterSpace = 0;
-        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-
-        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init_1_1(_countof(rp), rp, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        ComPtr<ID3D10Blob> signature;
-        ComPtr<ID3D10Blob> error;
-        HRESULT hr = D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, rootSignature.HighestVersion, &signature, &error);
-        if (FAILED(hr)) {
-            if (error) {
-                const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-                g_FError(errorMsg);
+            if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &rsData, sizeof(rsData)))) {
+                rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
             }
-            throw std::runtime_error("Failed to serialize root signature");
+
+            CD3DX12_DESCRIPTOR_RANGE1 srvRange[1]{};
+            srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, static_cast<INT>(FTextureType::FTextureType_MAX), 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+
+            CD3DX12_ROOT_PARAMETER1 rp[3]{};
+            rp[0].InitAsConstantBufferView(0, 0);
+            rp[1].InitAsConstantBufferView(1, 0);
+            rp[2].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
+
+            D3D12_STATIC_SAMPLER_DESC sampler{};
+            sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+            sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+            sampler.MipLODBias = 0;
+            sampler.MaxAnisotropy = 0;
+            sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+            sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+            sampler.MinLOD = 0.f;
+            sampler.MaxLOD = D3D12_FLOAT32_MAX;
+            sampler.ShaderRegister = 0;
+            sampler.RegisterSpace = 0;
+            sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+            CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc;
+            rsDesc.Init_1_1(_countof(rp), rp, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+            ComPtr<ID3D10Blob> signature;
+            ComPtr<ID3D10Blob> error;
+            HRESULT hr = D3DX12SerializeVersionedRootSignature(&rsDesc, rsData.HighestVersion, &signature, &error);
+            if (FAILED(hr)) {
+                if (error) {
+                    const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
+                    g_FError(errorMsg);
+                }
+                throw std::runtime_error("Failed to serialize root signature");
+            }
+            ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_modelPipelineRoot)));
+            m_modelPipelineRoot->SetName(L"app::m_modelPipelineRoot");
         }
-        ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
-        m_rootSignature->SetName(L"app::m_rootSignature");
+
+        // Sky Dome Pipeline Root
+        {
+            D3D12_FEATURE_DATA_ROOT_SIGNATURE rsData{};
+            rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+
+            if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &rsData, sizeof(rsData)))) {
+                rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+            }
+
+            CD3DX12_DESCRIPTOR_RANGE1 uavRange{};
+            uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+
+            CD3DX12_DESCRIPTOR_RANGE1 srvRange{};
+            srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+
+            CD3DX12_ROOT_PARAMETER1 rp[5]{};
+            rp[0].InitAsConstantBufferView(0, 0); // Frame
+            rp[1].InitAsConstantBufferView(1, 0); // Mesh
+            rp[2].InitAsConstantBufferView(2, 0); // Sky dome constants
+            rp[3].InitAsDescriptorTable(1, &uavRange);
+            rp[4].InitAsDescriptorTable(1, &srvRange);
+
+            D3D12_STATIC_SAMPLER_DESC sampler{};
+            sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+            sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+            CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc;
+            rsDesc.Init_1_1(_countof(rp), rp, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+            ComPtr<ID3D10Blob> signature;
+            ComPtr<ID3D10Blob> error;
+            HRESULT hr = D3DX12SerializeVersionedRootSignature(&rsDesc, rsData.HighestVersion, &signature, &error);
+            if (FAILED(hr)) {
+                if (error) {
+                    const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
+                    g_FError(errorMsg);
+                }
+                throw std::runtime_error("Failed to serialize sky dome root signature");
+            }
+            ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_skyDomePipelineRoot)));
+            m_skyDomePipelineRoot->SetName(L"app::m_skyDomePipelineRoot");
+        }
     }
 
-    // Create the constant buffer memory and map the resource
+    // Create the constant buffer memory
     {
         // Per frame 
         {
@@ -615,185 +706,370 @@ void app::LoadAssets() {
 
             m_meshConstantsGpuVirtualAddr = m_meshConstantsGpuResource->GetGPUVirtualAddress();
         }
+
+        // Sky Dome
+        {
+            const D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+            const size_t cbSize = static_cast<size_t>(FrameCount) * sizeof(PaddedSkyDomeConstants);
+
+            const D3D12_RESOURCE_DESC heapDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &heapProp,
+                D3D12_HEAP_FLAG_NONE,
+                &heapDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(m_skyDomeConstantsGpuResource.ReleaseAndGetAddressOf()))
+            );
+            m_skyDomeConstantsGpuResource->SetName(L"app::m_skyDomeConstantsGpuResource");
+            CD3DX12_RANGE readRange(0, 0);
+            ThrowIfFailed(m_skyDomeConstantsGpuResource->Map(0, &readRange, reinterpret_cast<void**>(&m_skyDomeConstantsCpuAddr)));
+
+            m_skyDomeConstantsGpuVirtualAddr = m_skyDomeConstantsGpuResource->GetGPUVirtualAddress();
+        }
     }
 
-    // Create the pipeline state, which includes compiling and loading shaders.
+    // Create the pipeline states, which includes compiling and loading shaders.
     {
-        ComPtr<IDxcBlob> vertexShader;
-        ComPtr<IDxcBlob> pixelShader;
         ComPtr<IDxcOperationResult> opResult;
         HRESULT hr{};
-
         auto validateOpResult = [](IDxcLibrary* library, HRESULT hr, IDxcOperationResult* opResult)
         {
             if (FAILED(hr)) throw std::runtime_error("Cannot validate");
-
+        
             ComPtr<IDxcBlobEncoding> errorBlob;
             if (SUCCEEDED(opResult->GetErrorBuffer(&errorBlob))) {
                 ComPtr<IDxcBlobEncoding> errorBlobUtf8;
                 if (errorBlob.Get() && errorBlob->GetBufferSize() > 0)
                 {
                     ThrowIfFailed(library->GetBlobAsUtf8(errorBlob.Get(), &errorBlobUtf8));
-                    const char * errstr = reinterpret_cast<const char*>(errorBlobUtf8->GetBufferPointer());
+                    const char* errstr = reinterpret_cast<const char*>(errorBlobUtf8->GetBufferPointer());
                     size_t errlen = errorBlobUtf8->GetBufferSize();
                     if (errorBlobUtf8) g_FError("%s\n", std::string(errstr, errlen));
                 }
             }
         };
 
-        // Shader Compile
+        auto compileShader = [this, &validateOpResult, &hr](IDxcBlobEncoding* sourceBlob, ComPtr<IDxcBlob>& shader, std::vector<LPCWSTR> args)
         {
-            ComPtr<IDxcBlobEncoding> vertexSource;
-            ComPtr<IDxcBlobEncoding> pixelSource;
+            DxcBuffer sourceBuffer{};
+            sourceBuffer.Encoding = DXC_CP_ACP;
+            sourceBuffer.Ptr = sourceBlob->GetBufferPointer();
+            sourceBuffer.Size = sourceBlob->GetBufferSize();
+        
+            ComPtr<IDxcResult> compileResult;
+            ThrowIfFailed(m_dxcCompiler->Compile(&sourceBuffer, args.data(), static_cast<UINT>(args.size()), m_dxcIncludeHandler.Get(), IID_PPV_ARGS(&compileResult)));
+        
+            ComPtr<IDxcBlobUtf8> error;
+            ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
+        
+            if (error && error->GetStringLength() > 0)
+                g_FError("Shader Error: %s\n", std::string(error->GetStringPointer(), error->GetStringLength()));
+        
+            compileResult->GetStatus(&hr);
+            ThrowIfFailed(hr);
+        
+            ThrowIfFailed(compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shader), nullptr));
+        };
 
-            ThrowIfFailed(m_dxcUtils->LoadFile((m_assetsPath + L"VS.hlsl").c_str(), nullptr, &vertexSource));
-            ThrowIfFailed(m_dxcUtils->LoadFile((m_assetsPath + L"PS.hlsl").c_str(), nullptr, &pixelSource));
+        // Model Pipeline
+        {
+            ComPtr<IDxcBlob> vertexShader;
+            ComPtr<IDxcBlob> pixelShader;
 
-            // Vertex Shader
+            // Shader Compile
             {
-                DxcBuffer vertexBuffer{};
-                vertexBuffer.Encoding = DXC_CP_ACP;
-                vertexBuffer.Ptr = vertexSource->GetBufferPointer();
-                vertexBuffer.Size = vertexSource->GetBufferSize();
+                ComPtr<IDxcBlobEncoding> vertexSource;
+                ComPtr<IDxcBlobEncoding> pixelSource;
 
-                LPCWSTR args[] = {
+                ThrowIfFailed(m_dxcUtils->LoadFile((m_assetsPath + L"VS.hlsl").c_str(), nullptr, &vertexSource));
+                ThrowIfFailed(m_dxcUtils->LoadFile((m_assetsPath + L"PS.hlsl").c_str(), nullptr, &pixelSource));
+
+                compileShader(vertexSource.Get(), vertexShader, {
                     L"-E", L"mainVS",
                     L"-T", L"vs_6_0",
                     L"-Zi",
                     L"-Od"
-                };
+                });
 
-                ComPtr<IDxcResult> compileResult;
-                ThrowIfFailed(m_dxcCompiler->Compile(&vertexBuffer, args, _countof(args), m_dxcIncludeHandler.Get(), IID_PPV_ARGS(&compileResult)));
-
-                ComPtr<IDxcBlobUtf8> error;
-                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
-
-                if (error && error->GetStringLength() > 0)
-                    g_FError("Vertex Shader: %s\n", std::string(error->GetStringPointer(), error->GetStringLength()));
-
-                compileResult->GetStatus(&hr);
-                ThrowIfFailed(hr);
-
-                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&vertexShader), nullptr));
-            }
-
-            // Pixel Shader
-            {
-                DxcBuffer pixelBuffer{};
-                pixelBuffer.Encoding = DXC_CP_ACP;
-                pixelBuffer.Ptr = pixelSource->GetBufferPointer();
-                pixelBuffer.Size = pixelSource->GetBufferSize();
-
-                LPCWSTR args[] = {
+                compileShader(pixelSource.Get(), pixelShader, {
                     L"-E", L"mainPS",
                     L"-T", L"ps_6_0",
                     L"-Zi",
                     L"-Od"
-                };
-
-                ComPtr<IDxcResult> compileResult;
-                ThrowIfFailed(m_dxcCompiler->Compile(&pixelBuffer, args, _countof(args), m_dxcIncludeHandler.Get(), IID_PPV_ARGS(&compileResult)));
-
-                ComPtr<IDxcBlobUtf8> error;
-                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
-
-                if (error && error->GetStringLength() > 0)
-                    g_FError("Pixel Shader: %s\n", std::string(error->GetStringPointer(), error->GetStringLength()));
-
-                compileResult->GetStatus(&hr);
-                ThrowIfFailed(hr);
-
-                ThrowIfFailed(compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&pixelShader), nullptr));
+                });
+  
+                hr = m_dxcValidator->Validate(vertexShader.Get(), DxcValidatorFlags_Default, &opResult);
+                validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
+                hr = m_dxcValidator->Validate(pixelShader.Get(), DxcValidatorFlags_Default, &opResult);
+                validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
             }
+
+            D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                {"POSITION",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, position),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                {"NORMAL",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, normal), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                {"TANGENT",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, tangent), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                {"BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, bitangent), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                {"TEXCOORD",  0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(Vertex, texCoord), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            };
+
+            // Pipeline
+            {
+                D3D12_RENDER_TARGET_BLEND_DESC blendDesc{};
+                blendDesc.BlendEnable = TRUE;
+                blendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+                blendDesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+                blendDesc.BlendOp = D3D12_BLEND_OP_ADD;
+                blendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
+                blendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
+                blendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+                blendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+                D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+                desc.InputLayout = { inputElements, _countof(inputElements) };
+                desc.pRootSignature = m_modelPipelineRoot.Get();
+                desc.VS = CD3DX12_SHADER_BYTECODE(vertexShader->GetBufferPointer(), vertexShader->GetBufferSize());
+                desc.PS = CD3DX12_SHADER_BYTECODE(pixelShader->GetBufferPointer(), pixelShader->GetBufferSize());
+                desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+                desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+                desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+                desc.BlendState.RenderTarget[0] = blendDesc;
+                desc.DepthStencilState.DepthEnable = TRUE;
+                desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+                desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+                desc.DepthStencilState.StencilEnable = FALSE;
+                desc.NumRenderTargets = 1;
+                desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+                desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+                desc.SampleDesc.Count = 1;
+                desc.SampleMask = UINT_MAX;
+                desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+                ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_modelPipeline)));
+                m_modelPipeline->SetName(L"app::m_modelPipeline");
+            }
+        }
+
+        // Sky Dome Pipeline
+        {}
+        {
+            ComPtr<IDxcBlob> vertexShader;
+            ComPtr<IDxcBlob> pixelShader;
+            ComPtr<IDxcBlob> transmittanceShader;
+            ComPtr<IDxcBlob> scatteringShader;
+
+            ComPtr<IDxcBlobEncoding> shaderSource;
+            ThrowIfFailed(m_dxcUtils->LoadFile((m_assetsPath + L"SkyDome.hlsl").c_str(), nullptr, &shaderSource));
+
+            compileShader(shaderSource.Get(), vertexShader, {
+                L"-E", L"VS_Sky",
+                L"-T", L"vs_6_0",
+                L"-Zi",
+                L"-Od"
+            });
+
+            compileShader(shaderSource.Get(), pixelShader, {
+                L"-E", L"PS_Sky",
+                L"-T", L"ps_6_0",
+                L"-Zi",
+                L"-Od"
+            });
+
+            compileShader(shaderSource.Get(), transmittanceShader, {
+                L"-E", L"CS_Transmittance",
+                L"-T", L"cs_6_0",
+                L"-Zi",
+                L"-Od",
+                L"-D", L"COMPUTE_SHADER=1"
+            });
+
+            compileShader(shaderSource.Get(), scatteringShader, {
+                L"-E", L"CS_Scattering",
+                L"-T", L"cs_6_0",
+                L"-Zi",
+                L"-Od",
+                L"-D", L"COMPUTE_SHADER=1"
+            });
 
             hr = m_dxcValidator->Validate(vertexShader.Get(), DxcValidatorFlags_Default, &opResult);
             validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
             hr = m_dxcValidator->Validate(pixelShader.Get(), DxcValidatorFlags_Default, &opResult);
             validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
-        }
+            hr = m_dxcValidator->Validate(transmittanceShader.Get(), DxcValidatorFlags_Default, &opResult);
+            validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
+            hr = m_dxcValidator->Validate(scatteringShader.Get(), DxcValidatorFlags_Default, &opResult);
+            validateOpResult(m_dxcLibrary.Get(), hr, opResult.Get());
 
-        D3D12_INPUT_ELEMENT_DESC inputElements[] = {
-            {"POSITION",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"NORMAL",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TANGENT",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD",  0, DXGI_FORMAT_R32G32_FLOAT,    0, 48, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        };
+            // Compute Pipeline
+            {
+                D3D12_COMPUTE_PIPELINE_STATE_DESC desc{};
+                desc.pRootSignature = m_skyDomePipelineRoot.Get();
+                desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
-        // Create the pipeline state objects, which includes compiling and loading
-        // shaders.
-        {
-            D3D12_RENDER_TARGET_BLEND_DESC blendDesc{};
-            blendDesc.BlendEnable = TRUE;
-            blendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
-            blendDesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-            blendDesc.BlendOp = D3D12_BLEND_OP_ADD;
-            blendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
-            blendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
-            blendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
-            blendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+                desc.CS = CD3DX12_SHADER_BYTECODE(transmittanceShader->GetBufferPointer(), transmittanceShader->GetBufferSize());
+                ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_skyDomePipelineTransmittance)));
+                m_skyDomePipelineTransmittance->SetName(L"app::m_skyDomePipelineTransmittance");
 
-            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
-            desc.InputLayout = { inputElements, _countof(inputElements) };
-            desc.pRootSignature = m_rootSignature.Get();
-            desc.VS = CD3DX12_SHADER_BYTECODE(vertexShader->GetBufferPointer(), vertexShader->GetBufferSize());
-            desc.PS = CD3DX12_SHADER_BYTECODE(pixelShader->GetBufferPointer(), pixelShader->GetBufferSize());
-            desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-            desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-            desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-            desc.BlendState.RenderTarget[0] = blendDesc;
-            desc.DepthStencilState.DepthEnable = TRUE;
-            desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-            desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-            desc.DepthStencilState.StencilEnable = FALSE;
-            desc.NumRenderTargets = 1;
-            desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-            desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-            desc.SampleDesc.Count = 1;
-            desc.SampleMask = UINT_MAX;
-            desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-            ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_pipeline)));
-            m_pipeline->SetName(L"app::m_pipeline");
+                desc.CS = CD3DX12_SHADER_BYTECODE(scatteringShader->GetBufferPointer(), scatteringShader->GetBufferSize());
+                ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_skyDomePipelineScattering)));
+                m_skyDomePipelineScattering->SetName(L"app::m_skyDomePipelineScattering");
+            }
+
+            // Graphics Pipeline
+            {
+                D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                    {"POSITION",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, position),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                    {"NORMAL",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, normal),    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                    {"TANGENT",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, tangent),   D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                    {"BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(Vertex, bitangent), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                    {"TEXCOORD",  0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(Vertex, texCoord),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                };
+
+                CD3DX12_RASTERIZER_DESC rasterizerDesc(D3D12_DEFAULT);
+                rasterizerDesc.CullMode = D3D12_CULL_MODE_FRONT;
+
+                CD3DX12_DEPTH_STENCIL_DESC depthStencilDesc(D3D12_DEFAULT);
+                depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+                depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+                CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
+
+                D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+                desc.pRootSignature = m_skyDomePipelineRoot.Get();
+                desc.VS = CD3DX12_SHADER_BYTECODE(vertexShader->GetBufferPointer(), vertexShader->GetBufferSize());
+                desc.PS = CD3DX12_SHADER_BYTECODE(pixelShader->GetBufferPointer(), pixelShader->GetBufferSize());
+                desc.RasterizerState = rasterizerDesc;
+                desc.DepthStencilState = depthStencilDesc;
+                desc.BlendState = blendDesc;
+                desc.InputLayout = { inputElements, _countof(inputElements) };
+                desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+                desc.NumRenderTargets = 1;
+                desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+                desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+                desc.SampleDesc.Count = 1;
+                desc.SampleMask = UINT_MAX;
+                ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_skyDomePipelineGraphics)));
+                m_skyDomePipelineGraphics->SetName(L"app::m_skyDomePipelineGraphics");
+            }
         }
     }
 
-    const float stride = 11.f;
-    const float gridStartPosX = 5.f * stride / -2.f;
-    const float gridStartPosY = 5.f * stride / -2.f;
-
-    int32_t idx{};
-    std::for_each(m_sphere.begin(), m_sphere.end(), [&](Model& model)
+    // Sky Dome.
+    {}
     {
-        const int32_t col = idx % 6;
-        const int32_t row = idx / 6;
-        const float metallic = col * .2f;
-        const float roughness = row * .2f;
+        auto desc23132 = CD3DX12_RESOURCE_DESC::Tex3D(
+            DXGI_FORMAT_R16G16B16A16_FLOAT,
+            32, 128, 32 * 8
+        );
 
-        const float posX = -col * stride - gridStartPosX;
-        const float posY =  row * stride + gridStartPosY;
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = 256;
+        desc.Height = 64;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        desc.SampleDesc.Count = 1;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-        model = Model(FString::format("Sphere%d", idx).c_str(), m_device.Get(), m_wicFactory.Get());
+        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+        m_device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&m_trasmittanceLUT)
+        );
+        m_trasmittanceLUT->SetName(L"TransmittenceLUT");
 
-        PrimitiveTraits<SSphere> desc(SSphere{
-            .radius = 5.f,
-            .sliceCount = 20,
-            .stackCount = 20
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+        desc.Width = 32;
+        desc.Height = 128;
+        desc.DepthOrArraySize = 32 * 8;
+        m_device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&m_scatteringLUT)
+        );
+        m_scatteringLUT->SetName(L"ScatteringLUT");
+
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_skyDomeDescHeap->GetCPUDescriptorHandleForHeapStart();
+
+        m_device->CreateUnorderedAccessView(m_trasmittanceLUT.Get(), nullptr, nullptr, CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, 0, m_skyDomeDescHeapSize));
+        m_device->CreateUnorderedAccessView(m_scatteringLUT.Get(), nullptr, nullptr, CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, 1, m_skyDomeDescHeapSize));
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC transmittanceSrv{};
+        transmittanceSrv.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        transmittanceSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        transmittanceSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        transmittanceSrv.Texture2D.MipLevels = 1;
+        m_device->CreateShaderResourceView(m_trasmittanceLUT.Get(), &transmittanceSrv, CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, 2, m_skyDomeDescHeapSize));
+        
+        D3D12_SHADER_RESOURCE_VIEW_DESC scatteringSrv{};
+        scatteringSrv.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        scatteringSrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+        scatteringSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        scatteringSrv.Texture3D.MipLevels = 1;
+        m_device->CreateShaderResourceView(m_scatteringLUT.Get(), &scatteringSrv, CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, 3, m_skyDomeDescHeapSize));
+
+        m_skyDome = Model("Sky Dome", m_device.Get(), m_wicFactory.Get());
+
+        PrimitiveTraits<SDome> traits(SDome{
+            .radius = 10000.f,
+            .sliceCount = 64,
+            .stackCount = 32
         });
-        model.As<SSphere>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+        m_skyDome.As<SDome>(m_commandList.Get(), traits) ? 0 : throw std::runtime_error("Sky Dome creation failed");
+    }
 
-        model.SetPosition({ posX, posY, 0.f });
-        model.SetMetallic(metallic);
-        model.SetRoughness(roughness);
-        idx++;
-    });
-    
+    // Creating the material grid
+    {
+        const float stride = 11.f;
+        const float gridStartPosX = 5.f * stride / -2.f;
+        const float gridStartPosY = 5.f * stride / -2.f;
+
+        int32_t idx{};
+        std::for_each(m_sphere.begin(), m_sphere.end(), [&](Model& model)
+        {
+            const int32_t col = idx % 6;
+            const int32_t row = idx / 6;
+            const float metallic = col * .2f;
+            const float roughness = row * .2f;
+            
+            const float posX = -col * stride - gridStartPosX;
+            const float posY = row * stride + gridStartPosY;
+            
+            model = Model(FString::format("Sphere%d", idx).c_str(), m_device.Get(), m_wicFactory.Get());
+            
+            PrimitiveTraits<SSphere> desc(SSphere{
+                .radius = 5.f,
+                .sliceCount = 20,
+                .stackCount = 20
+            });
+            model.As<SSphere>(m_commandList.Get(), desc) ? 0 : throw std::runtime_error("Sphere create failed");
+            
+            model.SetPosition({ posX, posY, 0.f });
+            model.SetMetallic(metallic);
+            model.SetRoughness(roughness);
+            idx++;
+        });
+    }
+
+    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
+    m_skyDome.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
+    WaitForGPU();
+
     std::for_each(m_sphere.begin(), m_sphere.end(), [this](Model& model) {
         ThrowIfFailed(m_commandList->Reset(m_commandAllocators[0].Get(), nullptr));
         model.UploadGPU(m_commandList.Get(), m_commandQueue.Get());
         WaitForGPU();
     });
 
+    m_skyDome.ResetUploadHeaps();
     std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model) {
         model.ResetUploadHeaps();
     });
@@ -804,33 +1080,19 @@ void app::PopulateCommandList()
 {
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
 
-    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipeline.Get()));
-
-    ID3D12DescriptorHeap* ppModelHeap[] = { im_modelSrvHeap.Get() };
-    m_commandList->SetDescriptorHeaps(1, ppModelHeap);
-
-    m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-    m_commandList->RSSetViewports(1, &m_viewport);
-    m_commandList->RSSetScissorRects(1, &m_scissorRect);
-    m_commandList->SetPipelineState(m_pipeline.Get());
+    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_modelPipeline.Get()));
 
     {
-        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        m_commandList->ResourceBarrier(1, &barrier);
+        CD3DX12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET)
+        };
+
+        m_commandList->ResourceBarrier(_countof(barriers), barriers);
     }
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-
-    const float clearColor[] = { .18f, .2f, .41f, 1.f };
-    m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-    m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
-
-    m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    UINT bufferIndex = (m_frameIndex % FrameCount);
-    auto frameConstantGpuAddrBase = m_frameConstantsGpuVirtualAddr + sizeof(PaddedFrameConstants) * bufferIndex;
+    UINT frameCBoffset = (m_frameIndex % FrameCount);
+    UINT meshCBoffset = frameCBoffset * c_maxObjects;
+    unsigned long long frameConstantGpuAddrBase = m_frameConstantsGpuVirtualAddr + sizeof(PaddedFrameConstants) * frameCBoffset;
 
     frameConstants frameCB{};
     DirectX::XMStoreFloat4x4(&frameCB.viewMatrix, m_viewMatrix);
@@ -838,59 +1100,152 @@ void app::PopulateCommandList()
     DirectX::XMStoreFloat4(&frameCB.lightDir, m_lightDir);
     DirectX::XMStoreFloat4(&frameCB.lightColor, m_lightColor);
     XMStoreFloat3(&frameCB.camPos, m_camEye);
-    
-    memcpy(&m_frameConstantsCpuAddr[bufferIndex].constant, &frameCB, sizeof(frameConstants));
 
-    m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
+    memcpy(&m_frameConstantsCpuAddr[frameCBoffset].constant, &frameCB, sizeof(frameConstants));
 
-    CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(im_modelSrvHeap->GetGPUDescriptorHandleForHeapStart());
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
+    CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    const float clearColor[] = { .18f, .2f, .41f, 1.f };
 
-    UINT bufferOffset{};
-    std::for_each(m_sphere.begin(), m_sphere.end(), [this, &srvGPUHandle, &bufferIndex, &bufferOffset](Model& model) {
-        model.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, bufferIndex, bufferOffset, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
-        bufferOffset += static_cast<UINT>(model.GetMeshes().size());
-    });
+    m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-    ID3D12DescriptorHeap* ppImGuiHeap[] = { im_imGuiSrvHeap.Get() };
-    m_commandList->SetDescriptorHeaps(1, ppImGuiHeap);
+    m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+    m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 
-    ImGui::Begin("Model");
+    // Sky Dome
     {
-        std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model)
-            {
-                // Use CollapsingHeader to make each sphere a collapsible child section
-                if (ImGui::CollapsingHeader(model.m_name.c_str()))
+        unsigned long long skyDomeConstantGpuAddrBase = m_skyDomeConstantsGpuVirtualAddr + sizeof(PaddedSkyDomeConstants) * frameCBoffset;
+
+        ID3D12DescriptorHeap* ppSkyDomeHeap[] = { m_skyDomeDescHeap.Get() };
+        m_commandList->SetDescriptorHeaps(1, ppSkyDomeHeap);
+        m_commandList->SetGraphicsRootSignature(m_skyDomePipelineRoot.Get());
+        m_commandList->RSSetViewports(1, &m_viewport);
+        m_commandList->RSSetScissorRects(1, &m_scissorRect);
+        m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
+        m_commandList->SetGraphicsRootConstantBufferView(2, skyDomeConstantGpuAddrBase);
+
+        CD3DX12_GPU_DESCRIPTOR_HANDLE srvTable(m_skyDomeDescHeap->GetGPUDescriptorHandleForHeapStart(), 2, m_skyDomeDescHeapSize);
+        m_commandList->SetGraphicsRootDescriptorTable(4, srvTable);
+
+        UpdateSkyDome();
+
+        m_commandList->SetPipelineState(m_skyDomePipelineGraphics.Get());
+
+        m_skyDome.Draw([this, &frameCBoffset, &meshCBoffset](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+        {
+            auto meshConstantGpuAddrBase = m_meshConstantsGpuVirtualAddr + sizeof(PaddedMeshConstants) * meshCBoffset;
+            
+            meshConstants constants{};
+            DirectX::XMStoreFloat4x4(&constants.worldMatrix, worldMatrix);
+            DirectX::XMVECTOR det;
+            DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
+            DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixTranspose(worldInverse);
+            DirectX::XMStoreFloat3x4(&constants.normalMatrix, normalMatrix);
+            
+            constants.baseColor = mesh.material.m_baseColor;
+            constants.metallic = mesh.material.m_metallic;
+            constants.roughness = mesh.material.m_roughness;
+            constants.opacity = mesh.material.m_opacity;
+            constants.textureFlags = mesh.material.m_textureFlags;
+            
+            memcpy(&m_meshConstantsCpuAddr[meshCBoffset].constant, &constants, sizeof(meshConstants));
+            
+            m_commandList->SetGraphicsRootConstantBufferView(1, meshConstantGpuAddrBase);
+            
+            m_commandList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+            m_commandList->IASetIndexBuffer(&mesh.indexBufferView);
+            m_commandList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+        });
+        meshCBoffset += static_cast<UINT>(m_skyDome.GetMeshes().size());
+
+        {
+            CD3DX12_RESOURCE_BARRIER barriers[] = {
+                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON)
+            };
+
+            m_commandList->ResourceBarrier(_countof(barriers), barriers);
+        }
+    }
+
+    // Objects
+    {
+        ID3D12DescriptorHeap* ppModelHeap[] = { im_modelSrvHeap.Get() };
+        m_commandList->SetDescriptorHeaps(1, ppModelHeap);
+
+        m_commandList->SetGraphicsRootSignature(m_modelPipelineRoot.Get());
+        m_commandList->RSSetViewports(1, &m_viewport);
+        m_commandList->RSSetScissorRects(1, &m_scissorRect);
+        m_commandList->SetPipelineState(m_modelPipeline.Get());
+
+        m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
+
+        CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle(im_modelSrvHeap->GetGPUDescriptorHandleForHeapStart());
+
+        std::for_each(m_sphere.begin(), m_sphere.end(), [this, &srvGPUHandle, &frameCBoffset, &meshCBoffset](Model& model) {
+            model.Draw({ m_commandList.Get(), srvGPUHandle, im_modelSrvDescriptorSize, frameCBoffset, meshCBoffset, m_meshConstantsGpuVirtualAddr, m_meshConstantsCpuAddr });
+            meshCBoffset += static_cast<UINT>(model.GetMeshes().size());
+        });
+    }
+
+    // UI
+    {
+        ID3D12DescriptorHeap* ppImGuiHeap[] = { im_imGuiSrvHeap.Get() };
+        m_commandList->SetDescriptorHeaps(1, ppImGuiHeap);
+
+        ImGui::Begin("Model");
+        {
+            std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model)
                 {
-                    DirectX::XMFLOAT3 pos = model.GetPosition();
-                    if (ImGui::DragFloat3("Position", &pos.x, 0.1f, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max()))
+                    // Use CollapsingHeader to make each sphere a collapsible child section
+                    if (ImGui::CollapsingHeader(model.m_name.c_str()))
                     {
-                        model.SetPosition(pos);
-                    }
+                        DirectX::XMFLOAT3 pos = model.GetPosition();
+                        if (ImGui::DragFloat3("Position", &pos.x, 0.1f, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max()))
+                        {
+                            model.SetPosition(pos);
+                        }
 
-                    float metallic = model.GetMetallic();
-                    if (ImGui::SliderFloat("Metallic", &metallic, 0.0f, 1.0f))
-                    {
+                        float metallic = model.GetMetallic();
+                        if (ImGui::SliderFloat("Metallic", &metallic, 0.0f, 1.0f))
+                        {
+                            model.SetMetallic(metallic);
+                        }
                         model.SetMetallic(metallic);
-                    }
-                    model.SetMetallic(metallic);
 
-                    float roughness = model.GetRoughness();
-                    if (ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f))
-                    {
+                        float roughness = model.GetRoughness();
+                        if (ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f))
+                        {
+                            model.SetRoughness(roughness);
+                        }
                         model.SetRoughness(roughness);
                     }
-                    model.SetRoughness(roughness);
+                });
+            if (ImGui::CollapsingHeader(m_skyDome.m_name.c_str()))
+            {
+                DirectX::XMFLOAT3 pos = m_skyDome.GetPosition();
+                if (ImGui::DragFloat3("Position", &pos.x, 0.1f, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max()))
+                {
+                    m_skyDome.SetPosition(pos);
                 }
-            });
-    }
-    ImGui::End();
+            }
+        }
+        ImGui::End();
 
-    ImGui::Render();
-    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+        ImGui::Render();
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+    }
 
     {
-        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-        m_commandList->ResourceBarrier(1, &barrier);
+        CD3DX12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT)
+        };
+
+        m_commandList->ResourceBarrier(_countof(barriers), barriers);
     }
 
     ThrowIfFailed(m_commandList->Close());
@@ -979,6 +1334,92 @@ void app::UpdateCamera() {
     m_camUp = DirectX::XMVector3Normalize(m_camUp);
 
     m_viewMatrix = DirectX::XMMatrixLookAtLH(m_camEye, lookAt, m_camUp);
+}
+void app::UpdateSkyDome()
+{
+    if      (not Float3Equals(m_skyDomeConstantsUpload.BetaR, m_skyDomeConstantsDefault.BetaR)  ) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.BetaMScatter != m_skyDomeConstantsDefault.BetaMScatter) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.BetaMExtinct != m_skyDomeConstantsDefault.BetaMExtinct) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.MieG         != m_skyDomeConstantsDefault.MieG        ) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.HR           != m_skyDomeConstantsDefault.HR          ) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.HM           != m_skyDomeConstantsDefault.HM          ) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.Rg           != m_skyDomeConstantsDefault.Rg          ) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.Rt           != m_skyDomeConstantsDefault.Rt          ) m_isSkyDomeDirty = true;
+    else if (m_skyDomeConstantsUpload.SunIntensity != m_skyDomeConstantsDefault.SunIntensity) m_isSkyDomeDirty = true;
+    else if (not Float3Equals(m_skyDomeConstantsUpload.SunDir, m_skyDomeConstantsDefault.SunDir)) m_isSkyDomeDirty = true;
+
+    if (m_isSkyDomeDirty)
+    {
+        m_skyDomeConstantsDefault = m_skyDomeConstantsUpload;
+
+        UINT frameCBoffset = (m_frameIndex % FrameCount);
+        memcpy(&m_skyDomeConstantsCpuAddr[frameCBoffset].constant, &m_skyDomeConstantsDefault, sizeof(skyDomeConstants));
+
+        unsigned long long skyDomeConstantGpuAddrBase = m_skyDomeConstantsGpuVirtualAddr + sizeof(PaddedSkyDomeConstants) * frameCBoffset;
+
+        ID3D12DescriptorHeap* ppHeaps[] = { m_skyDomeDescHeap.Get() };
+        m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+        m_commandList->SetComputeRootSignature(m_skyDomePipelineRoot.Get());
+        m_commandList->SetComputeRootConstantBufferView(2, skyDomeConstantGpuAddrBase);
+
+        CD3DX12_GPU_DESCRIPTOR_HANDLE heapStart(m_skyDomeDescHeap->GetGPUDescriptorHandleForHeapStart());
+
+        // Pass 1: Transmittance
+        {
+            CD3DX12_RESOURCE_BARRIER barriers[] = {
+                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+            };
+            m_commandList->ResourceBarrier(_countof(barriers), barriers);
+
+            m_commandList->SetPipelineState(m_skyDomePipelineTransmittance.Get());
+            m_commandList->SetComputeRootDescriptorTable(3, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapStart, 0, m_skyDomeDescHeapSize));
+            m_commandList->Dispatch(
+                (256 + 7) / 8,
+                (64 + 7) / 8,
+                1
+            );
+        }
+
+        // Pass 2: Scattering
+        {
+            CD3DX12_RESOURCE_BARRIER barriers[] = {
+                CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+            };
+            m_commandList->ResourceBarrier(_countof(barriers), barriers);
+
+            m_commandList->SetPipelineState(m_skyDomePipelineScattering.Get());
+            m_commandList->SetComputeRootDescriptorTable(3, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapStart, 1, m_skyDomeDescHeapSize));
+            m_commandList->SetComputeRootDescriptorTable(4, CD3DX12_GPU_DESCRIPTOR_HANDLE(heapStart, 2, m_skyDomeDescHeapSize));
+            m_commandList->Dispatch(
+                (32 + 3) / 4,
+                (128 + 3) / 4,
+                (256 + 3) / 4
+            );
+        }
+
+        {
+            CD3DX12_RESOURCE_BARRIER barriers[] = {
+                CD3DX12_RESOURCE_BARRIER::UAV(m_scatteringLUT.Get()),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+                CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+            };
+
+            m_commandList->ResourceBarrier(_countof(barriers), barriers);
+        }
+
+        m_isSkyDomeDirty = false;
+    }
+    else
+    {
+        CD3DX12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+            CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        };
+
+        m_commandList->ResourceBarrier(_countof(barriers), barriers);
+    }
 }
 
 void app::OnResize(UINT width, UINT height) {

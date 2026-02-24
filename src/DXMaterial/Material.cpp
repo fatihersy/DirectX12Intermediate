@@ -238,12 +238,8 @@ void Material::UnloadGPU()
 
 void Material::ResetUploadHeaps()
 {
-    if (not m_isOnCPU)
-    {
-        g_FError("No CPU resource\n");
-        return;
-    }
-
+    if (not m_isOnCPU) return;
+    
     for (FTexture& texture : m_textures)
     {
         texture.uploadBuffer.Reset();

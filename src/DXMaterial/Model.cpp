@@ -423,7 +423,7 @@ void Model::Draw(DrawContext ctx)
         const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
         const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation * globalPosition;
 
-        const UINT slot = ctx.bufferIndex * IApp::GetInstance()->c_maxObjects + ctx.bufferOffset + meshIndex;
+        const UINT slot = ctx.meshCBoffset + meshIndex;
         auto meshConstantGpuAddrBase = ctx.meshConstantsGpuVirtualAddr + sizeof(PaddedMeshConstants) * slot;
 
         meshConstants constants{};
@@ -448,6 +448,24 @@ void Model::Draw(DrawContext ctx)
         ctx.cmdList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
         ctx.cmdList->IASetIndexBuffer(&mesh.indexBufferView);
         ctx.cmdList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+
+        meshIndex++;
+    }
+}
+void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach)
+{
+    DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
+    DirectX::XMMATRIX globalPosition = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&m_position));
+
+    UINT meshIndex{};
+    for (Mesh& mesh : meshes)
+    {
+        const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
+        const DirectX::XMMATRIX rotQMatrix = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
+        const DirectX::XMMATRIX posMatrix = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
+        const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation * globalPosition;
+
+        forEach(mesh, meshIndex, worldMatrix);
 
         meshIndex++;
     }
@@ -480,12 +498,8 @@ void Model::SetPosition(DirectX::XMFLOAT3 position)
 }
 
 void Model::ResetUploadHeaps() {
-    if (not isOnCPU)
-    {
-        g_FError("No CPU resource\n");
-        return;
-    }
-
+    if (not isOnCPU) return;
+    
     for (Mesh& mesh : meshes)
     {
         mesh.uploadIndexBuffer.Reset();
@@ -497,12 +511,8 @@ void Model::ResetUploadHeaps() {
 
 void Model::UnloadGPU()
 {
-    if (not isOnGPU)
-    {
-        g_FError("GPU resource is already empty\n");
-        return;
-    }
-
+    if (not isOnGPU) return;
+    
     for(Mesh& mesh : meshes)
     {
         mesh.defaultIndexBuffer.Reset();
@@ -524,6 +534,12 @@ bool Model::_As(const char* name, ID3D12GraphicsCommandList* cmdList, EPrimitive
 
     switch (type)
     {
+        case EPrimitive::PRIMITIVE_TYPE_DOME: {
+            const SDome* desc = reinterpret_cast<const SDome*>(pDesc);
+            Primitives::CreateDome(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
+            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
+            return true;
+        }
         case EPrimitive::PRIMITIVE_TYPE_SPHERE: {
             const SSphere* desc = reinterpret_cast<const SSphere*>(pDesc);
             Primitives::CreateSphere(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);

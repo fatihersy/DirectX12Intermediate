@@ -24,6 +24,8 @@
 #include <cstdio>
 #include <memory>
 #include <algorithm>
+#include <functional>
 
 #include <MeshTypes.h>
 #include <ComTypes.h>
+#include <Tool.h>

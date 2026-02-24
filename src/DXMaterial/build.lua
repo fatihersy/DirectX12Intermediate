@@ -71,6 +71,13 @@ filter "files:PS.hlsl"
     linkbuildoutputs "false"
 filter {}
 
+filter "files:SkyDome.hlsl"
+    buildaction "CustomBuild"
+    buildoutputs { "%{wks.location}/app/%{file.name}" }
+    buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
+    linkbuildoutputs "false"
+filter {}
+
 -- Use the following to build after other projects
 -- dependson {
 --     "ProjectName",

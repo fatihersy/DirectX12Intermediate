@@ -30,6 +30,7 @@ private:
     ComPtr<IDxcIncludeHandler> m_dxcIncludeHandler;
     ComPtr<IWICImagingFactory2> m_wicFactory;
 
+
     CD3DX12_VIEWPORT m_viewport;
     CD3DX12_RECT m_scissorRect;
     ComPtr<IDXGISwapChain4> m_swapchain;
@@ -38,13 +39,23 @@ private:
     ComPtr<ID3D12Resource2> m_depthStencil;
     ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
     ComPtr<ID3D12CommandQueue> m_commandQueue;
-    ComPtr<ID3D12RootSignature> m_rootSignature;
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-    ComPtr<ID3D12PipelineState> m_pipeline;
     ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
-    FTexture m_fallbackTexture;
+    ComPtr<ID3D12RootSignature> m_modelPipelineRoot;
+    ComPtr<ID3D12PipelineState> m_modelPipeline;
+
+    Model m_skyDome;
+    ComPtr<ID3D12RootSignature> m_skyDomePipelineRoot;
+    ComPtr<ID3D12PipelineState> m_skyDomePipelineGraphics;
+    ComPtr<ID3D12PipelineState> m_skyDomePipelineTransmittance;
+    ComPtr<ID3D12PipelineState> m_skyDomePipelineScattering;
+    ComPtr<ID3D12DescriptorHeap> m_skyDomeDescHeap;
+    UINT m_skyDomeDescHeapSize{};
+    bool m_isSkyDomeDirty;
+    skyDomeConstants m_skyDomeConstantsUpload;
+    skyDomeConstants m_skyDomeConstantsDefault;
 
     std::array<Model, 36u> m_sphere;
 
@@ -57,11 +68,14 @@ private:
     D3D12_GPU_VIRTUAL_ADDRESS m_meshConstantsGpuVirtualAddr;
     PaddedMeshConstants* m_meshConstantsCpuAddr;
 
+    ComPtr<ID3D12Resource2> m_skyDomeConstantsGpuResource;
+    D3D12_GPU_VIRTUAL_ADDRESS m_skyDomeConstantsGpuVirtualAddr;
+    PaddedSkyDomeConstants* m_skyDomeConstantsCpuAddr;
+
     UINT m_frameIndex;
     HANDLE m_fenceEvent;
     ComPtr<ID3D12Fence1> m_fence;
     UINT64 m_fenceGeneration;
-
 
     void PopulateCommandList();
     void WaitForGPU();
@@ -71,6 +85,11 @@ private:
     void UpdateKeyBindings();
     void UpdateMouseBindings();
     void UpdateCamera();
+    void UpdateSkyDome();
+
+    ComPtr<ID3D12Resource> m_trasmittanceLUT;
+    ComPtr<ID3D12Resource> m_scatteringLUT;
+    FTexture m_fallbackTexture;
 
     DirectX::XMMATRIX m_viewMatrix;
     DirectX::XMMATRIX m_projectionMatrix;

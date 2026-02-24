@@ -41,4 +41,16 @@ private:
     }
 };
 
+inline bool Float3Equals(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b, const float epsilon = 1e-6f) noexcept
+{
+    using namespace DirectX;
 
+    const XMVECTOR va = XMLoadFloat3(&a);
+    const XMVECTOR vb = XMLoadFloat3(&b);
+
+    const XMVECTOR diff = XMVectorAbs(XMVectorSubtract(va, vb));
+
+    const XMVECTOR epsilonVec = XMVectorReplicate(epsilon);
+
+    return XMVector3Less(diff, epsilonVec);
+};

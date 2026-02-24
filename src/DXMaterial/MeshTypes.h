@@ -39,6 +39,31 @@ union PaddedMeshConstants
 };
 static_assert(sizeof(PaddedMeshConstants) == D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * 1);
 
+struct skyDomeConstants
+{
+    DirectX::XMFLOAT3 BetaR;
+    FLOAT PadR;
+    FLOAT  BetaMScatter;
+    FLOAT  BetaMExtinct;
+    FLOAT  MieG;
+    FLOAT  Pad0;
+    FLOAT  HR;
+    FLOAT  HM;
+    FLOAT  Rg;
+    FLOAT  Rt;
+    FLOAT  SunIntensity;
+    DirectX::XMFLOAT3 SunDir;
+};
+static_assert(sizeof(skyDomeConstants) % 16 == 0);
+static_assert(offsetof(skyDomeConstants, SunDir) % 4 == 0);
+
+union PaddedSkyDomeConstants
+{
+    skyDomeConstants constant;
+    uint8_t bytes[D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT];
+};
+static_assert(sizeof(PaddedSkyDomeConstants) == D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * 1);
+
 struct Vertex
 {
     DirectX::XMFLOAT3 position;
@@ -52,12 +77,17 @@ struct DrawContext {
     ID3D12GraphicsCommandList* cmdList;
     CD3DX12_GPU_DESCRIPTOR_HANDLE srvGPUHandle;
     UINT srvDescriptorSize;
-    UINT bufferIndex;
-    UINT& bufferOffset;
+    UINT frameCBOffset;
+    UINT& meshCBoffset;
     D3D12_GPU_VIRTUAL_ADDRESS meshConstantsGpuVirtualAddr;
     PaddedMeshConstants* meshConstantsCpuAddr;
 };
 
+struct SDome {
+    float radius;
+    UINT sliceCount;
+    UINT stackCount;
+};
 struct SSphere {
     float radius;
     UINT sliceCount;
@@ -90,6 +120,7 @@ struct SCone {
 
 enum class EPrimitive : uint32_t {
     PRIMITIVE_TYPE_NONE,
+    PRIMITIVE_TYPE_DOME,
     PRIMITIVE_TYPE_SPHERE,
     PRIMITIVE_TYPE_CUBE,
     PRIMITIVE_TYPE_PLANE,
@@ -102,6 +133,14 @@ template<typename T>
 struct PrimitiveTraits {
     static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_NONE;
 };
+
+template<>
+struct PrimitiveTraits<SDome> {
+    PrimitiveTraits<SDome>(SDome desc) : desc(desc) {};
+    SDome desc{};
+    static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_DOME;
+};
+static_assert(offsetof(PrimitiveTraits<SDome>, desc) == 0);
 
 template<>
 struct PrimitiveTraits<SSphere> {
