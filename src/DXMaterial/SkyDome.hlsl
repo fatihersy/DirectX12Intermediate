@@ -160,8 +160,8 @@ void TransmittanceFromUV(float2 uv, out float r, out float mu)
     float uR  = uv.y;
     float uMu = uv.x;
 
-    float rho = SafeSqrt(uR) * SafeSqrt(GetRT2() - GetRG2());
-    r         = SafeSqrt(rho * rho + GetRG2());
+    r         = Rg + uR * uR * (Rt - Rg);
+    float rho = SafeSqrt(r * r - GetRG2());
 
     float H     = SafeSqrt(GetRT2() - GetRG2());
     float muHor = -rho / r;
@@ -222,8 +222,8 @@ void ScatteringFromUVWZ(float4 uvwz, out float r, out float mu, out float muS, o
     float uMu  = uvwz.z;
     float uR   = uvwz.w;
 
-    float rho = SafeSqrt(uR) * SafeSqrt(GetRT2() - GetRG2());
-    r         = SafeSqrt(rho * rho + GetRG2());
+    r         = Rg + uR * uR * (Rt - Rg);
+    float rho = SafeSqrt(r * r - GetRG2());
     float H   = SafeSqrt(GetRT2() - GetRG2());
     float muHor = -rho / r;
 
@@ -545,7 +545,7 @@ float4 PS_Sky(VSOutput input) : SV_Target
 {
     float3 viewDir = normalize(input.WorldPos);
     float3 sunDir  = normalize(-LightDir.xyz);
-    float  sunIntensity = LightColor.w;
+    float  sunIntensity = SunIntensity;
 
     // Camera parameters in planet frame
     // Camera is typically near sea level: CamPos.y + Rg gives the radial distance
@@ -567,10 +567,6 @@ float4 PS_Sky(VSOutput input) : SV_Target
     float phaseM = PhaseMie(nu);
     float3 inScatter = (scatterR * phaseR + scatterM * phaseM) * sunIntensity;
 
-    // --- Transmittance to atmosphere top ---
-    float2 transUV = TransmittanceUV(r, mu);
-    float3 trans   = TransmittanceLUT.SampleLevel(LinearClamp, transUV, 0).rgb;
-
     // --- Sun disk ---
     // Only draw sun disk if ray doesn't hit the ground
     float3 sunColor = 0.0f;
@@ -578,7 +574,7 @@ float4 PS_Sky(VSOutput input) : SV_Target
     {
         float disk = SunDisk(viewDir, sunDir);
         // Attenuate sun by transmittance along sun direction
-        float2 sunTransUV = TransmittanceUV(r, mu);
+        float2 sunTransUV = TransmittanceUV(r, muS);
         float3 sunTrans   = TransmittanceLUT.SampleLevel(LinearClamp, sunTransUV, 0).rgb;
         sunColor = disk * sunTrans * sunIntensity * LightColor.rgb;
     }

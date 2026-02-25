@@ -37,7 +37,8 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_viewMatrix{},
     m_isSkyDomeDirty(true),
     m_skyDomeConstantsUpload{},
-    m_skyDomeConstantsDefault{}
+    m_skyDomeConstantsDefault{},
+    m_timeOfDay(12.f)
 {
     s_instance = this;
 
@@ -248,9 +249,22 @@ void app::OnUpdate() {
 
     DirectX::XMFLOAT3 fcamEye{};
     DirectX::XMStoreFloat3(&fcamEye, m_camEye);
-    m_skyDome.SetPosition(fcamEye);
 
-    DirectX::XMStoreFloat3(&m_skyDomeConstantsUpload.SunDir, DirectX::XMVector3Normalize(DirectX::XMVectorNegate(m_lightDir)));
+    {
+        m_skyDome.SetPosition(fcamEye);
+
+        float hourAngle = (m_timeOfDay / 24.f) * DirectX::XM_2PI - DirectX::XM_PIDIV2;
+
+        DirectX::XMFLOAT3 sunDir;
+        sunDir.x = cos(hourAngle);
+        sunDir.y = sin(hourAngle);
+        sunDir.z = 0.f;
+
+        DirectX::XMVECTOR vSunDir = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&sunDir));
+
+        DirectX::XMStoreFloat3(&m_skyDomeConstantsUpload.SunDir, vSunDir);
+        m_lightDir = DirectX::XMVectorNegate(vSunDir);
+    }
 
     app::UpdateKeyBindings();
     app::UpdateMouseBindings();
@@ -710,7 +724,7 @@ void app::LoadAssets() {
         // Sky Dome
         {
             const D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-            const size_t cbSize = static_cast<size_t>(FrameCount) * sizeof(PaddedSkyDomeConstants);
+            const size_t cbSize = sizeof(PaddedSkyDomeConstants);
 
             const D3D12_RESOURCE_DESC heapDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
             ThrowIfFailed(m_device->CreateCommittedResource(
@@ -1024,6 +1038,23 @@ void app::LoadAssets() {
             .stackCount = 32
         });
         m_skyDome.As<SDome>(m_commandList.Get(), traits) ? 0 : throw std::runtime_error("Sky Dome creation failed");
+
+        {
+            CD3DX12_RESOURCE_BARRIER barriers[] = {
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_trasmittanceLUT.Get(),
+                    D3D12_RESOURCE_STATE_COMMON,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+            ),
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_scatteringLUT.Get(),
+                    D3D12_RESOURCE_STATE_COMMON,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                )
+            };
+        
+            m_commandList->ResourceBarrier(_countof(barriers), barriers);
+        }
     }
 
     // Creating the material grid
@@ -1114,8 +1145,6 @@ void app::PopulateCommandList()
 
     // Sky Dome
     {
-        unsigned long long skyDomeConstantGpuAddrBase = m_skyDomeConstantsGpuVirtualAddr + sizeof(PaddedSkyDomeConstants) * frameCBoffset;
-
         ID3D12DescriptorHeap* ppSkyDomeHeap[] = { m_skyDomeDescHeap.Get() };
         m_commandList->SetDescriptorHeaps(1, ppSkyDomeHeap);
         m_commandList->SetGraphicsRootSignature(m_skyDomePipelineRoot.Get());
@@ -1124,7 +1153,7 @@ void app::PopulateCommandList()
         m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         m_commandList->SetGraphicsRootConstantBufferView(0, frameConstantGpuAddrBase);
-        m_commandList->SetGraphicsRootConstantBufferView(2, skyDomeConstantGpuAddrBase);
+        m_commandList->SetGraphicsRootConstantBufferView(2, m_skyDomeConstantsGpuVirtualAddr);
 
         CD3DX12_GPU_DESCRIPTOR_HANDLE srvTable(m_skyDomeDescHeap->GetGPUDescriptorHandleForHeapStart(), 2, m_skyDomeDescHeapSize);
         m_commandList->SetGraphicsRootDescriptorTable(4, srvTable);
@@ -1159,15 +1188,6 @@ void app::PopulateCommandList()
             m_commandList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
         });
         meshCBoffset += static_cast<UINT>(m_skyDome.GetMeshes().size());
-
-        {
-            CD3DX12_RESOURCE_BARRIER barriers[] = {
-                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON),
-                CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON)
-            };
-
-            m_commandList->ResourceBarrier(_countof(barriers), barriers);
-        }
     }
 
     // Objects
@@ -1199,40 +1219,40 @@ void app::PopulateCommandList()
 
         ImGui::Begin("Model");
         {
-            std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model)
-                {
-                    // Use CollapsingHeader to make each sphere a collapsible child section
-                    if (ImGui::CollapsingHeader(model.m_name.c_str()))
-                    {
-                        DirectX::XMFLOAT3 pos = model.GetPosition();
-                        if (ImGui::DragFloat3("Position", &pos.x, 0.1f, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max()))
-                        {
-                            model.SetPosition(pos);
-                        }
-
-                        float metallic = model.GetMetallic();
-                        if (ImGui::SliderFloat("Metallic", &metallic, 0.0f, 1.0f))
-                        {
-                            model.SetMetallic(metallic);
-                        }
-                        model.SetMetallic(metallic);
-
-                        float roughness = model.GetRoughness();
-                        if (ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f))
-                        {
-                            model.SetRoughness(roughness);
-                        }
-                        model.SetRoughness(roughness);
-                    }
-                });
-            if (ImGui::CollapsingHeader(m_skyDome.m_name.c_str()))
+            if (ImGui::CollapsingHeader("Sun Direction"))
             {
-                DirectX::XMFLOAT3 pos = m_skyDome.GetPosition();
-                if (ImGui::DragFloat3("Position", &pos.x, 0.1f, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max()))
+                if (ImGui::DragFloat("Position", &m_timeOfDay, 0.1f, 0.f, 24.f))
                 {
-                    m_skyDome.SetPosition(pos);
+
                 }
             }
+
+            std::for_each(m_sphere.begin(), m_sphere.end(), [](Model& model)
+            {
+                // Use CollapsingHeader to make each sphere a collapsible child section
+                if (ImGui::CollapsingHeader(model.m_name.c_str()))
+                {
+                    DirectX::XMFLOAT3 pos = model.GetPosition();
+                    if (ImGui::DragFloat3("Position", &pos.x, 0.1f, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max()))
+                    {
+                        model.SetPosition(pos);
+                    }
+            
+                    float metallic = model.GetMetallic();
+                    if (ImGui::SliderFloat("Metallic", &metallic, 0.0f, 1.0f))
+                    {
+                        model.SetMetallic(metallic);
+                    }
+                    model.SetMetallic(metallic);
+            
+                    float roughness = model.GetRoughness();
+                    if (ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f))
+                    {
+                        model.SetRoughness(roughness);
+                    }
+                    model.SetRoughness(roughness);
+                }
+            });
         }
         ImGui::End();
 
@@ -1352,22 +1372,23 @@ void app::UpdateSkyDome()
     {
         m_skyDomeConstantsDefault = m_skyDomeConstantsUpload;
 
-        UINT frameCBoffset = (m_frameIndex % FrameCount);
-        memcpy(&m_skyDomeConstantsCpuAddr[frameCBoffset].constant, &m_skyDomeConstantsDefault, sizeof(skyDomeConstants));
-
-        unsigned long long skyDomeConstantGpuAddrBase = m_skyDomeConstantsGpuVirtualAddr + sizeof(PaddedSkyDomeConstants) * frameCBoffset;
+        memcpy(&m_skyDomeConstantsCpuAddr->constant, &m_skyDomeConstantsDefault, sizeof(skyDomeConstants));
 
         ID3D12DescriptorHeap* ppHeaps[] = { m_skyDomeDescHeap.Get() };
         m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
         m_commandList->SetComputeRootSignature(m_skyDomePipelineRoot.Get());
-        m_commandList->SetComputeRootConstantBufferView(2, skyDomeConstantGpuAddrBase);
+        m_commandList->SetComputeRootConstantBufferView(2, m_skyDomeConstantsGpuVirtualAddr);
 
         CD3DX12_GPU_DESCRIPTOR_HANDLE heapStart(m_skyDomeDescHeap->GetGPUDescriptorHandleForHeapStart());
 
         // Pass 1: Transmittance
         {
             CD3DX12_RESOURCE_BARRIER barriers[] = {
-                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_trasmittanceLUT.Get(),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                )
             };
             m_commandList->ResourceBarrier(_countof(barriers), barriers);
 
@@ -1384,8 +1405,16 @@ void app::UpdateSkyDome()
         {
             CD3DX12_RESOURCE_BARRIER barriers[] = {
                 CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
-                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-                CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_trasmittanceLUT.Get(),
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                ),
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_scatteringLUT.Get(),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                )
             };
             m_commandList->ResourceBarrier(_countof(barriers), barriers);
 
@@ -1401,11 +1430,12 @@ void app::UpdateSkyDome()
 
         {
             CD3DX12_RESOURCE_BARRIER barriers[] = {
-                CD3DX12_RESOURCE_BARRIER::UAV(m_scatteringLUT.Get()),
-                CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-                CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_scatteringLUT.Get(),
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                )
             };
-
             m_commandList->ResourceBarrier(_countof(barriers), barriers);
         }
 
@@ -1413,12 +1443,6 @@ void app::UpdateSkyDome()
     }
     else
     {
-        CD3DX12_RESOURCE_BARRIER barriers[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(m_trasmittanceLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
-            CD3DX12_RESOURCE_BARRIER::Transition(m_scatteringLUT.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        };
-
-        m_commandList->ResourceBarrier(_countof(barriers), barriers);
     }
 }
 

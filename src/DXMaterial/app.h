@@ -103,6 +103,7 @@ private:
     FLOAT m_lookSensitivity;
     DirectX::XMVECTOR m_lightDir;
     DirectX::XMVECTOR m_lightColor;
+    FLOAT m_timeOfDay;
 
     float m_aspectRatio;
     std::wstring m_assetsPath;
