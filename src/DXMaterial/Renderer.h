@@ -5,7 +5,9 @@
 #include "Descriptor.h"
 #include "Allocator.h"
 #include "Pipeline.h"
-#include "Scene.h"
+#include "Material.h"
+
+class Scene;
 
 class Renderer
 {

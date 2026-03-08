@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Material.h"
+#include "Renderer.h"
 
 #include "DXSampleHelper.h"
 

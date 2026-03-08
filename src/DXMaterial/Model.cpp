@@ -4,6 +4,7 @@
 #include "DXSampleHelper.h"
 #include "IApp.h"
 #include "Model.h"
+#include "Renderer.h"
 #include "Primitives.h"
 
 #include <assimp/Importer.hpp>
@@ -525,6 +526,8 @@ Model&& Model::_As(Renderer& renderer, const char* name, EPrimitive type, void* 
             return std::move(*this);
         }
     }
+
+    throw std::runtime_error("Unsupported primitive type");
 }
 
 Mesh& Model::CreateMeshFromMemory(const char* name, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices)

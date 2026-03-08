@@ -1,6 +1,8 @@
 #pragma once
 
-#include "Renderer.h"
+#include "RendererTypes.h"
+
+class Renderer;
 
 enum class FTextureType : UINT {
     FTextureType_NONE = 0,

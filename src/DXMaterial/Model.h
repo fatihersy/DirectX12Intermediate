@@ -2,9 +2,10 @@
 
 #include <assimp/scene.h>
 
-#include "Renderer.h"
 #include "Material.h"
 #include "Allocator.h"
+
+class Renderer;
 
 class Mesh
 {
@@ -82,7 +83,7 @@ public:
 
     template<typename T> requires IsPrimitiveMesh<T>
     inline Model&& As(Renderer& renderer, PrimitiveTraits<T>& desc) {
-        return _As("self", cmdList, PrimitiveTraits<T>::type, &desc);
+        return _As(renderer, "self", PrimitiveTraits<T>::type, &desc);
     }
 
     void Draw(Renderer& renderer, CBAllocator& allocator);

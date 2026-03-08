@@ -9,7 +9,7 @@ namespace RenderPass
         ComPtr<ID3D12Resource2> m_default;
         Descriptor::Handle m_descriptor;
 
-        inline ID3D12Resource2* Get() const { m_default.Get(); };
+        inline ID3D12Resource2* Get() const { return m_default.Get(); };
     };
 
     class IRenderPass

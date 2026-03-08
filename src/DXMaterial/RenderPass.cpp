@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "RenderPass.h"
+#include "Scene.h"
 
 #include "DXSampleHelper.h"
 #include "Model.h"
@@ -126,7 +127,7 @@ void GeometryPass::Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsComma
 
     for (Model& model : scene.m_models)
     {
-        model.Draw(cmdList, allocator);
+        model.Draw(renderer, allocator);
     }
 }
 void GeometryPass::OnResize(Renderer& renderer, uint32_t width, uint32_t height)

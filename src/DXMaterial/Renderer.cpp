@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Renderer.h"
+#include "Scene.h"
 
 #include "DXSampleHelper.h"
 #include "RenderPass.h"

@@ -208,7 +208,7 @@ void app::LoadAssets()
 {
     m_scene = Scene(m_device.Get(), m_wicFactory.Get());
 
-    m_scene.AddObject<SDome>(m_renderer.GetCmdList(), "Sky Dome", {}, SDome {
+    m_scene.AddObject<SDome>(m_renderer, "Sky Dome", {}, SDome {
         .radius = 10000.f,
         .sliceCount = 64,
         .stackCount = 32
