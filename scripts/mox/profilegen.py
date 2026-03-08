@@ -44,6 +44,19 @@ VS_MSVC_MAPPINGS = {
     "17.14": "194",
 }
 
+VS_YEAR_MSVC_MAPPINGS = {
+    "2022": "194",
+    "2019": "192",
+    "2017": "191",
+}
+
+MSVC_MAX_CPPSTD = {
+    "194": "23",
+    "193": "23",
+    "192": "20",
+    "191": "17",
+}
+
 class INIProfileGen:
     def __init__(self, filename: str, architecture: str, os: str):
         # Open file
@@ -93,16 +106,23 @@ class INIProfileGen:
     def WritePair(self, key: str, value: str):
         self.file.write(f"{key}={value}\n")
 
-def ProfileGen(path: str, architecture: str, cppversion: str, tempfolder: str):
+def ProfileGen(path: str, architecture: str, cppversion: str, tempfolder: str, vs_year: str = None):
     is_windows = platform.system().lower() == "windows"
     platformInfo = mox.GetPlatformInfo(architecture)
     arch = platformInfo["conan_arch"]
 
     gen = INIProfileGen(path, arch, platform.system())
     if is_windows:
-        vs_version = moxwin.FindLatestVisualStudio()[0]["catalog"]["buildVersion"]
-        vs_version = ".".join(vs_version.split(".")[:2])
-        msvc_version = VS_MSVC_MAPPINGS[vs_version]
+        if vs_year and vs_year in VS_YEAR_MSVC_MAPPINGS:
+            msvc_version = VS_YEAR_MSVC_MAPPINGS[vs_year]
+        else:
+            vs_version = moxwin.FindLatestVisualStudio()[0]["catalog"]["buildVersion"]
+            vs_version = ".".join(vs_version.split(".")[:2])
+            msvc_version = VS_MSVC_MAPPINGS[vs_version]
+        max_std = MSVC_MAX_CPPSTD.get(msvc_version)
+        if max_std and int(cppversion) > int(max_std):
+            print(f"Warning: MSVC {msvc_version} does not support C++{cppversion}, capping Conan cppstd to {max_std}")
+            cppversion = max_std
         gen.AddMSVC(cppversion, msvc_version, "dynamic")
     else:
         gcc_version = subprocess.check_output(("g++", "-dumpversion"), text=True).strip()

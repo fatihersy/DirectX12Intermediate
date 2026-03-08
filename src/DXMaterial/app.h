@@ -1,11 +1,12 @@
 #pragma once
 
 #include "IApp.h"
-#include "Model.h"
-#include "StepTimer.h"
 
 #include "directxtk12/Keyboard.h"
 #include "directxtk12/Mouse.h"
+
+#include "Renderer.h"
+#include "Scene.h"
 
 class app : public IApp
 {
@@ -23,101 +24,26 @@ public:
     void ToggleFullScreen() override;
 
 private:
-    ComPtr<IDxcCompiler3> m_dxcCompiler;
-    ComPtr<IDxcLibrary> m_dxcLibrary;
-    ComPtr<IDxcUtils> m_dxcUtils;
-    ComPtr<IDxcValidator2> m_dxcValidator;
-    ComPtr<IDxcIncludeHandler> m_dxcIncludeHandler;
     ComPtr<IWICImagingFactory2> m_wicFactory;
-
-
-    CD3DX12_VIEWPORT m_viewport;
-    CD3DX12_RECT m_scissorRect;
-    ComPtr<IDXGISwapChain4> m_swapchain;
+    ComPtr<IDXGIFactory7> m_factory;
     ComPtr<ID3D12Device14> m_device;
-    ComPtr<ID3D12Resource2> m_renderTarget[FrameCount];
-    ComPtr<ID3D12Resource2> m_depthStencil;
-    ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
-    ComPtr<ID3D12CommandQueue> m_commandQueue;
-    ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
-    ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-    ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
-    ComPtr<ID3D12RootSignature> m_modelPipelineRoot;
-    ComPtr<ID3D12PipelineState> m_modelPipeline;
-
-    Model m_skyDome;
-    ComPtr<ID3D12RootSignature> m_skyDomePipelineRoot;
-    ComPtr<ID3D12PipelineState> m_skyDomePipelineGraphics;
-    ComPtr<ID3D12PipelineState> m_skyDomePipelineTransmittance;
-    ComPtr<ID3D12PipelineState> m_skyDomePipelineScattering;
-    ComPtr<ID3D12DescriptorHeap> m_skyDomeDescHeap;
-    UINT m_skyDomeDescHeapSize{};
-    bool m_isSkyDomeDirty;
-    skyDomeConstants m_skyDomeConstantsUpload;
-    skyDomeConstants m_skyDomeConstantsDefault;
-
-    std::array<Model, 36u> m_sphere;
-
-    UINT m_rtvDescriptorSize;
-    ComPtr<ID3D12Resource2> m_frameConstantsGpuResource;
-    D3D12_GPU_VIRTUAL_ADDRESS m_frameConstantsGpuVirtualAddr;
-    PaddedFrameConstants* m_frameConstantsCpuAddr;
-
-    ComPtr<ID3D12Resource2> m_meshConstantsGpuResource;
-    D3D12_GPU_VIRTUAL_ADDRESS m_meshConstantsGpuVirtualAddr;
-    PaddedMeshConstants* m_meshConstantsCpuAddr;
-
-    ComPtr<ID3D12Resource2> m_skyDomeConstantsGpuResource;
-    D3D12_GPU_VIRTUAL_ADDRESS m_skyDomeConstantsGpuVirtualAddr;
-    PaddedSkyDomeConstants* m_skyDomeConstantsCpuAddr;
-
-    UINT m_frameIndex;
-    HANDLE m_fenceEvent;
-    ComPtr<ID3D12Fence1> m_fence;
-    UINT64 m_fenceGeneration;
-
-    void PopulateCommandList();
-    void WaitForGPU();
-    void MoveToNextFrame();
     void LoadPipeline();
     void LoadAssets();
     void UpdateKeyBindings();
     void UpdateMouseBindings();
-    void UpdateCamera();
-    void UpdateSkyDome();
 
-    ComPtr<ID3D12Resource> m_trasmittanceLUT;
-    ComPtr<ID3D12Resource> m_scatteringLUT;
-    FTexture m_fallbackTexture;
-
-    DirectX::XMMATRIX m_viewMatrix;
-    DirectX::XMMATRIX m_projectionMatrix;
-
-    DirectX::XMVECTOR m_camEye;
-    DirectX::XMVECTOR m_camFwd;
-    DirectX::XMVECTOR m_camUp;
-    FLOAT m_camYaw;
-    FLOAT m_camPitch;
-    FLOAT m_camSpeed;
-    FLOAT m_lookSensitivity;
-    DirectX::XMVECTOR m_lightDir;
-    DirectX::XMVECTOR m_lightColor;
-    FLOAT m_timeOfDay;
-
-    float m_aspectRatio;
-    std::wstring m_assetsPath;
-    std::wstring m_executablePath;
-
+    Scene m_scene;
+    Renderer m_renderer;
+    std::unique_ptr<ShaderCompiler> m_shaderCompiler;
     std::unique_ptr<DirectX::Keyboard> m_keyboard;
     std::unique_ptr<DirectX::Mouse> m_mouse;
     DirectX::Keyboard::KeyboardStateTracker m_keyboardTracker;
 
-    StepTimer m_timer;
-
-    inline std::wstring GetAssetFullPath(const LPCWSTR assetName) const {
-        return m_assetsPath + assetName;
-    }
+    // ImGui
+    ComPtr<ID3D12DescriptorHeap> m_imGuiSrvHeap;
+    std::vector<INT> m_freeImGuiSRVindices;
+    UINT m_imGuiSrvDescriptorSize{};
 
 };
 

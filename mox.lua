@@ -24,7 +24,7 @@ cmox_configurations_d = {
 
 -- CPPVERSION
 -- Defines the c++ version
-cmox_cpp_version = "C++23"
+cmox_cpp_version = "C++20"
 
 -- SOURCE FOLDER NAME
 cmox_src_folder = "src"
@@ -48,6 +48,12 @@ cmox_src_folder = "src"
 --                  provide the "cmox_function_includeprojects"
 --                  function.
 cmox_project_architecture = "flat"
+
+-- VISUAL STUDIO VERSION (Windows only)
+-- Defines the Visual Studio version year to use for project generation
+-- Set to nil to auto-detect the latest installed version
+-- cmox_vs_version = "2022"
+cmox_vs_version = "2019"
 
 -- DLL DISTRIBUTING
 -- When enabled, dlls will be copied as a postbuild-step to the output directory

@@ -34,7 +34,7 @@ links {
     "winmm.lib",
     "comctl32.lib",
     "delayimp.lib",
-    "assimp-vc143-mt.lib",
+    "assimp-vc142-mt.lib",
     "imgui.lib"
 }
 
@@ -57,21 +57,7 @@ filter "configurations:Release"
     linkoptions { "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF" }
 filter {}
 
-filter "files:VS.hlsl"
-    buildaction "CustomBuild"
-    buildoutputs { "%{wks.location}/app/%{file.name}" }
-    buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
-    linkbuildoutputs "false"
-filter {}
-
-filter "files:PS.hlsl"
-    buildaction "CustomBuild"
-    buildoutputs { "%{wks.location}/app/%{file.name}" }
-    buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
-    linkbuildoutputs "false"
-filter {}
-
-filter "files:SkyDome.hlsl"
+filter "files:**.hlsl"
     buildaction "CustomBuild"
     buildoutputs { "%{wks.location}/app/%{file.name}" }
     buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }

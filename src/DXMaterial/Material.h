@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Renderer.h"
+
 enum class FTextureType : UINT {
     FTextureType_NONE = 0,
     FTextureType_DIFFUSE = 1,
@@ -37,8 +39,7 @@ struct FTexture {
     FTextureType textureType = FTextureType::FTextureType_NONE;
     ComPtr<ID3D12Resource2> defaultBuffer;
     ComPtr<ID3D12Resource2> uploadBuffer;
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle;
+    Descriptor::hOffset srvOffset;
     DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
     UINT width{};
     UINT height{};
@@ -50,7 +51,7 @@ class Material
 public:
     std::string m_name;
     std::vector<FTexture> m_textures;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE m_baseGPUhandle;
+    Descriptor::Handle m_srvHandle;
 
     DirectX::XMFLOAT4 m_baseColor{ 1.f, 0.f, 1.f, 1.f };
     FLOAT m_metallic{};
@@ -65,11 +66,11 @@ public:
     
     HRESULT LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, INT tType);
 
-    void UploadGPU(ID3D12Device* device, ID3D12CommandQueue* cmdQueue, ID3D12GraphicsCommandList* cmdList);
-    void UnloadGPU();
+    void UploadGPU(ID3D12Device* device, Renderer& renderer);
+    void UnloadGPU(Renderer& renderer);
     void ResetUploadHeaps();
 
-    void Bind(ID3D12GraphicsCommandList* cmdList) const;
+    void Bind(ID3D12GraphicsCommandList10* cmdList) const;
 
     inline bool HasTextureType(FTextureType tType) {
         for (FTexture& tex : m_textures) {

@@ -44,13 +44,23 @@ def GetExecutable(exe):
     else:
         return f'{exe}.exe'
 
-def GetPremakeGenerator():
+VS_TOOLSET_MAP = {
+    '2022': 'v143',
+    '2019': 'v142',
+    '2017': 'v141',
+}
+
+def GetPremakeGenerator(vs_version=None):
     if sys.platform.startswith('linux'):
-        return 'gmake'
+        return 'gmake', ''
     else:
+        if vs_version:
+            toolset = VS_TOOLSET_MAP.get(str(vs_version), '')
+            return f'vs{vs_version}', toolset
         vswhere = moxwin.FindLatestVisualStudio()
         vsversion = moxwin.GetVisualStudioYearNumber(vswhere)
-        return f'vs{vsversion}'
+        toolset = VS_TOOLSET_MAP.get(vsversion, '')
+        return f'vs{vsversion}', toolset
 
 def GetPremakeDownloadUrl(version):
     baseUrl = f'https://github.com/premake/premake-core/releases/download/v{version}/premake-{version}'
@@ -170,6 +180,7 @@ if __name__ == '__main__':
     p.add_argument("--skip-vcpkg", action="store_true", help="Skip vcpkg initialization")
     p.add_argument("--arch", default=platform.machine().lower(), help="Alternative (cross compile) architecture")
     p.add_argument("--conan-release-only", action=argparse.BooleanOptionalAction, default=DEFAULT_TO_CONAN_ALWAY_RELEASE, help="Forces conan into only generating release dependencies.")
+    p.add_argument("--vs-version", default=None, help="Visual Studio version year (e.g. 2022, 2019). Defaults to latest installed.")
     args = p.parse_args()
 
     skipConan = args.skip_conan
@@ -181,11 +192,14 @@ if __name__ == '__main__':
     tempFolder = str(os.path.abspath("./dependencies/conan-temp"))
     os.makedirs(tempFolder, exist_ok=True)
 
+    # Resolve Visual Studio version
+    vs_version = args.vs_version or mox.ExtractLuaDef("./mox.lua", "cmox_vs_version")
+
     # Generate conan profiles
     os.makedirs("./profiles/", exist_ok=True)
     cpp_version = re.search(r'(\d+)', mox.ExtractLuaDef("./mox.lua", "cmox_cpp_version")).group(1)
-    mox.ProfileGen("./profiles/build", platform.machine().lower(), cpp_version, tempFolder)
-    mox.ProfileGen(f"./profiles/host_{arch}", arch, cpp_version, tempFolder)
+    mox.ProfileGen("./profiles/build", platform.machine().lower(), cpp_version, tempFolder, vs_version)
+    mox.ProfileGen(f"./profiles/host_{arch}", arch, cpp_version, tempFolder, vs_version)
 
     # Download tool applications
     DownloadPremake()
@@ -224,7 +238,7 @@ if __name__ == '__main__':
     vcpkgInstalledRoot = os.path.abspath('./dependencies/vcpkg_installed')
 
     # Run premake5
-    premakeGenerator = GetPremakeGenerator()
+    premakeGenerator, vsToolset = GetPremakeGenerator(vs_version)
     subprocess.run((
         './dependencies/premake5/premake5',
         f'--mox_conan_arch={ hostArch["conan_arch"] }',
@@ -233,6 +247,7 @@ if __name__ == '__main__':
         f'--mox_version={ version }',
         f'--mox_conan_release_only={ conanReleaseOnly }',
         f'--mox_vcpkg_root={ vcpkgInstalledRoot }',
+        f'--mox_vs_toolset={ vsToolset }',
         '--file=./scripts/premake5.lua',
         premakeGenerator
     ))

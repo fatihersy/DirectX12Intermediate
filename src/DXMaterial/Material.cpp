@@ -118,20 +118,18 @@ HRESULT Material::LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, 
     return S_OK;
 }
 
-void Material::Bind(ID3D12GraphicsCommandList* cmdList) const
+void Material::Bind(ID3D12GraphicsCommandList10* cmdList) const
 {
     if (not m_isOnGPU) return;
 
-    cmdList->SetGraphicsRootDescriptorTable(2, m_baseGPUhandle);
+    cmdList->SetGraphicsRootDescriptorTable(2, m_srvHandle.gpuAddr);
     return;
 }
 
-void Material::UploadGPU(ID3D12Device* device, ID3D12CommandQueue* cmdQueue, ID3D12GraphicsCommandList* cmdList)
+void Material::UploadGPU(ID3D12Device* device, Renderer& renderer)
 {
-    if (not device or not cmdQueue or not cmdList) {
-        g_FError("At least one of the parameters are invalid\n");
-        return;
-    }
+    assert(device);
+    
     if (m_textures.empty()) return;
     
     bool invalidTexture = false;
@@ -148,16 +146,50 @@ void Material::UploadGPU(ID3D12Device* device, ID3D12CommandQueue* cmdQueue, ID3
 
     IApp* appInfo = IApp::GetInstance();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE baseCpuHandle;
-    CD3DX12_GPU_DESCRIPTOR_HANDLE baseGpuHandle;
+    m_srvHandle = renderer.AllocSRVStatic(static_cast<INT>(FTextureType::FTextureType_MAX));
 
-    appInfo->modelSrvAlloc(&baseCpuHandle, &baseGpuHandle, static_cast<INT>(FTextureType::FTextureType_MAX));
+    const Descriptor::Handle fallbackHandle = renderer.GetFallbackSRV();
 
-    for (UINT i = 0; i < static_cast<UINT>(FTextureType::FTextureType_MAX); i++) // Binding the fallback texture
-    {
-        CD3DX12_CPU_DESCRIPTOR_HANDLE slotHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(baseCpuHandle, i, appInfo->GetModelSrvDescriptorSize());
-        device->CopyDescriptorsSimple(1, slotHandle, appInfo->im_fallbackTextureCpuHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    }
+    D3D12_CPU_DESCRIPTOR_HANDLE handles[] = {
+        renderer.OffsetSRV(m_srvHandle, 0u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 1u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 2u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 3u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 4u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 5u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 6u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 7u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 8u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 9u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 10u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 11u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 12u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 13u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 14u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 15u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 16u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 17u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 18u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 19u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 20u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 21u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 22u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 23u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 24u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 25u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 26u).cpuAddr,
+        renderer.OffsetSRV(m_srvHandle, 27u).cpuAddr,
+    };
+
+    device->CopyDescriptors(
+        static_cast<INT>(FTextureType::FTextureType_MAX),
+        handles,
+        nullptr,
+        1u,
+        &fallbackHandle.cpuAddr,
+        nullptr,
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
+    );
 
     std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
 
@@ -170,9 +202,10 @@ void Material::UploadGPU(ID3D12Device* device, ID3D12CommandQueue* cmdQueue, ID3
         ));
     }
 
-    cmdList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     barriers.clear();
 
+    uint32_t texIndex = 0u;
     for (FTexture& tex : m_textures)
     {
         D3D12_TEXTURE_COPY_LOCATION srcLoc{};
@@ -190,48 +223,39 @@ void Material::UploadGPU(ID3D12Device* device, ID3D12CommandQueue* cmdQueue, ID3
         dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         dstLoc.SubresourceIndex = 0;
 
-        cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+        renderer.GetCmdList()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 
         barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
             tex.defaultBuffer.Get(),
             D3D12_RESOURCE_STATE_COPY_DEST,
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
         ));
-        
-        tex.cpuHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(baseCpuHandle, static_cast<INT>(tex.textureType), appInfo->GetModelSrvDescriptorSize());
-        tex.gpuHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(baseGpuHandle, static_cast<INT>(tex.textureType), appInfo->GetModelSrvDescriptorSize());
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = 1;
         srvDesc.Format = tex.format;
-        device->CreateShaderResourceView(tex.defaultBuffer.Get(), &srvDesc, tex.cpuHandle);
+        device->CreateShaderResourceView(tex.defaultBuffer.Get(), &srvDesc, renderer.OffsetSRV(m_srvHandle, texIndex).cpuAddr);
+
+        texIndex++;
     }
 
     if (not barriers.empty())
     {
-        cmdList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     }
 
     m_isOnGPU = true;
-
-    m_baseGPUhandle = baseGpuHandle;
 }
 
-void Material::UnloadGPU()
+void Material::UnloadGPU(Renderer& renderer)
 {
-    if (not m_isOnGPU)
-    {
-        g_FError("GPU resource is already empty\n");
-        return;
-    }
+    if (not m_isOnGPU) return;
+    
+    renderer.FreeSRVStatic(m_srvHandle);
 
-    for (FTexture& texture : m_textures)
-    {
-        IApp::GetInstance()->modelSrvFree(texture.cpuHandle, texture.gpuHandle);
-        texture.defaultBuffer.Reset();
-    }
+    for (FTexture& texture : m_textures) texture.defaultBuffer.Reset();
 
     m_isOnGPU = false;
 }

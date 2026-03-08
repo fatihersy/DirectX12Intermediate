@@ -66,6 +66,13 @@ newoption {
     category = "MoxPP",
     default = ""
 }
+newoption {
+    trigger = "mox_vs_toolset",
+    value = "TOOLSET",
+    description = "Visual Studio platform toolset (e.g. v143, v142, v141)",
+    category = "MoxPP",
+    default = ""
+}
 
 -- Extract if conan is release only
 hmox_conan_release_only = _OPTIONS["mox_conan_release_only"] == "True"
@@ -134,6 +141,11 @@ workspace(cmox_product_name)
     configurations(cmox_configurations_n)
     architecture(_OPTIONS["mox_premake_arch"])
     location "../"
+
+    -- Set platform toolset if specified
+    if _OPTIONS["mox_vs_toolset"] and _OPTIONS["mox_vs_toolset"] ~= "" then
+        toolset("msc-" .. _OPTIONS["mox_vs_toolset"])
+    end
 
     -- Custom workspace configuration
     if cmox_function_setupworkspace~=nil then

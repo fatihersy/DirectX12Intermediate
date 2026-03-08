@@ -1,7 +1,10 @@
 #pragma once
 
 #include <assimp/scene.h>
+
+#include "Renderer.h"
 #include "Material.h"
+#include "Allocator.h"
 
 class Mesh
 {
@@ -34,18 +37,24 @@ public:
 
     void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Move(DirectX::XMFLOAT3 vector, double delta);
-    void SetPosition(DirectX::XMFLOAT3 position);
-    inline void SetMetallic(float value) {
-        if (not meshes.empty())
-            meshes[0].material.m_metallic = value;
+    inline Model&& SetPosition(DirectX::XMFLOAT3 position)
+    {
+        m_position.x = position.x;
+        m_position.y = position.y;
+        m_position.z = position.z;
+        return std::move(*this);
     }
-    inline void SetRoughness(float value) {
-        if (not meshes.empty())
-            meshes[0].material.m_roughness = value;
+    inline Model&& SetMetallic(float value) {
+        meshes[0].material.m_metallic = value;
+        return std::move(*this);
     }
-    inline void SetOpacity(float value) {
-        if (not meshes.empty())
-            meshes[0].material.m_opacity = value;
+    inline Model&& SetRoughness(float value) {
+        meshes[0].material.m_roughness = value;
+        return std::move(*this);
+    }
+    inline Model&& SetOpacity(float value) {
+        meshes[0].material.m_opacity = value;
+        return std::move(*this);
     }
 
     inline DirectX::XMFLOAT3 GetPosition() const { return m_position; }
@@ -66,17 +75,17 @@ public:
         else return -1;
     }
 
-    bool Load(_In_ const std::filesystem::path& path, _In_ ID3D12GraphicsCommandList* cmdList);
-    void UploadGPU(_In_ ID3D12GraphicsCommandList* cmdList, _In_ ID3D12CommandQueue* cmdQueue);
-    void UnloadGPU();
+    bool Load(_In_ Renderer& renderer, _In_ const std::filesystem::path& path);
+    void UploadGPU(_In_ Renderer& renderer);
+    void UnloadGPU(Renderer& renderer);
     void ResetUploadHeaps();
 
     template<typename T> requires IsPrimitiveMesh<T>
-    inline bool As(ID3D12GraphicsCommandList* cmdList, PrimitiveTraits<T>& desc) {
+    inline Model&& As(Renderer& renderer, PrimitiveTraits<T>& desc) {
         return _As("self", cmdList, PrimitiveTraits<T>::type, &desc);
     }
 
-    void Draw(_In_ DrawContext ctx);
+    void Draw(Renderer& renderer, CBAllocator& allocator);
     void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
 
     std::filesystem::path m_assetPath;
@@ -86,16 +95,17 @@ public:
 private:
     IWICImagingFactory2* m_wicFactory;
     ID3D12Device* m_device;
+
     std::vector<Mesh> meshes;
     DirectX::XMFLOAT3 m_position{};
     DirectX::XMFLOAT3 m_rotation{};
     DirectX::XMFLOAT3 m_scale{ 1.f, 1.f, 1.f };
 
-    void ProcessNode(_In_ aiNode* node, _In_  const aiScene* scene, _In_ ID3D12GraphicsCommandList* cmdList);
+    void ProcessNode(_In_ Renderer& renderer, _In_ aiNode* node, _In_  const aiScene* scene);
     void ProcessMesh(_In_ aiMesh* pAiMesh, _In_ const aiScene* scene, _In_ aiNode* node, _Out_ Mesh& outMesh);
 
-    Mesh& CreateMeshFromMemory(const char* name, ID3D12GraphicsCommandList* cmdList, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices);
-    bool _As(const char* name, ID3D12GraphicsCommandList* cmdList, EPrimitive type, void* pDesc);
+    Mesh& CreateMeshFromMemory(const char* name, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices);
+    Model&& _As(Renderer& renderer, const char* name, EPrimitive type, void* pDesc);
 
     inline aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node) {
         aiMatrix4x4 transform = node->mTransformation;

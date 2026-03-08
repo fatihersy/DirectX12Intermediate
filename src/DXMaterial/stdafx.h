@@ -17,7 +17,7 @@
 #include <vector>
 #include <wrl.h>
 #include <shellapi.h>
-#include <print>
+#include <map>
 #include <format>
 #include <array>
 #include <filesystem>
@@ -25,7 +25,15 @@
 #include <memory>
 #include <algorithm>
 #include <functional>
+#include <variant>
+#include <type_traits>
+#include <stdexcept>
 
-#include <MeshTypes.h>
-#include <ComTypes.h>
-#include <Tool.h>
+template<typename T>
+using ComPtr = Microsoft::WRL::ComPtr<T>;
+
+#include "StepTimer.h"
+#include "AllocatorTypes.h"
+#include "Tool.h"
+#include "MeshTypes.h"
+#include "RendererTypes.h"

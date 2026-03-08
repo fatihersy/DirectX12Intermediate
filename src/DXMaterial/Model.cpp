@@ -22,13 +22,8 @@ Model::Model(_In_ const char* name, ID3D12Device* device, _In_ IWICImagingFactor
 }
 
 _Use_decl_annotations_
-bool Model::Load(const std::filesystem::path& path, ID3D12GraphicsCommandList* cmdList)
+bool Model::Load(Renderer& renderer, const std::filesystem::path& path)
 {
-    if (not cmdList)
-    {
-        throw std::runtime_error("At least one of the pointers are invalid");
-    }
-
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(path.generic_string(),
         aiProcess_Triangulate |
@@ -44,29 +39,21 @@ bool Model::Load(const std::filesystem::path& path, ID3D12GraphicsCommandList* c
     }
 
     m_assetPath = path;
-    ProcessNode(scene->mRootNode, scene, cmdList);
+    ProcessNode(renderer, scene->mRootNode, scene);
 
     isOnCPU = true;
     return true;
 }
 
 _Use_decl_annotations_
-void Model::ProcessNode(aiNode* node, const aiScene* scene, ID3D12GraphicsCommandList* cmdList) {
-
-    if (not node or not scene or not node or not cmdList)
-    {
-        throw std::runtime_error("At least one of the pointers are invalid");
-    }
+void Model::ProcessNode(Renderer& renderer, aiNode* node, const aiScene* scene)
+{
+    assert(node and scene and node);
 
     for (UINT i = 0; i < node->mNumMeshes; ++i) {
         aiMesh* pAiMesh = scene->mMeshes[node->mMeshes[i]];
 
-        if (IApp::GetInstance()->m_remainingMeshSlots <= 0)
-        {
-            throw std::out_of_range("No available mesh slot");
-        }
         Mesh& mesh = meshes.emplace_back(Mesh(m_wicFactory));
-        IApp::GetInstance()->m_remainingMeshSlots--;
         
         mesh.name = FString::format("%s::mesh_%s", m_name, pAiMesh->mName.C_Str());
         mesh.material.m_name = FString::format("%s::material", mesh.name);
@@ -78,17 +65,14 @@ void Model::ProcessNode(aiNode* node, const aiScene* scene, ID3D12GraphicsComman
         throw std::out_of_range("Meshes got out of range");
     }
     for (UINT i = 0; i < node->mNumChildren; ++i) {
-        ProcessNode(node->mChildren[i], scene, cmdList);
+        ProcessNode(renderer, node->mChildren[i], scene);
     }
 }
 
 _Use_decl_annotations_
 void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node, Mesh& outMesh)
 {
-    if (not m_device or not pAiMesh or not scene)
-    {
-        throw std::runtime_error("At least one of the pointers are invalid");
-    }
+    assert(m_device and pAiMesh and scene);
 
     std::wstring meshName = std::wstring(outMesh.name.begin(), outMesh.name.end());
 
@@ -338,20 +322,12 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
 }
 
 _Use_decl_annotations_
-void Model::UploadGPU(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cmdQueue)
+void Model::UploadGPU(Renderer& renderer)
 {
-    if (not cmdList or not cmdQueue)
-    {
-        throw std::runtime_error("At least one of the pointers are invalid");
-    }
-    if (not isOnCPU)
-    {
-        throw std::runtime_error("Upload heaps are empty");
-    }
-    if (isOnGPU)
-    {
-        return;
-    }
+    assert(isOnCPU);
+
+    if (isOnGPU) return;
+    
     std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
     barriers.reserve(meshes.size() * 3u);
 
@@ -369,14 +345,14 @@ void Model::UploadGPU(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cm
         ));
     }
 
-    cmdList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
 
     barriers.clear();
 
     for (Mesh& mesh : meshes)
     {
-        cmdList->CopyResource(mesh.defaultVertexBuffer.Get(), mesh.uploadVertexBuffer.Get());
-        cmdList->CopyResource(mesh.defaultIndexBuffer.Get(), mesh.uploadIndexBuffer.Get());
+        renderer.GetCmdList()->CopyResource(mesh.defaultVertexBuffer.Get(), mesh.uploadVertexBuffer.Get());
+        renderer.GetCmdList()->CopyResource(mesh.defaultIndexBuffer.Get(), mesh.uploadIndexBuffer.Get());
 
         barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
             mesh.defaultVertexBuffer.Get(),
@@ -390,66 +366,50 @@ void Model::UploadGPU(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* cm
         ));
     }
 
-    cmdList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
 
     for (Mesh& mesh : meshes)
     {
-        mesh.material.UploadGPU(m_device, cmdQueue, cmdList);
+        mesh.material.UploadGPU(m_device, renderer);
     }
-
-    ThrowIfFailed(cmdList->Close());
-    ID3D12CommandList* ppCommandLists[] = { cmdList };
-    cmdQueue->ExecuteCommandLists(1, ppCommandLists);
 
     isOnGPU = true;
 }
 
-_Use_decl_annotations_
-void Model::Draw(DrawContext ctx)
+void Model::Draw(Renderer& renderer, CBAllocator& allocator)
 {
-    if (not ctx.cmdList)
-    {
-        throw std::runtime_error("At least one of the pointers are invalid");
-    }
-
     DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
     DirectX::XMMATRIX globalPosition = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&m_position));
 
-    UINT meshIndex{};
     for (Mesh& mesh : meshes)
     {
+        Allocator::AllocCtx allocCtx = allocator.Allocate(sizeof(meshConstants));
+        meshConstants& meshCB = allocCtx.As<meshConstants>();
+
         const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
         const DirectX::XMMATRIX rotQMatrix  = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
         const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
         const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation * globalPosition;
 
-        const UINT slot = ctx.meshCBoffset + meshIndex;
-        auto meshConstantGpuAddrBase = ctx.meshConstantsGpuVirtualAddr + sizeof(PaddedMeshConstants) * slot;
-
-        meshConstants constants{};
-        DirectX::XMStoreFloat4x4(&constants.worldMatrix, worldMatrix);
+        DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
         DirectX::XMVECTOR det;
         DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
         DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixTranspose(worldInverse);
-        DirectX::XMStoreFloat3x4(&constants.normalMatrix, normalMatrix);
-        
-        constants.baseColor = mesh.material.m_baseColor;
-        constants.metallic = mesh.material.m_metallic;
-        constants.roughness = mesh.material.m_roughness;
-        constants.opacity = mesh.material.m_opacity;
-        constants.textureFlags = mesh.material.m_textureFlags;
+        DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, normalMatrix);
 
-        memcpy(&ctx.meshConstantsCpuAddr[slot].constant, &constants, sizeof(meshConstants));
+        meshCB.baseColor = mesh.material.m_baseColor;
+        meshCB.metallic = mesh.material.m_metallic;
+        meshCB.roughness = mesh.material.m_roughness;
+        meshCB.opacity = mesh.material.m_opacity;
+        meshCB.textureFlags = mesh.material.m_textureFlags;
 
-        ctx.cmdList->SetGraphicsRootConstantBufferView(1, meshConstantGpuAddrBase);
+        renderer.GetCmdList()->SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
 
-        mesh.material.Bind(ctx.cmdList);
+        mesh.material.Bind(renderer.GetCmdList());
 
-        ctx.cmdList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-        ctx.cmdList->IASetIndexBuffer(&mesh.indexBufferView);
-        ctx.cmdList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
-
-        meshIndex++;
+        renderer.GetCmdList()->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+        renderer.GetCmdList()->IASetIndexBuffer(&mesh.indexBufferView);
+        renderer.GetCmdList()->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
     }
 }
 void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach)
@@ -490,12 +450,6 @@ void Model::Move(DirectX::XMFLOAT3 vector, double delta)
     m_position.y += static_cast<float>(static_cast<double>(vector.y) * delta);
     m_position.z += static_cast<float>(static_cast<double>(vector.z) * delta);
 }
-void Model::SetPosition(DirectX::XMFLOAT3 position)
-{
-    m_position.x = position.x;
-    m_position.y = position.y;
-    m_position.z = position.z;
-}
 
 void Model::ResetUploadHeaps() {
     if (not isOnCPU) return;
@@ -509,7 +463,7 @@ void Model::ResetUploadHeaps() {
     isOnCPU = false;
 }
 
-void Model::UnloadGPU()
+void Model::UnloadGPU(Renderer& renderer)
 {
     if (not isOnGPU) return;
     
@@ -517,17 +471,17 @@ void Model::UnloadGPU()
     {
         mesh.defaultIndexBuffer.Reset();
         mesh.defaultVertexBuffer.Reset();
-        mesh.material.UnloadGPU();
+        mesh.material.UnloadGPU(renderer);
     }
 
     isOnGPU = false;
 }
 
-bool Model::_As(const char* name, ID3D12GraphicsCommandList* cmdList, EPrimitive type, void* pDesc) {
-    if (not name or not pDesc or type <= EPrimitive::PRIMITIVE_TYPE_NONE or type >= EPrimitive::PRIMITIVE_TYPE_MAX)
-    return false;
+Model&& Model::_As(Renderer& renderer, const char* name, EPrimitive type, void* pDesc)
+{
+    assert(name and pDesc and type > EPrimitive::PRIMITIVE_TYPE_NONE and type < EPrimitive::PRIMITIVE_TYPE_MAX);
 
-    this->UnloadGPU();
+    this->UnloadGPU(renderer);
     this->ResetUploadHeaps();
     std::vector<Vertex> vertices;
     std::vector<UINT> indices;
@@ -537,50 +491,47 @@ bool Model::_As(const char* name, ID3D12GraphicsCommandList* cmdList, EPrimitive
         case EPrimitive::PRIMITIVE_TYPE_DOME: {
             const SDome* desc = reinterpret_cast<const SDome*>(pDesc);
             Primitives::CreateDome(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
-            return true;
+            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+            return std::move(*this);
         }
         case EPrimitive::PRIMITIVE_TYPE_SPHERE: {
             const SSphere* desc = reinterpret_cast<const SSphere*>(pDesc);
             Primitives::CreateSphere(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
-            return true;
+            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+            return std::move(*this);
         }
         case EPrimitive::PRIMITIVE_TYPE_CUBE: {
             const SCube* desc = reinterpret_cast<const SCube*>(pDesc);
             Primitives::CreateCube(desc->width, desc->height, desc->depth, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
-            return true;
+            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+            return std::move(*this);
         }
         case EPrimitive::PRIMITIVE_TYPE_PLANE: {
             const SPlane* desc = reinterpret_cast<const SPlane*>(pDesc);
             Primitives::CreatePlane(desc->width, desc->depth, desc->widthSubdivisions, desc->depthSubdivisions, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
-            return true;
+            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+            return std::move(*this);
         }
         case EPrimitive::PRIMITIVE_TYPE_CYLINDER: {
             const SCylinder* desc = reinterpret_cast<const SCylinder*>(pDesc);
             Primitives::CreateCylinder(desc->topRadius, desc->bottomRadius, desc->height, desc->sliceCount, desc->stackCount, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
-            return true;
+            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+            return std::move(*this);
         }
         case EPrimitive::PRIMITIVE_TYPE_CONE: {
             const SCone* desc = reinterpret_cast<const SCone*>(pDesc);
             Primitives::CreateCone(desc->bottomRadius, desc->height, desc->sliceCount, desc->stackCount, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, cmdList, vertices, indices);
-            return true;
+            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+            return std::move(*this);
         }
-        default: return false;
     }
 }
 
-Mesh& Model::CreateMeshFromMemory(const char* name, ID3D12GraphicsCommandList* cmdList, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices)
+Mesh& Model::CreateMeshFromMemory(const char* name, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices)
 {
     IApp* appInfo = IApp::GetInstance();
 
-    if (not appInfo or not name or not cmdList or appInfo->m_remainingMeshSlots <= 0 or inVertices.empty() or inIndices.empty()) {
-        throw std::invalid_argument("Invalid parameter");
-    }
+    assert(name and not inVertices.empty() or not inIndices.empty());
 
     Mesh& mesh = meshes.emplace_back(Mesh(m_wicFactory));
     mesh.name = FString::format("%s::%s", m_name, name) ;
@@ -658,6 +609,5 @@ Mesh& Model::CreateMeshFromMemory(const char* name, ID3D12GraphicsCommandList* c
     mesh.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
     isOnCPU = true;
-    appInfo->m_remainingMeshSlots--;
     return mesh;
 }
