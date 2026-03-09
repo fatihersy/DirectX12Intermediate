@@ -5,13 +5,14 @@
 #include "DXSampleHelper.h"
 #include "RenderPass.h"
 
-Renderer::Renderer(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, UINT width, UINT height)
+void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, UINT width, UINT height)
 {
     m_factory = factory;
+    m_device = device;
 
     constexpr size_t OneMb = 1u * 1024 * 1024;
-    m_allocator = CBAllocator(device, OneMb);
-
+    m_allocator = ConstBuffAlloc(m_device, OneMb);
+    
     // Describe and create the command queue.
     {
         D3D12_COMMAND_QUEUE_DESC desc{};
@@ -23,9 +24,9 @@ Renderer::Renderer(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, UI
 
     CreateSwapChain(factory, hwnd, width, height);
 
-    m_rtvHeap = Descriptor::StaticHeap(device, L"Renderer::m_rtvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_RTV, IApp::c_frameCount, false);
-    m_dsvHeap = Descriptor::StaticHeap(device, L"Renderer::m_dsvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1u, false);
-    m_srvHeap = Descriptor::RingHeap(device, L"Renderer::m_srvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+    m_rtvHeap = Descriptor::StaticHeap(m_device, L"Renderer::m_rtvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_RTV, IApp::c_frameCount, false);
+    m_dsvHeap = Descriptor::StaticHeap(m_device, L"Renderer::m_dsvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1u, false);
+    m_srvHeap = Descriptor::RingHeap(m_device, L"Renderer::m_srvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         IApp::c_maxObjects * static_cast<UINT>(FTextureType::FTextureType_MAX) + 1024,
         IApp::c_frameCount
     );
@@ -51,8 +52,7 @@ Renderer::Renderer(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, UI
         .cpuHandle = m_dsvHeap.GetCpuStart(),
         .outDSV = m_depthStencil
     });
-
-
+    
     // Command List
     {
         UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
@@ -97,6 +97,20 @@ void Renderer::PopulateCommandList(Scene& scene)
 
 void Renderer::Render()
 {
+    MoveToNextFrame();
+
+    UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
+
+    ThrowIfFailed(m_commandAllocators[frameIndex].Reset());
+    ThrowIfFailed(m_commandList.Reset());
+
+    m_srvHeap.BeginFrame(frameIndex);
+    m_allocator.BeginFrame(frameIndex);
+
+    ID3D12DescriptorHeap* heaps[] = {
+        const_cast<ID3D12DescriptorHeap*>(m_srvHeap.GetHeap())
+    };
+    m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
 
 }
 void Renderer::Resize(UINT width, UINT height)
@@ -189,7 +203,7 @@ void Renderer::CreateSwapChain(IDXGIFactory7* factory, HWND hwnd, UINT width, UI
     ThrowIfFailed(m_factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
     ThrowIfFailed(swapChain.As(&m_swapchain));
 }
-void Renderer::CreateDepthStencil(LPCWSTR name, RendererTypes::DepthStencilCreateDescription dsvDesc)
+void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription dsvDesc)
 {
     D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
     desc.Format = dsvDesc.format;
@@ -306,4 +320,30 @@ void Renderer::CreateDefaultTexture()
     m_commandQueue->ExecuteCommandLists(1, ppCmdList);
 
     WaitForGPU();
+}
+
+void Renderer::Execute(FnRendererExecutionBody Exec)
+{
+    MoveToNextFrame();
+
+    UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
+
+    ThrowIfFailed(m_commandAllocators[frameIndex].Reset());
+    ThrowIfFailed(m_commandList.Reset());
+
+    NSRenderer::Ctx ctx(
+        NSRenderer::GraphicsCommandList(m_commandList.Get()),
+        m_fallbackTextureSRVHandle,
+        [this](uint32_t amount) { return this->AllocSRVRing(amount); },
+        [this](uint32_t amount) { return this->AllocSRVStatic(amount); },
+        [this](Descriptor::Handle handle) { this->FreeSRVStatic(handle); },
+        [this](const Descriptor::Handle& handle, uint32_t offset) { return this->OffsetSRV(handle, offset); },
+        [this](size_t size) { return this->m_allocator.Allocate(size); }
+    );
+
+    Exec(ctx);
+
+    ThrowIfFailed(m_commandList->Close());
+    ID3D12CommandList *const lists[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
 }

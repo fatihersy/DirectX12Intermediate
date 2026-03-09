@@ -1,7 +1,5 @@
 #pragma once
 
-#include "RendererTypes.h"
-#include "Pipeline.h"
 #include "Model.h"
 
 struct Camera
@@ -45,7 +43,7 @@ public:
     }
     ~Scene();
 
-    void OnDestroy(Renderer& renderer);
+    void OnDestroy(NSRenderer::Ctx& rendererCtx);
 
     void OnUpdate();
     void UpdateCamera();
@@ -54,21 +52,21 @@ public:
     IWICImagingFactory2* m_wicFactory = nullptr;
 
     template<typename T> requires IsPrimitiveMesh<T>
-    Model& AddObject(Renderer& renderer, const char* name, DirectX::XMFLOAT3 position, PrimitiveTraits<T> desc, float metallic = 0.f, float roughness = 0.f, float opacity = 1.f)
+    Model& AddObject(NSRenderer::Ctx rendererCtx, const char* name, DirectX::XMFLOAT3 position, PrimitiveTraits<T> desc, float metallic = 0.f, float roughness = 0.f, float opacity = 1.f)
     {
         Model& model = m_models.emplace_back(Model(name, m_device, m_wicFactory));
-        model.As<T>(renderer, desc);
+        model.As<T>(rendererCtx, desc);
         model.SetMetallic(metallic);
         model.SetRoughness(roughness);
         model.SetOpacity(opacity);
         return model;
     }
 
-    bool AddObject(Renderer& renderer, const std::filesystem::path& filepath, const char* name, Model& outModel, DirectX::XMFLOAT3 position)
+    bool AddObject(NSRenderer::Ctx rendererCtx, const std::filesystem::path& filepath, const char* name, Model& outModel, DirectX::XMFLOAT3 position)
     {
         outModel = m_models.emplace_back(Model(name, m_device, m_wicFactory));
 
-        if (outModel.Load(renderer, filepath))
+        if (outModel.Load(rendererCtx, filepath))
         {
             outModel.SetPosition(position);
             return true;

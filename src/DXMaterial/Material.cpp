@@ -1,11 +1,9 @@
 #include "stdafx.h"
 #include "Material.h"
-#include "Renderer.h"
 
 #include "DXSampleHelper.h"
 
 #include "IApp.h"
-
 
 Material::Material(IWICImagingFactory2* wicFactory) : m_isOnCPU{}, m_isOnGPU{} {
     m_wicFactory = wicFactory;
@@ -119,15 +117,15 @@ HRESULT Material::LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, 
     return S_OK;
 }
 
-void Material::Bind(ID3D12GraphicsCommandList10* cmdList) const
+void Material::Bind(NSRenderer::Ctx& rendererCtx) const
 {
     if (not m_isOnGPU) return;
 
-    cmdList->SetGraphicsRootDescriptorTable(2, m_srvHandle.gpuAddr);
+    rendererCtx.cmdList.SetGraphicsRootDescriptorTable(2, m_srvHandle.gpuAddr);
     return;
 }
 
-void Material::UploadGPU(ID3D12Device* device, Renderer& renderer)
+void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx& rendererCtx)
 {
     assert(device);
     
@@ -147,39 +145,39 @@ void Material::UploadGPU(ID3D12Device* device, Renderer& renderer)
 
     IApp* appInfo = IApp::GetInstance();
 
-    m_srvHandle = renderer.AllocSRVStatic(static_cast<INT>(FTextureType::FTextureType_MAX));
+    m_srvHandle = rendererCtx.allocSRVStatic(static_cast<INT>(FTextureType::FTextureType_MAX));
 
-    const Descriptor::Handle fallbackHandle = renderer.GetFallbackSRV();
+    const Descriptor::Handle fallbackHandle = rendererCtx.fallbackSRV;
 
     D3D12_CPU_DESCRIPTOR_HANDLE handles[] = {
-        renderer.OffsetSRV(m_srvHandle, 0u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 1u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 2u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 3u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 4u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 5u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 6u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 7u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 8u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 9u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 10u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 11u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 12u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 13u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 14u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 15u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 16u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 17u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 18u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 19u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 20u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 21u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 22u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 23u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 24u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 25u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 26u).cpuAddr,
-        renderer.OffsetSRV(m_srvHandle, 27u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 0u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 1u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 2u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 3u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 4u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 5u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 6u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 7u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 8u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 9u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 10u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 11u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 12u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 13u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 14u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 15u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 16u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 17u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 18u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 19u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 20u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 21u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 22u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 23u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 24u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 25u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 26u).cpuAddr,
+        rendererCtx.offsetSRV(m_srvHandle, 27u).cpuAddr,
     };
 
     device->CopyDescriptors(
@@ -203,7 +201,7 @@ void Material::UploadGPU(ID3D12Device* device, Renderer& renderer)
         ));
     }
 
-    renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     barriers.clear();
 
     uint32_t texIndex = 0u;
@@ -224,7 +222,7 @@ void Material::UploadGPU(ID3D12Device* device, Renderer& renderer)
         dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         dstLoc.SubresourceIndex = 0;
 
-        renderer.GetCmdList()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+        rendererCtx.cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 
         barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
             tex.defaultBuffer.Get(),
@@ -237,24 +235,24 @@ void Material::UploadGPU(ID3D12Device* device, Renderer& renderer)
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = 1;
         srvDesc.Format = tex.format;
-        device->CreateShaderResourceView(tex.defaultBuffer.Get(), &srvDesc, renderer.OffsetSRV(m_srvHandle, texIndex).cpuAddr);
+        device->CreateShaderResourceView(tex.defaultBuffer.Get(), &srvDesc, rendererCtx.offsetSRV(m_srvHandle, texIndex).cpuAddr);
 
         texIndex++;
     }
 
     if (not barriers.empty())
     {
-        renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     }
 
     m_isOnGPU = true;
 }
 
-void Material::UnloadGPU(Renderer& renderer)
+void Material::UnloadGPU(NSRenderer::Ctx& rendererCtx)
 {
     if (not m_isOnGPU) return;
     
-    renderer.FreeSRVStatic(m_srvHandle);
+    rendererCtx.freeSRVStatic(m_srvHandle);
 
     for (FTexture& texture : m_textures) texture.defaultBuffer.Reset();
 

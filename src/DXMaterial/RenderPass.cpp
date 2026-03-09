@@ -5,10 +5,12 @@
 #include "DXSampleHelper.h"
 #include "Model.h"
 #include "Tool.h"
+#include "Renderer.h"
+#include "Pipeline.h"
 
 using namespace RenderPass;
 
-GeometryPass::GeometryPass(Renderer& renderer, ID3D12Device14* device)
+GeometryPass::GeometryPass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx)
     : m_pipeline(GraphicsPipeline(device, L"GeometryPass::Graphics", [&device](CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC& desc)
     {
         D3D12_FEATURE_DATA_ROOT_SIGNATURE rsData{};
@@ -97,14 +99,16 @@ GeometryPass::GeometryPass(Renderer& renderer, ID3D12Device14* device)
     }
 }
 
-void GeometryPass::Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsCommandList10* cmdList)
+GeometryPass::~GeometryPass(){
+    
+}
+
+void GeometryPass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
 {
     if (not IsEnabled()) return;
 
-    CBAllocator& allocator = renderer.GetCBAllocator();
-
     // Per-frame constants
-    Allocator::AllocCtx frameCBAC = allocator.Allocate(sizeof(frameConstants));
+    Allocator::AllocCtx frameCBAC = rendererCtx.allocConstBuff(sizeof(frameConstants));
     {
         using namespace DirectX;
 
@@ -116,24 +120,19 @@ void GeometryPass::Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsComma
         frameCB.lightDir = scene.lightDir;
         frameCB.lightColor = scene.lightColor;
     }
-    cmdList->SetGraphicsRootConstantBufferView(0, frameCBAC.gpuAddr);
+    rendererCtx.cmdList.SetGraphicsRootConstantBufferView(0, frameCBAC.gpuAddr);
 
-    m_pipeline.Bind(cmdList);
-
-    CD3DX12_CPU_DESCRIPTOR_HANDLE currRtvHandle = renderer.GetCurrentRTV();
-    CD3DX12_CPU_DESCRIPTOR_HANDLE currDsvHandle = renderer.GetCurrentDSV();
-
-    cmdList->OMSetRenderTargets(1, &currRtvHandle, FALSE, &currDsvHandle);
+    m_pipeline.Bind(rendererCtx);
 
     for (Model& model : scene.m_models)
     {
-        model.Draw(renderer, allocator);
+        model.Draw(rendererCtx);
     }
 }
-void GeometryPass::OnResize(Renderer& renderer, uint32_t width, uint32_t height)
+void GeometryPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx)
 {}
 
-SkyDomePass::SkyDomePass(Renderer& renderer, ID3D12Device14* device)
+SkyDomePass::SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx)
 {
     // Sky Dome Pipeline Root
     {
@@ -269,9 +268,9 @@ SkyDomePass::SkyDomePass(Renderer& renderer, ID3D12Device14* device)
         &desc,
         D3D12_RESOURCE_STATE_COMMON,
         nullptr,
-        IID_PPV_ARGS(&m_trasmittanceLUT.m_default)
+        IID_PPV_ARGS(&m_trasmittanceLUT)
     );
-    m_trasmittanceLUT.m_default->SetName(L"TransmittenceLUT");
+    m_trasmittanceLUT->SetName(L"TransmittenceLUT");
 
     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
     desc.Width = 32;
@@ -283,23 +282,23 @@ SkyDomePass::SkyDomePass(Renderer& renderer, ID3D12Device14* device)
         &desc,
         D3D12_RESOURCE_STATE_COMMON,
         nullptr,
-        IID_PPV_ARGS(&m_scatteringLUT.m_default)
+        IID_PPV_ARGS(&m_scatteringLUT)
     );
-    m_scatteringLUT.m_default->SetName(L"ScatteringLUT");
+    m_scatteringLUT->SetName(L"ScatteringLUT");
 
-    Descriptor::Handle srvHandle = renderer.AllocSRVStatic(4u);
+    m_srvHandle = rendererCtx.allocSRVStatic(4u);
 
     device->CreateUnorderedAccessView(
         m_trasmittanceLUT.Get(),
         nullptr,
         nullptr,
-        renderer.OffsetSRV(srvHandle, IDX_UAV_TRANSMITTANCE).cpuAddr
+        rendererCtx.offsetSRV(m_srvHandle, IDX_UAV_TRANSMITTANCE).cpuAddr
     );
     device->CreateUnorderedAccessView(
         m_scatteringLUT.Get(),
         nullptr,
         nullptr,
-        renderer.OffsetSRV(srvHandle, IDX_UAV_SCATTERING).cpuAddr
+        rendererCtx.offsetSRV(m_srvHandle, IDX_UAV_SCATTERING).cpuAddr
     );
     {
         D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
@@ -310,7 +309,7 @@ SkyDomePass::SkyDomePass(Renderer& renderer, ID3D12Device14* device)
         device->CreateShaderResourceView(
             m_trasmittanceLUT.Get(),
             &desc,
-            renderer.OffsetSRV(srvHandle, IDX_SRV_TRANSMITTANCE).cpuAddr
+            rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE).cpuAddr
         );
     }
     {
@@ -322,18 +321,20 @@ SkyDomePass::SkyDomePass(Renderer& renderer, ID3D12Device14* device)
         device->CreateShaderResourceView(
             m_scatteringLUT.Get(),
             &desc,
-            renderer.OffsetSRV(srvHandle, IDX_SRV_SCATTERING).cpuAddr
+            rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_SCATTERING).cpuAddr
         );
     }
 }
 
-void SkyDomePass::Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsCommandList10* cmdList)
+SkyDomePass::~SkyDomePass()
+{
+}
+
+void SkyDomePass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
 {
     if (not IsEnabled()) return;
 
-    CBAllocator& allocator = renderer.GetCBAllocator();
-
-    Allocator::AllocCtx frameCBAC = allocator.Allocate(sizeof(frameConstants));
+    Allocator::AllocCtx frameCBAC = rendererCtx.allocConstBuff(sizeof(frameConstants));
     {
         using namespace DirectX;
 
@@ -345,24 +346,29 @@ void SkyDomePass::Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsComman
         frameCB.lightDir = scene.lightDir;
         frameCB.lightColor = scene.lightColor;
     }
-    cmdList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    Allocator::AllocCtx skyDomeCBAC = allocator.Allocate(sizeof(skyDomeConstants));
+    Allocator::AllocCtx skyDomeCBAC = rendererCtx.allocConstBuff(sizeof(skyDomeConstants));
     skyDomeConstants& skyDomeCB = skyDomeCBAC.As<skyDomeConstants>();
 
-    m_graphics.Bind(cmdList);
-    cmdList->SetGraphicsRootConstantBufferView(IDX_CBV_FRAME, frameCBAC.gpuAddr);
-    cmdList->SetGraphicsRootConstantBufferView(IDX_CBV_SKYDOME, skyDomeCBAC.gpuAddr);
+    m_graphics.Bind(rendererCtx);
+    rendererCtx.cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_FRAME, frameCBAC.gpuAddr);
+    rendererCtx.cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_SKYDOME, skyDomeCBAC.gpuAddr);
 
-    UpdateSkyDome(cmdList, skyDomeCB);
-
-    std::for_each(scene.m_models.begin(), scene.m_models.end(), [this, &allocator, cmdList](Model& model)
+    if (m_constantsUpload != m_constantsDefault)
     {
-        model.Draw([this, &allocator, cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+        m_constantsDefault = m_constantsUpload;
+        skyDomeCB = m_constantsDefault;
+
+        UpdateSkyDome(rendererCtx);
+    }
+
+    std::for_each(scene.m_models.begin(), scene.m_models.end(), [this, &rendererCtx](Model& model)
+    {
+        model.Draw([this, &rendererCtx](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
         {
-            Allocator::AllocCtx allocCtx = allocator.Allocate(sizeof(meshConstants));
+            Allocator::AllocCtx allocCtx = rendererCtx.allocConstBuff(sizeof(meshConstants));
             meshConstants& meshCB = allocCtx.As<meshConstants>();
-            cmdList->SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
+            rendererCtx.cmdList.SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
 
             DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
             DirectX::XMVECTOR det;
@@ -376,88 +382,65 @@ void SkyDomePass::Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsComman
             meshCB.opacity = mesh.material.m_opacity;
             meshCB.textureFlags = mesh.material.m_textureFlags;
 
-            cmdList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-            cmdList->IASetIndexBuffer(&mesh.indexBufferView);
-            cmdList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+            rendererCtx.cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+            rendererCtx.cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+            rendererCtx.cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
         });
     });
 }
 
-
-void SkyDomePass::UpdateSkyDome(ID3D12GraphicsCommandList10* cmdList, skyDomeConstants& constants)
+void SkyDomePass::UpdateSkyDome(NSRenderer::Ctx& rendererCtx)
 {
-    if (not Float3Equals(m_constantsUpload.BetaR, m_constantsDefault.BetaR)) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.BetaMScatter != m_constantsDefault.BetaMScatter) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.BetaMExtinct != m_constantsDefault.BetaMExtinct) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.MieG != m_constantsDefault.MieG) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.HR != m_constantsDefault.HR) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.HM != m_constantsDefault.HM) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.Rg != m_constantsDefault.Rg) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.Rt != m_constantsDefault.Rt) m_isSkyDomeDirty = true;
-    else if (m_constantsUpload.SunIntensity != m_constantsDefault.SunIntensity) m_isSkyDomeDirty = true;
-    else if (not Float3Equals(m_constantsUpload.SunDir, m_constantsDefault.SunDir)) m_isSkyDomeDirty = true;
-
-    if (m_isSkyDomeDirty)
     {
-        m_constantsDefault = m_constantsUpload;
-        constants = m_constantsDefault;
-
-        {
-            CD3DX12_RESOURCE_BARRIER barriers[] = {
-                CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
-                    CD3DX12_RESOURCE_BARRIER::Transition(
-                    m_trasmittanceLUT.Get(),
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-                ),
+        CD3DX12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
                 CD3DX12_RESOURCE_BARRIER::Transition(
-                    m_scatteringLUT.Get(),
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-                )
-            };
-            cmdList->ResourceBarrier(_countof(barriers), barriers);
-        }
-
-        m_transmittance.BindPipe(cmdList);
-        cmdList->Dispatch(
-            (256 + 7) / 8,
-            (64 + 7) / 8,
-            1
-        );
-
-        m_scattering.BindPipe(cmdList);
-        cmdList->Dispatch(
-            (32 + 3) / 4,
-            (128 + 3) / 4,
-            (256 + 3) / 4
-        );
-        
-        {
-            CD3DX12_RESOURCE_BARRIER barriers[] = {
-                CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
-                    CD3DX12_RESOURCE_BARRIER::Transition(
-                    m_trasmittanceLUT.Get(),
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-                ),
-                CD3DX12_RESOURCE_BARRIER::Transition(
-                    m_scatteringLUT.Get(),
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-                )
-            };
-            cmdList->ResourceBarrier(_countof(barriers), barriers);
-        }
-
-        m_isSkyDomeDirty = false;
+                m_trasmittanceLUT.Get(),
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+            ),
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_scatteringLUT.Get(),
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+            )
+        };
+        rendererCtx.cmdList.ResourceBarrier(_countof(barriers), barriers);
     }
-    else
+
+    m_transmittance.BindPipe(rendererCtx);
+    rendererCtx.cmdList.Dispatch(
+        (256 + 7) / 8,
+        (64 + 7) / 8,
+        1
+    );
+
+    m_scattering.BindPipe(rendererCtx);
+    rendererCtx.cmdList.Dispatch(
+        (32 + 3) / 4,
+        (128 + 3) / 4,
+        (256 + 3) / 4
+    );
+        
     {
+        CD3DX12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                m_trasmittanceLUT.Get(),
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+            ),
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_scatteringLUT.Get(),
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+            )
+        };
+        rendererCtx.cmdList.ResourceBarrier(_countof(barriers), barriers);
     }
 }
 
-void SkyDomePass::OnResize(Renderer& renderer, uint32_t width, uint32_t height)
+void SkyDomePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx)
 {
 
 }

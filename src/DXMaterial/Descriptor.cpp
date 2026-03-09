@@ -57,7 +57,9 @@ IDescriptor::IDescriptor(ID3D12Device14* device, LPCWSTR name, D3D12_DESCRIPTOR_
 
     im_descriptorSize = device->GetDescriptorHandleIncrementSize(im_desc.Type);
     im_cpuStart = im_heap->GetCPUDescriptorHandleForHeapStart();
-    im_gpuStart = im_heap->GetGPUDescriptorHandleForHeapStart();
+
+    if (flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE)
+        im_gpuStart = im_heap->GetGPUDescriptorHandleForHeapStart();
 }
 IDescriptor::~IDescriptor()
 {
@@ -86,13 +88,13 @@ Handle StaticHeap::Allocate(uint32_t amount)
 
     result.handleIndexBegin = std::clamp(
         result.handleIndexBegin,
-        static_cast<int64_t>(std::numeric_limits<int>::max()),
-        0ll
+        0ll,
+        static_cast<int64_t>(std::numeric_limits<int>::max())
     );
     result.vectorIndexBegin = std::clamp(
         result.vectorIndexBegin,
-        static_cast<int64_t>(std::numeric_limits<int>::max()),
-        0ll
+        0ll,
+        static_cast<int64_t>(std::numeric_limits<int>::max())
     );
 
     const std::vector<uint32_t>::iterator blockBegin = m_freeList.begin() + static_cast<uint32_t>(result.vectorIndexBegin);

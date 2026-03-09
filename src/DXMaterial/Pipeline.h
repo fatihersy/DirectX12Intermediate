@@ -65,11 +65,11 @@ public:
     GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
     GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature setRootSignature);
 
-    inline void Bind(ID3D12GraphicsCommandList10* cmdList) const {
+    inline void Bind(NSRenderer::Ctx& rendererCtx) const {
         if (im_pipeline and im_rootSignature)
         {
-            cmdList->SetPipelineState(im_pipeline.Get());
-            cmdList->SetGraphicsRootSignature(im_rootSignature);
+            rendererCtx.cmdList.SetPipelineState(im_pipeline.Get());
+            rendererCtx.cmdList.SetGraphicsRootSignature(im_rootSignature);
             return;
         }
         throw std::runtime_error("Invalid use");
@@ -94,20 +94,20 @@ public:
     ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
     ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature);
 
-    inline void BindPipe(ID3D12GraphicsCommandList10* cmdList) const
+    inline void BindPipe(NSRenderer::Ctx& rendererCtx) const
     {
         if (im_pipeline)
         {
-            cmdList->SetPipelineState(im_pipeline.Get());
+            rendererCtx.cmdList.SetPipelineState(im_pipeline.Get());
             return;
         }
         throw std::runtime_error("Invalid use");
     }
-    inline void BindRoot(ID3D12GraphicsCommandList10* cmdList) const
+    inline void BindRoot(NSRenderer::Ctx& rendererCtx) const
     {
         if (im_rootSignature)
         {
-            cmdList->SetComputeRootSignature(im_rootSignature);
+            rendererCtx.cmdList.SetComputeRootSignature(im_rootSignature);
             return;
         }
         throw std::runtime_error("Invalid use");

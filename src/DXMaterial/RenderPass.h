@@ -1,52 +1,50 @@
 #pragma once
 
-#include "Renderer.h"
 #include "Pipeline.h"
+
+class Renderer;
+class Scene;
 
 namespace RenderPass
 {
-    struct GpuResource {
-        ComPtr<ID3D12Resource2> m_default;
-        Descriptor::Handle m_descriptor;
-
-        inline ID3D12Resource2* Get() const { return m_default.Get(); };
-    };
-
     class IRenderPass
     {
     public:
         virtual ~IRenderPass() = default;
 
-        virtual void Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsCommandList10* cmdList) = 0;
-        virtual void OnResize(Renderer& renderer, uint32_t width, uint32_t height) = 0;
+        virtual void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) = 0;
+        virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) = 0;
         virtual void Destroy() = 0;
 
-        bool IsEnabled() const { return m_isEnabled; }
-        void SetEnabled(bool newVal) { m_isEnabled = newVal; }
+        bool IsEnabled() const { return im_isEnabled; }
+        void SetEnabled(bool newVal) { im_isEnabled = newVal; }
+
     private:
-        bool m_isEnabled{};
+        bool im_isEnabled{};
     };
 
     class GeometryPass : public IRenderPass
     {
     public:
-        GeometryPass(Renderer& renderer, ID3D12Device14* device);
+        GeometryPass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx);
+        ~GeometryPass() override;
 
-        void Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsCommandList10* cmdList) override;
-        void OnResize(Renderer& renderer, uint32_t width, uint32_t height) override;
+        void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) override;
+        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) override;
 
     private:
+
         GraphicsPipeline m_pipeline;
     };
 
     class SkyDomePass : public IRenderPass
     {
     public:
-        SkyDomePass(Renderer& renderer, ID3D12Device14* device);
+        SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx);
+        ~SkyDomePass();
 
-        void Execute(Renderer& renderer, Scene& scene, ID3D12GraphicsCommandList10* cmdList) override;
-        void OnResize(Renderer& renderer, uint32_t width, uint32_t height) override;
-
+        void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) override;
+        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) override;
 
         float m_timeOfDay{};
         skyDomeConstants m_constantsUpload{};
@@ -56,12 +54,10 @@ namespace RenderPass
         ComputePipeline m_transmittance;
         ComputePipeline m_scattering;
 
-        GpuResource m_trasmittanceLUT;
-        GpuResource m_scatteringLUT;
+        ComPtr<ID3D12Resource2> m_trasmittanceLUT;
+        ComPtr<ID3D12Resource2> m_scatteringLUT;
 
-        bool m_isSkyDomeDirty{};
-
-        void UpdateSkyDome(ID3D12GraphicsCommandList10* cmdList, skyDomeConstants& constants);
+        void UpdateSkyDome(NSRenderer::Ctx& rendererCtx);
 
         static constexpr UINT IDX_ROOT_CBV_FRAME = 0u;
         static constexpr UINT IDX_ROOT_CBV_MESH = 1u;

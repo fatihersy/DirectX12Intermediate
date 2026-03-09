@@ -4,10 +4,10 @@
 
 #include "IApp.h"
 
-void Scene::OnDestroy(Renderer& renderer)
+void Scene::OnDestroy(NSRenderer::Ctx& rendererCtx)
 {
-    std::for_each(m_models.begin(), m_models.end(), [&renderer](Model& model) {
-        model.UnloadGPU(renderer);
+    std::for_each(m_models.begin(), m_models.end(), [&rendererCtx](Model& model) {
+        model.UnloadGPU(rendererCtx);
     });
 }
 Scene::~Scene()

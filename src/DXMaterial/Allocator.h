@@ -1,11 +1,16 @@
 #pragma once
 
-class CBAllocator
+class ConstBuffAlloc
 {
 public:
-    CBAllocator(){};
-    CBAllocator(ID3D12Device* device, size_t totalSize);
-    ~CBAllocator();
+    ConstBuffAlloc() {};
+    ConstBuffAlloc(ID3D12Device* device, size_t totalSize);
+    ~ConstBuffAlloc();
+
+    ConstBuffAlloc(const ConstBuffAlloc&) = delete;
+    ConstBuffAlloc& operator=(const ConstBuffAlloc&) = delete;
+    ConstBuffAlloc(ConstBuffAlloc&& other) noexcept;
+    ConstBuffAlloc& operator=(ConstBuffAlloc&& other) noexcept;
 
     Allocator::AllocCtx Allocate(size_t size);
 

@@ -4,7 +4,6 @@
 #include "DXSampleHelper.h"
 #include "IApp.h"
 #include "Model.h"
-#include "Renderer.h"
 #include "Primitives.h"
 
 #include <assimp/Importer.hpp>
@@ -23,7 +22,7 @@ Model::Model(_In_ const char* name, ID3D12Device* device, _In_ IWICImagingFactor
 }
 
 _Use_decl_annotations_
-bool Model::Load(Renderer& renderer, const std::filesystem::path& path)
+bool Model::Load(NSRenderer::Ctx& rendererCtx, const std::filesystem::path& path)
 {
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(path.generic_string(),
@@ -40,14 +39,14 @@ bool Model::Load(Renderer& renderer, const std::filesystem::path& path)
     }
 
     m_assetPath = path;
-    ProcessNode(renderer, scene->mRootNode, scene);
+    ProcessNode(rendererCtx, scene->mRootNode, scene);
 
     isOnCPU = true;
     return true;
 }
 
 _Use_decl_annotations_
-void Model::ProcessNode(Renderer& renderer, aiNode* node, const aiScene* scene)
+void Model::ProcessNode(NSRenderer::Ctx& rendererCtx, aiNode* node, const aiScene* scene)
 {
     assert(node and scene and node);
 
@@ -55,7 +54,7 @@ void Model::ProcessNode(Renderer& renderer, aiNode* node, const aiScene* scene)
         aiMesh* pAiMesh = scene->mMeshes[node->mMeshes[i]];
 
         Mesh& mesh = meshes.emplace_back(Mesh(m_wicFactory));
-        
+
         mesh.name = FString::format("%s::mesh_%s", m_name, pAiMesh->mName.C_Str());
         mesh.material.m_name = FString::format("%s::material", mesh.name);
 
@@ -66,7 +65,7 @@ void Model::ProcessNode(Renderer& renderer, aiNode* node, const aiScene* scene)
         throw std::out_of_range("Meshes got out of range");
     }
     for (UINT i = 0; i < node->mNumChildren; ++i) {
-        ProcessNode(renderer, node->mChildren[i], scene);
+        ProcessNode(rendererCtx, node->mChildren[i], scene);
     }
 }
 
@@ -103,24 +102,24 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
     {
         Vertex v{};
 
-        v.position = DirectX::XMFLOAT3 {
+        v.position = DirectX::XMFLOAT3{
             pAiMesh->mVertices[i].x,
             pAiMesh->mVertices[i].y,
             pAiMesh->mVertices[i].z
         };
 
-        v.normal = pAiMesh->HasNormals() ? DirectX::XMFLOAT3 {
+        v.normal = pAiMesh->HasNormals() ? DirectX::XMFLOAT3{
             pAiMesh->mNormals[i].x,
             pAiMesh->mNormals[i].y,
             pAiMesh->mNormals[i].z
         }
-        :   DirectX::XMFLOAT3 {0.f, 0.f, 0.f};
+        : DirectX::XMFLOAT3{ 0.f, 0.f, 0.f };
 
-        v.texCoord = pAiMesh->mTextureCoords[0] ? DirectX::XMFLOAT2 {
+        v.texCoord = pAiMesh->mTextureCoords[0] ? DirectX::XMFLOAT2{
             pAiMesh->mTextureCoords[0][i].x,
             pAiMesh->mTextureCoords[0][i].y
         }
-        :   DirectX::XMFLOAT2{ 0.f, 0.f };
+        : DirectX::XMFLOAT2{ 0.f, 0.f };
 
         v.tangent = pAiMesh->HasTangentsAndBitangents() ? DirectX::XMFLOAT3{
             pAiMesh->mTangents[i].x,
@@ -201,7 +200,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
 
     void* mappedIndexBuffer = nullptr;
     if (FAILED(outMesh.uploadIndexBuffer->Map(0u, nullptr, reinterpret_cast<void**>(&mappedIndexBuffer)))) throw std::runtime_error("Failed to map index upload buffer");
-    
+
     memcpy(mappedIndexBuffer, indices.data(), ibByteSize);
     outMesh.uploadIndexBuffer->Unmap(0, nullptr);
 
@@ -249,7 +248,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
             outMesh.material.m_baseColor = DirectX::XMFLOAT4(baseColor.r, baseColor.g, baseColor.b, baseColor.a);
         }
 
-        float metallic {};
+        float metallic{};
         if (material->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == AI_SUCCESS) {
             outMesh.material.m_metallic = metallic;
         }
@@ -323,12 +322,12 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
 }
 
 _Use_decl_annotations_
-void Model::UploadGPU(Renderer& renderer)
+void Model::UploadGPU(NSRenderer::Ctx& rendererCtx)
 {
     assert(isOnCPU);
 
     if (isOnGPU) return;
-    
+
     std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
     barriers.reserve(meshes.size() * 3u);
 
@@ -346,14 +345,14 @@ void Model::UploadGPU(Renderer& renderer)
         ));
     }
 
-    renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
 
     barriers.clear();
 
     for (Mesh& mesh : meshes)
     {
-        renderer.GetCmdList()->CopyResource(mesh.defaultVertexBuffer.Get(), mesh.uploadVertexBuffer.Get());
-        renderer.GetCmdList()->CopyResource(mesh.defaultIndexBuffer.Get(), mesh.uploadIndexBuffer.Get());
+        rendererCtx.cmdList.CopyResource(mesh.defaultVertexBuffer.Get(), mesh.uploadVertexBuffer.Get());
+        rendererCtx.cmdList.CopyResource(mesh.defaultIndexBuffer.Get(), mesh.uploadIndexBuffer.Get());
 
         barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
             mesh.defaultVertexBuffer.Get(),
@@ -367,29 +366,29 @@ void Model::UploadGPU(Renderer& renderer)
         ));
     }
 
-    renderer.GetCmdList()->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
 
     for (Mesh& mesh : meshes)
     {
-        mesh.material.UploadGPU(m_device, renderer);
+        mesh.material.UploadGPU(m_device, rendererCtx);
     }
 
     isOnGPU = true;
 }
 
-void Model::Draw(Renderer& renderer, CBAllocator& allocator)
+void Model::Draw(NSRenderer::Ctx& rendererCtx)
 {
     DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
     DirectX::XMMATRIX globalPosition = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&m_position));
 
     for (Mesh& mesh : meshes)
     {
-        Allocator::AllocCtx allocCtx = allocator.Allocate(sizeof(meshConstants));
+        Allocator::AllocCtx allocCtx = rendererCtx.allocConstBuff(sizeof(meshConstants));
         meshConstants& meshCB = allocCtx.As<meshConstants>();
 
         const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
-        const DirectX::XMMATRIX rotQMatrix  = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
-        const DirectX::XMMATRIX posMatrix   = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
+        const DirectX::XMMATRIX rotQMatrix = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
+        const DirectX::XMMATRIX posMatrix = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
         const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation * globalPosition;
 
         DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
@@ -404,13 +403,13 @@ void Model::Draw(Renderer& renderer, CBAllocator& allocator)
         meshCB.opacity = mesh.material.m_opacity;
         meshCB.textureFlags = mesh.material.m_textureFlags;
 
-        renderer.GetCmdList()->SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
+        rendererCtx.cmdList.SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
 
-        mesh.material.Bind(renderer.GetCmdList());
+        mesh.material.Bind(rendererCtx);
 
-        renderer.GetCmdList()->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-        renderer.GetCmdList()->IASetIndexBuffer(&mesh.indexBufferView);
-        renderer.GetCmdList()->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+        rendererCtx.cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+        rendererCtx.cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+        rendererCtx.cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
     }
 }
 void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach)
@@ -454,7 +453,7 @@ void Model::Move(DirectX::XMFLOAT3 vector, double delta)
 
 void Model::ResetUploadHeaps() {
     if (not isOnCPU) return;
-    
+
     for (Mesh& mesh : meshes)
     {
         mesh.uploadIndexBuffer.Reset();
@@ -464,25 +463,25 @@ void Model::ResetUploadHeaps() {
     isOnCPU = false;
 }
 
-void Model::UnloadGPU(Renderer& renderer)
+void Model::UnloadGPU(NSRenderer::Ctx& rendererCtx)
 {
     if (not isOnGPU) return;
-    
-    for(Mesh& mesh : meshes)
+
+    for (Mesh& mesh : meshes)
     {
         mesh.defaultIndexBuffer.Reset();
         mesh.defaultVertexBuffer.Reset();
-        mesh.material.UnloadGPU(renderer);
+        mesh.material.UnloadGPU(rendererCtx);
     }
 
     isOnGPU = false;
 }
 
-Model&& Model::_As(Renderer& renderer, const char* name, EPrimitive type, void* pDesc)
+Model&& Model::_As(NSRenderer::Ctx& rendererCtx, const char* name, EPrimitive type, void* pDesc)
 {
     assert(name and pDesc and type > EPrimitive::PRIMITIVE_TYPE_NONE and type < EPrimitive::PRIMITIVE_TYPE_MAX);
 
-    this->UnloadGPU(renderer);
+    this->UnloadGPU(rendererCtx);
     this->ResetUploadHeaps();
     std::vector<Vertex> vertices;
     std::vector<UINT> indices;

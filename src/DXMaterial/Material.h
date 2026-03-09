@@ -2,8 +2,6 @@
 
 #include "RendererTypes.h"
 
-class Renderer;
-
 enum class FTextureType : UINT {
     FTextureType_NONE = 0,
     FTextureType_DIFFUSE = 1,
@@ -68,11 +66,11 @@ public:
     
     HRESULT LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, INT tType);
 
-    void UploadGPU(ID3D12Device* device, Renderer& renderer);
-    void UnloadGPU(Renderer& renderer);
+    void UploadGPU(ID3D12Device* device, NSRenderer::Ctx& rendererCtx);
+    void UnloadGPU(NSRenderer::Ctx& rendererCtx);
     void ResetUploadHeaps();
 
-    void Bind(ID3D12GraphicsCommandList10* cmdList) const;
+    void Bind(NSRenderer::Ctx& rendererCtx) const;
 
     inline bool HasTextureType(FTextureType tType) {
         for (FTexture& tex : m_textures) {

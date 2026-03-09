@@ -69,7 +69,6 @@ void app::OnDestroy()
 
 void app::OnInit()
 {
-
     app::LoadPipeline();
     app::LoadAssets();
 
@@ -83,7 +82,7 @@ void app::OnInit()
         ImGui_ImplDX12_InitInfo initInfo{};
         initInfo.UserData = s_instance;
         initInfo.Device = m_device.Get();
-        initInfo.CommandQueue = m_renderer.GetCmdQueue();
+        initInfo.CommandQueue = m_renderer.ImGui_getCmdQueue();
         initInfo.NumFramesInFlight = IApp::c_frameCount;
         initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
@@ -200,54 +199,58 @@ void app::LoadPipeline() {
         }
         ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&m_device)));
         m_device->SetName(L"app::m_device");
+
     }
 
-    m_renderer = Renderer(m_factory.Get(), m_device.Get(), plat.GetHWND(), m_width, m_height);
+    m_renderer.Init(m_factory.Get(), m_device.Get(), plat.GetHWND(), m_width, m_height);
 }
 void app::LoadAssets()
 {
-    m_scene = Scene(m_device.Get(), m_wicFactory.Get());
+    m_renderer.Execute([this](NSRenderer::Ctx& ctx)
+    {
+        m_scene = Scene(m_device.Get(), m_wicFactory.Get());
 
-    m_scene.AddObject<SDome>(m_renderer, "Sky Dome", {}, SDome {
-        .radius = 10000.f,
-        .sliceCount = 64,
-        .stackCount = 32
+        m_scene.AddObject<SDome>(ctx, "Sky Dome", {}, SDome{
+            .radius = 10000.f,
+            .sliceCount = 64,
+            .stackCount = 32
+        });
+
+        // Creating the material grid
+        {
+            const float stride = 11.f;
+            const float gridStartPosX = 5.f * stride / -2.f;
+            const float gridStartPosY = 5.f * stride / -2.f;
+
+            int32_t idx{};
+            for (size_t i = 0; i < 36u; i++)
+            {
+                const int32_t col = idx % 6;
+                const int32_t row = idx / 6;
+                const float metallic = col * .2f;
+                const float roughness = row * .2f;
+                const float posX = -col * stride - gridStartPosX;
+                const float posY = row * stride + gridStartPosY;
+
+                PrimitiveTraits<SSphere> desc({
+                    .radius = 5.f,
+                    .sliceCount = 20,
+                    .stackCount = 20
+                });
+
+                Model& model = m_scene.AddObject<SSphere>(
+                    ctx,
+                    FString::format("Sphere%d", idx).c_str(),
+                    { posX, posY, 0.f },
+                    desc,
+                    metallic,
+                    roughness
+                    );
+                idx++;
+            }
+        }
     });
 
-    // Creating the material grid
-    {
-        const float stride = 11.f;
-        const float gridStartPosX = 5.f * stride / -2.f;
-        const float gridStartPosY = 5.f * stride / -2.f;
-
-        int32_t idx{};
-        for (size_t i = 0; i < 36u; i++)
-        {
-            const int32_t col = idx % 6;
-            const int32_t row = idx / 6;
-            const float metallic = col * .2f;
-            const float roughness = row * .2f;
-
-            const float posX = -col * stride - gridStartPosX;
-            const float posY = row * stride + gridStartPosY;
-
-            PrimitiveTraits<SSphere> desc({
-                .radius = 5.f,
-                .sliceCount = 20,
-                .stackCount = 20
-            });
-            Model& model = m_scene.AddObject<SSphere>(
-                m_renderer,
-                FString::format("Sphere%d", idx).c_str(),
-                { posX, posY, 0.f },
-                desc,
-                metallic,
-                roughness
-            );
-
-            idx++;
-        }
-    }
 }
 
 void app::UpdateKeyBindings()

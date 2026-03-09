@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "Allocator.h"
 
-CBAllocator::CBAllocator(ID3D12Device* device, size_t totalSize)
+ConstBuffAlloc::ConstBuffAlloc(ID3D12Device* device, size_t totalSize)
 {
     m_blobTotalSize = totalSize;
 
@@ -30,7 +30,7 @@ CBAllocator::CBAllocator(ID3D12Device* device, size_t totalSize)
     m_gpuAddr = m_bufferDefault->GetGPUVirtualAddress();
 }
 
-CBAllocator::~CBAllocator()
+ConstBuffAlloc::~ConstBuffAlloc()
 {
     if (m_bufferDefault)
     {
@@ -39,7 +39,51 @@ CBAllocator::~CBAllocator()
     }
 }
 
-Allocator::AllocCtx CBAllocator::Allocate(size_t size)
+ConstBuffAlloc::ConstBuffAlloc(ConstBuffAlloc&& other) noexcept
+    : m_bufferDefault(std::move(other.m_bufferDefault))
+    , m_gpuAddr(other.m_gpuAddr)
+    , m_cpuAddr(other.m_cpuAddr)
+    , m_blobTotalSize(other.m_blobTotalSize)
+    , m_blobFrameSize(other.m_blobFrameSize)
+    , m_blobFrameEnd(other.m_blobFrameEnd)
+    , m_blobOffset(other.m_blobOffset)
+{
+    other.m_gpuAddr = {};
+    other.m_cpuAddr = nullptr;
+    other.m_blobTotalSize = 0;
+    other.m_blobFrameSize = 0;
+    other.m_blobFrameEnd = 0;
+    other.m_blobOffset = 0;
+}
+
+ConstBuffAlloc& ConstBuffAlloc::operator=(ConstBuffAlloc&& other) noexcept
+{
+    if (this != &other)
+    {
+        if (m_bufferDefault)
+        {
+            m_bufferDefault->Unmap(0, nullptr);
+        }
+
+        m_bufferDefault = std::move(other.m_bufferDefault);
+        m_gpuAddr = other.m_gpuAddr;
+        m_cpuAddr = other.m_cpuAddr;
+        m_blobTotalSize = other.m_blobTotalSize;
+        m_blobFrameSize = other.m_blobFrameSize;
+        m_blobFrameEnd = other.m_blobFrameEnd;
+        m_blobOffset = other.m_blobOffset;
+
+        other.m_gpuAddr = {};
+        other.m_cpuAddr = nullptr;
+        other.m_blobTotalSize = 0;
+        other.m_blobFrameSize = 0;
+        other.m_blobFrameEnd = 0;
+        other.m_blobOffset = 0;
+    }
+    return *this;
+}
+
+Allocator::AllocCtx ConstBuffAlloc::Allocate(size_t size)
 {
     if (not m_cpuAddr or not m_bufferDefault)
     {
