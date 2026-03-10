@@ -19,13 +19,16 @@ public:
 
     void Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, UINT width, UINT height);
 
-    void Render();
+    void BeginFrame();
+    void EndFrame();
+    void DrawScene(Scene& scene);
+
     void Resize(UINT width, UINT height);
     void WaitForGPU();
 
     void onDestroy();
 
-    void Execute(FnRendererExecutionBody Exec);
+    void Execute(FnRendererExecutionBody Record);
 
     inline Descriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
         return m_srvHeap.AllocateRing(amount);
@@ -76,9 +79,9 @@ private:
     void CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription desc);
     void CreateDefaultTexture();
 
-    void PopulateCommandList(Scene& scene);
     void MoveToNextFrame();
 
     static constexpr uint32_t FALLBACK_TEXTURE_SRV_INDEX = 0;
+    static constexpr float CLEAR_COLOR[] = { 0.176f, 0.203f, 0.211f, 1.f };
 };
 

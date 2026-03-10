@@ -48,6 +48,11 @@ void app::OnDestroy()
 {
     ImGui_ImplDX12_Shutdown();
     ImGui::DestroyContext();
+    m_imGuiSrvHeap.Reset();
+
+    m_renderer.Execute([this](NSRenderer::Ctx ctx){
+        m_scene.OnDestroy(ctx);
+    });
 
     m_mouse.release();
     m_mouse.reset();
@@ -57,6 +62,7 @@ void app::OnDestroy()
     m_renderer.onDestroy();
 
     m_wicFactory.Reset();
+    m_factory.Reset();
     m_device.Reset();
 
     ComPtr<IDXGIDebug1> dxgiDebug;
@@ -167,7 +173,11 @@ void app::OnUpdate() {
 }
 void app::OnRender()
 {
-    m_renderer.Render();
+    m_renderer.BeginFrame();
+
+    m_renderer.DrawScene(m_scene);
+
+    m_renderer.EndFrame();
 }
 
 void app::LoadPipeline() {
@@ -216,7 +226,6 @@ void app::LoadAssets()
             .stackCount = 32
         });
 
-        // Creating the material grid
         {
             const float stride = 11.f;
             const float gridStartPosX = 5.f * stride / -2.f;
@@ -245,12 +254,11 @@ void app::LoadAssets()
                     desc,
                     metallic,
                     roughness
-                    );
+                );
                 idx++;
             }
         }
     });
-
 }
 
 void app::UpdateKeyBindings()

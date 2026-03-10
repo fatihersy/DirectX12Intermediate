@@ -24,14 +24,13 @@ namespace Descriptor
             return thisHeap.ptr == handle.cpuAddr.ptr;
         }
 
-        inline bool At(uint32_t index, Handle& handle) const
+        inline bool At(uint32_t index, hOffset& offset) const
         {
             if (index >= im_desc.NumDescriptors) return false;
             
-            handle.amount = 1u;
-            handle.index = index;
-            handle.cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, index, im_descriptorSize);
-            handle.gpuAddr = CD3DX12_GPU_DESCRIPTOR_HANDLE(im_gpuStart, index, im_descriptorSize);
+            offset.index = index;
+            offset.cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, index, im_descriptorSize);
+            offset.gpuAddr = CD3DX12_GPU_DESCRIPTOR_HANDLE(im_gpuStart, index, im_descriptorSize);
             return true;
         }
 

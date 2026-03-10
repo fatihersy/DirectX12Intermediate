@@ -465,16 +465,17 @@ void Model::ResetUploadHeaps() {
 
 void Model::UnloadGPU(NSRenderer::Ctx& rendererCtx)
 {
-    if (not isOnGPU) return;
-
     for (Mesh& mesh : meshes)
     {
-        mesh.defaultIndexBuffer.Reset();
+        mesh.uploadVertexBuffer.Reset();
+        mesh.uploadIndexBuffer.Reset();
         mesh.defaultVertexBuffer.Reset();
+        mesh.defaultIndexBuffer.Reset();
         mesh.material.UnloadGPU(rendererCtx);
     }
 
     isOnGPU = false;
+    isOnCPU = false;
 }
 
 Model&& Model::_As(NSRenderer::Ctx& rendererCtx, const char* name, EPrimitive type, void* pDesc)

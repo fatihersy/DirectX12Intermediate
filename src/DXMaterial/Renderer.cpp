@@ -56,7 +56,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, U
     // Command List
     {
         UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
-        ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
+        ThrowIfFailed(m_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&m_commandList)));
         m_commandList->SetName(L"Renderer::m_commandList");
     }
 
@@ -76,43 +76,96 @@ Renderer::~Renderer() {}
 
 void Renderer::onDestroy()
 {
+    WaitForGPU();
+
+    m_fallbackTexture = {};
+    m_allocator = {};
+
     m_swapchain.Reset();
 
     for (UINT i = 0; i < IApp::c_frameCount; i++) {
         m_renderTarget[i].Reset();
         m_commandAllocators[i].Reset();
     }
-    
+
     m_depthStencil.Reset();
-    m_commandQueue.Reset();
     m_commandList.Reset();
 
+    m_srvHeap = {};
+    m_dsvHeap = {};
+    m_rtvHeap = {};
+
+    if (m_fenceEvent) {
+        CloseHandle(m_fenceEvent);
+        m_fenceEvent = nullptr;
+    }
     m_fence.Reset();
+    m_commandQueue.Reset();
 }
 
-void Renderer::PopulateCommandList(Scene& scene)
+void Renderer::DrawScene(Scene& scene)
 {
 
 }
 
-void Renderer::Render()
-{
-    MoveToNextFrame();
 
+void Renderer::BeginFrame()
+{
     UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
 
-    ThrowIfFailed(m_commandAllocators[frameIndex].Reset());
-    ThrowIfFailed(m_commandList.Reset());
+    ThrowIfFailed(m_commandAllocators[frameIndex]->Reset());
+    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[frameIndex].Get(), nullptr));
+
+    {
+        CD3DX12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET)
+        };
+
+        m_commandList->ResourceBarrier(_countof(barriers), barriers);
+    }
 
     m_srvHeap.BeginFrame(frameIndex);
     m_allocator.BeginFrame(frameIndex);
+
+    Descriptor::hOffset rtvHandle{};
+    Descriptor::hOffset dsvHandle{};
+    assert(m_rtvHeap.At(frameIndex, rtvHandle));
+    assert(m_dsvHeap.At(0u, dsvHandle));
+
+    m_commandList->OMSetRenderTargets(1, &rtvHandle.cpuAddr, FALSE, &dsvHandle.cpuAddr);
+
+    m_commandList->ClearRenderTargetView(rtvHandle.cpuAddr, CLEAR_COLOR, 0, nullptr);
+    m_commandList->ClearDepthStencilView(dsvHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 
     ID3D12DescriptorHeap* heaps[] = {
         const_cast<ID3D12DescriptorHeap*>(m_srvHeap.GetHeap())
     };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-
 }
+void Renderer::EndFrame()
+{
+    UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
+
+    {
+        CD3DX12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT)
+        };
+
+        m_commandList->ResourceBarrier(_countof(barriers), barriers);
+    }
+
+    ThrowIfFailed(m_commandList->Close());
+
+    ID3D12CommandList* const cmdLists[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(_countof(cmdLists), cmdLists);
+
+    ThrowIfFailed(m_swapchain->Present(1, 0));
+
+    MoveToNextFrame();
+}
+
+
+
 void Renderer::Resize(UINT width, UINT height)
 {
     WaitForGPU();
@@ -130,13 +183,14 @@ void Renderer::Resize(UINT width, UINT height)
     }
 
     UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
-    Descriptor::Handle rtvHandle{};
-    assert(m_rtvHeap.At(0u, rtvHandle));
 
     for (UINT i = 0; i < IApp::c_frameCount; i++)
     {
+        Descriptor::hOffset rtvHandle{};
+        assert(m_rtvHeap.At(i, rtvHandle));
+
         ThrowIfFailed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&m_renderTarget[i])));
-        m_device->CreateRenderTargetView(m_renderTarget[i].Get(), nullptr, m_rtvHeap.Offset(rtvHandle, i).cpuAddr);
+        m_device->CreateRenderTargetView(m_renderTarget[i].Get(), nullptr, rtvHandle.cpuAddr);
     }
 
     {
@@ -322,14 +376,14 @@ void Renderer::CreateDefaultTexture()
     WaitForGPU();
 }
 
-void Renderer::Execute(FnRendererExecutionBody Exec)
+void Renderer::Execute(FnRendererExecutionBody Record)
 {
     MoveToNextFrame();
 
     UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
 
-    ThrowIfFailed(m_commandAllocators[frameIndex].Reset());
-    ThrowIfFailed(m_commandList.Reset());
+    ThrowIfFailed(m_commandAllocators[frameIndex]->Reset());
+    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[frameIndex].Get(), nullptr));
 
     NSRenderer::Ctx ctx(
         NSRenderer::GraphicsCommandList(m_commandList.Get()),
@@ -341,9 +395,11 @@ void Renderer::Execute(FnRendererExecutionBody Exec)
         [this](size_t size) { return this->m_allocator.Allocate(size); }
     );
 
-    Exec(ctx);
+    Record(ctx);
 
     ThrowIfFailed(m_commandList->Close());
     ID3D12CommandList *const lists[] = { m_commandList.Get() };
     m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
+
+    WaitForGPU();
 }
