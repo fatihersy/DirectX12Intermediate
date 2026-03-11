@@ -18,22 +18,22 @@ public:
     virtual void OnResize(UINT width, UINT height) = 0;
     virtual void ToggleFullScreen() = 0;
 
-    std::wstring m_title;
-    UINT m_width{};
-    UINT m_height{};
-    RECT m_defaultWindowedRECT{};
-    bool m_isFullscreen{};
+    std::wstring im_title;
+    UINT im_width{};
+    UINT im_height{};
+    RECT im_defaultWindowedRECT{};
+    bool im_isFullscreen{};
    
-    static constexpr UINT c_frameCount = 2;
-    static constexpr UINT c_maxObjects = 110;
+    static constexpr UINT ic_frameCount = 2;
+    static constexpr UINT ic_maxObjects = 110;
 
-    float m_aspectRatio{};
-    std::wstring m_assetsPath;
-    std::wstring m_executablePath;
-    StepTimer m_timer;
+    float im_aspectRatio{};
+    std::wstring im_assetsPath;
+    std::wstring im_executablePath;
+    StepTimer im_timer;
 
     inline std::wstring GetAssetFullPath(const LPCWSTR assetName) const {
-        return m_assetsPath + assetName;
+        return im_assetsPath + assetName;
     }
 
     protected:

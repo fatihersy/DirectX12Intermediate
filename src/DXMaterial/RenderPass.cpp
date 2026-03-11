@@ -117,10 +117,18 @@ void GeometryPass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
         XMStoreFloat4x4(&frameCB.viewMatrix, XMMatrixTranspose(scene.m_camera.viewMatrix));
         XMStoreFloat4x4(&frameCB.projectionMatrix, XMMatrixTranspose(scene.m_camera.projectionMatrix));
         XMStoreFloat3(&frameCB.camPos, scene.m_camera.camEye);
-        frameCB.lightDir = scene.lightDir;
-        frameCB.lightColor = scene.lightColor;
+        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
     rendererCtx.cmdList.SetGraphicsRootConstantBufferView(0, frameCBAC.gpuAddr);
+
+    UINT width = IApp::GetInstance()->im_width;
+    UINT height = IApp::GetInstance()->im_height;
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
+    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
+
+    rendererCtx.cmdList.RSSetViewports(1, &viewport);
+    rendererCtx.cmdList.RSSetScissorRects(1, &scissor);
 
     m_pipeline.Bind(rendererCtx);
 
@@ -324,6 +332,29 @@ SkyDomePass::SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx)
             rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_SCATTERING).cpuAddr
         );
     }
+
+    {
+        m_timeOfDayDefault = 12.f;
+        float hourAngle = (m_timeOfDayDefault / 24.f) * DirectX::XM_2PI - DirectX::XM_PIDIV2;
+
+        DirectX::XMFLOAT3 sunDir;
+        sunDir.x = cos(hourAngle);
+        sunDir.y = sin(hourAngle);
+        sunDir.z = 0.f;
+
+        DirectX::XMVECTOR vSunDir = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&sunDir));
+
+        m_constantsUpload.BetaR = { 5.802e-6f, 13.558e-6f, 33.1e-6f };
+        m_constantsUpload.BetaMScatter = 3.996e-6f;
+        m_constantsUpload.BetaMExtinct = 3.996e-6f / 0.9f;
+        m_constantsUpload.MieG = 0.8f;
+        m_constantsUpload.HR = 8000.0f;
+        m_constantsUpload.HM = 1200.0f;
+        m_constantsUpload.Rg = 6360000.0f;
+        m_constantsUpload.Rt = 6420000.0f;
+        m_constantsUpload.SunIntensity = 20.0f;
+        DirectX::XMStoreFloat3(&m_constantsUpload.SunDir, vSunDir);
+    }
 }
 
 SkyDomePass::~SkyDomePass()
@@ -343,19 +374,38 @@ void SkyDomePass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
         XMStoreFloat4x4(&frameCB.viewMatrix, XMMatrixTranspose(scene.m_camera.viewMatrix));
         XMStoreFloat4x4(&frameCB.projectionMatrix, XMMatrixTranspose(scene.m_camera.projectionMatrix));
         XMStoreFloat3(&frameCB.camPos, scene.m_camera.camEye);
-        frameCB.lightDir = scene.lightDir;
-        frameCB.lightColor = scene.lightColor;
+        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
 
     Allocator::AllocCtx skyDomeCBAC = rendererCtx.allocConstBuff(sizeof(skyDomeConstants));
     skyDomeConstants& skyDomeCB = skyDomeCBAC.As<skyDomeConstants>();
 
+    UINT width = IApp::GetInstance()->im_width;
+    UINT height = IApp::GetInstance()->im_height;
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
+    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
+
+    rendererCtx.cmdList.RSSetViewports(1, &viewport);
+    rendererCtx.cmdList.RSSetScissorRects(1, &scissor);
+
     m_graphics.Bind(rendererCtx);
     rendererCtx.cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_FRAME, frameCBAC.gpuAddr);
     rendererCtx.cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_SKYDOME, skyDomeCBAC.gpuAddr);
 
-    if (m_constantsUpload != m_constantsDefault)
+    if (m_constantsUpload != m_constantsDefault or scene.m_timeOfDay != m_timeOfDayDefault)
     {
+        float hourAngle = (scene.m_timeOfDay / 24.f) * DirectX::XM_2PI - DirectX::XM_PIDIV2;
+
+        DirectX::XMFLOAT3 sunDir;
+        sunDir.x = cos(hourAngle);
+        sunDir.y = sin(hourAngle);
+        sunDir.z = 0.f;
+        DirectX::XMVECTOR vSunDir = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&sunDir));
+
+        scene.m_lightDir = DirectX::XMVectorNegate(vSunDir);
+        DirectX::XMStoreFloat3(&m_constantsUpload.SunDir, vSunDir);
+
         m_constantsDefault = m_constantsUpload;
         skyDomeCB = m_constantsDefault;
 

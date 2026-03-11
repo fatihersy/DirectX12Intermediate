@@ -4,6 +4,26 @@
 
 #include "IApp.h"
 
+Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, DirectX::XMVECTOR camEye, float camSpeed, float lookSens, float timeOfDay)
+    : m_device(device), m_wicFactory(wicFactory)
+{
+    m_camera.camEye = camEye;
+    m_camera.camFwd = { 0.f, 0.f, -1.f, 0.f };
+    m_camera.camUp = { 0.f, 1.f, 0.f, 0.f };
+    m_camera.camYaw = {};
+    m_camera.camPitch = {};
+    m_camera.camSpeed = camSpeed;
+    m_camera.lookSensitivity = lookSens;
+    m_camera.viewMatrix = {};
+
+    m_timeOfDay = timeOfDay;
+
+    m_camera.projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, IApp::GetInstance()->im_aspectRatio, .01f, 20000.f);
+
+    m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.0f);
+    m_lightColor = DirectX::XMVectorSet(0.9f, 0.9f, 0.9f, 1.0f);
+}
+
 void Scene::OnDestroy(NSRenderer::Ctx& rendererCtx)
 {
     std::for_each(m_models.begin(), m_models.end(), [&rendererCtx](Model& model) {

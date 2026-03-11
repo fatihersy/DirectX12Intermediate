@@ -26,9 +26,14 @@ public:
     void Resize(UINT width, UINT height);
     void WaitForGPU();
 
-    void onDestroy();
+    void OnDestroy();
 
     void Execute(FnRendererExecutionBody Record);
+
+    template<typename T, typename... Args>
+    inline void AddPass(Args&&... args) {
+        m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
+    }
 
     inline Descriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
         return m_srvHeap.AllocateRing(amount);
@@ -52,10 +57,10 @@ private:
     IDXGIFactory7* m_factory = nullptr;
 
     ComPtr<IDXGISwapChain4> m_swapchain;
-    ComPtr<ID3D12Resource2> m_renderTarget[IApp::c_frameCount];
+    ComPtr<ID3D12Resource2> m_renderTarget[IApp::ic_frameCount];
     ComPtr<ID3D12Resource2> m_depthStencil;
 
-    ComPtr<ID3D12CommandAllocator> m_commandAllocators[IApp::c_frameCount];
+    ComPtr<ID3D12CommandAllocator> m_commandAllocators[IApp::ic_frameCount];
     ComPtr<ID3D12CommandQueue> m_commandQueue;
     ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
@@ -72,13 +77,13 @@ private:
     FTexture m_fallbackTexture{};
     Descriptor::Handle m_fallbackTextureSRVHandle;
 
-    CD3DX12_VIEWPORT m_viewport{};
-    CD3DX12_RECT m_scissorRect{};
+    std::vector<std::unique_ptr<RenderPass::IRenderPass>> m_passes;
 
     void CreateSwapChain(IDXGIFactory7* factory, HWND hwnd, UINT width, UINT height);
     void CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription desc);
     void CreateDefaultTexture();
 
+    UINT m_frameIndex{};
     void MoveToNextFrame();
 
     static constexpr uint32_t FALLBACK_TEXTURE_SRV_INDEX = 0;

@@ -20,17 +20,17 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
 {
     s_instance = this;
 
-    m_defaultWindowedRECT = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
-    m_isFullscreen = false;
-    m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+    im_defaultWindowedRECT = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+    im_isFullscreen = false;
+    im_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
     plat = platform(width, height, title, hInstance, nCmdShow, s_instance);
 
-    m_assetsPath = std::filesystem::current_path().generic_wstring().append(L"/");
+    im_assetsPath = std::filesystem::current_path().generic_wstring().append(L"/");
 
     WCHAR executablePath[512];
     GetAssetsPath(executablePath, _countof(executablePath));
-    m_executablePath = executablePath;
+    im_executablePath = executablePath;
 
     ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
     ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory)));
@@ -59,7 +59,7 @@ void app::OnDestroy()
     m_keyboard.release();
     m_keyboard.reset();
 
-    m_renderer.onDestroy();
+    m_renderer.OnDestroy();
 
     m_wicFactory.Reset();
     m_factory.Reset();
@@ -89,7 +89,7 @@ void app::OnInit()
         initInfo.UserData = s_instance;
         initInfo.Device = m_device.Get();
         initInfo.CommandQueue = m_renderer.ImGui_getCmdQueue();
-        initInfo.NumFramesInFlight = IApp::c_frameCount;
+        initInfo.NumFramesInFlight = IApp::ic_frameCount;
         initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
@@ -161,7 +161,7 @@ void app::Run() {
     }
 }
 void app::OnUpdate() {
-    m_timer.Tick(NULL);
+    im_timer.Tick(NULL);
 
     ImGui_ImplDX12_NewFrame();
     ImGui::NewFrame();
@@ -212,13 +212,13 @@ void app::LoadPipeline() {
 
     }
 
-    m_renderer.Init(m_factory.Get(), m_device.Get(), plat.GetHWND(), m_width, m_height);
+    m_renderer.Init(m_factory.Get(), m_device.Get(), plat.GetHWND(), im_width, im_height);
 }
 void app::LoadAssets()
 {
     m_renderer.Execute([this](NSRenderer::Ctx& ctx)
     {
-        m_scene = Scene(m_device.Get(), m_wicFactory.Get());
+        m_scene = Scene(m_device.Get(), m_wicFactory.Get(), { 0.f, 0.f, 100.f, 0.f }, 10.f, .1f, 12.f);
 
         m_scene.AddObject<SDome>(ctx, "Sky Dome", {}, SDome{
             .radius = 10000.f,
@@ -312,7 +312,7 @@ void app::UpdateKeyBindings()
 
         if (DirectX::XMVector3Greater(DirectX::XMVector3LengthSq(move), DirectX::g_XMEpsilon)) {
             move = DirectX::XMVector3Normalize(move);
-            move = DirectX::XMVectorScale(move, m_scene.m_camera.camSpeed * static_cast<FLOAT>(m_timer.GetElapsedSeconds()));
+            move = DirectX::XMVectorScale(move, m_scene.m_camera.camSpeed * static_cast<FLOAT>(im_timer.GetElapsedSeconds()));
             m_scene.m_camera.camEye = DirectX::XMVectorAdd(m_scene.m_camera.camEye, move);
         }
     }
@@ -336,25 +336,25 @@ void app::UpdateMouseBindings()
 
 void app::OnResize(UINT width, UINT height)
 {
-    if (width == 0 or height == 0 or (width == m_width and height == m_height))
+    if (width == 0 or height == 0 or (width == im_width and height == im_height))
     {
         return;
     }
 
-    m_width = width;
-    m_height = height;
-    m_aspectRatio = static_cast<FLOAT>(m_width) / static_cast<FLOAT>(m_height);
+    im_width = width;
+    im_height = height;
+    im_aspectRatio = static_cast<FLOAT>(im_width) / static_cast<FLOAT>(im_height);
 
-    m_renderer.Resize(m_width, m_height);
+    m_renderer.Resize(im_width, im_height);
 
     DirectX::XMMATRIX& projectionMatrix = m_scene.m_camera.projectionMatrix;
     const DirectX::XMMATRIX oldProjection = projectionMatrix;
-    projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, m_aspectRatio, m_scene.NEAR_CLIP, m_scene.FAR_CLIP);
+    projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, im_aspectRatio, m_scene.NEAR_CLIP, m_scene.FAR_CLIP);
 }
 
 void app::ToggleFullScreen()
 {
-    m_isFullscreen = not m_isFullscreen;
+    im_isFullscreen = not im_isFullscreen;
 
     MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
     GetMonitorInfo(MonitorFromWindow(plat.GetHWND(), MONITOR_DEFAULTTOPRIMARY), &monitorInfo);
@@ -363,7 +363,7 @@ void app::ToggleFullScreen()
     const UINT monitorLeft = monitorInfo.rcMonitor.left;
     const UINT monitorTop = monitorInfo.rcMonitor.top;
 
-    if (m_isFullscreen)
+    if (im_isFullscreen)
     {
         SetWindowLong(plat.GetHWND(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
         SetWindowPos(plat.GetHWND(), HWND_TOP, monitorInfo.rcMonitor.left, monitorInfo.rcMonitor.top, monitorWidth, monitorHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
@@ -372,8 +372,8 @@ void app::ToggleFullScreen()
         return;
     }
 
-    const UINT windowWidth  = m_defaultWindowedRECT.right - m_defaultWindowedRECT.left;
-    const UINT windowHeight = m_defaultWindowedRECT.bottom - m_defaultWindowedRECT.top;
+    const UINT windowWidth  = im_defaultWindowedRECT.right - im_defaultWindowedRECT.left;
+    const UINT windowHeight = im_defaultWindowedRECT.bottom - im_defaultWindowedRECT.top;
 
     const UINT windowLeft = monitorLeft + static_cast<UINT>(monitorWidth / 2.f) - static_cast<UINT>(windowWidth / 2.f);
     const UINT windowTop  = monitorTop + static_cast<UINT>(monitorHeight / 2.f) - static_cast<UINT>(windowHeight / 2.f);

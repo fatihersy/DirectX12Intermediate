@@ -60,7 +60,7 @@ void Model::ProcessNode(NSRenderer::Ctx& rendererCtx, aiNode* node, const aiScen
 
         ProcessMesh(pAiMesh, scene, node, mesh);
     }
-    if (meshes.size() > IApp::GetInstance()->c_maxObjects)
+    if (meshes.size() > IApp::GetInstance()->ic_maxObjects)
     {
         throw std::out_of_range("Meshes got out of range");
     }

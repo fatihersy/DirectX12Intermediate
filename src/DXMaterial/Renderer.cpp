@@ -24,17 +24,17 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, U
 
     CreateSwapChain(factory, hwnd, width, height);
 
-    m_rtvHeap = Descriptor::StaticHeap(m_device, L"Renderer::m_rtvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_RTV, IApp::c_frameCount, false);
+    m_rtvHeap = Descriptor::StaticHeap(m_device, L"Renderer::m_rtvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_RTV, IApp::ic_frameCount, false);
     m_dsvHeap = Descriptor::StaticHeap(m_device, L"Renderer::m_dsvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1u, false);
     m_srvHeap = Descriptor::RingHeap(m_device, L"Renderer::m_srvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        IApp::c_maxObjects * static_cast<UINT>(FTextureType::FTextureType_MAX) + 1024,
-        IApp::c_frameCount
+        IApp::ic_maxObjects * static_cast<UINT>(FTextureType::FTextureType_MAX) + 1024,
+        IApp::ic_frameCount
     );
     
     // Create frame resources
     {
-        Descriptor::Handle handle = m_rtvHeap.Allocate(IApp::c_frameCount);
-        for (UINT n = 0; n < IApp::c_frameCount; n++)
+        Descriptor::Handle handle = m_rtvHeap.Allocate(IApp::ic_frameCount);
+        for (UINT n = 0; n < IApp::ic_frameCount; n++)
         {
             ThrowIfFailed(m_swapchain->GetBuffer(n, IID_PPV_ARGS(&m_renderTarget[n])));
             m_device->CreateRenderTargetView(m_renderTarget[n].Get(), nullptr, m_rtvHeap.Offset(handle, n).cpuAddr);
@@ -74,16 +74,18 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, U
 }
 Renderer::~Renderer() {}
 
-void Renderer::onDestroy()
+void Renderer::OnDestroy()
 {
     WaitForGPU();
 
     m_fallbackTexture = {};
     m_allocator = {};
 
+    m_passes.clear();
+
     m_swapchain.Reset();
 
-    for (UINT i = 0; i < IApp::c_frameCount; i++) {
+    for (UINT i = 0; i < IApp::ic_frameCount; i++) {
         m_renderTarget[i].Reset();
         m_commandAllocators[i].Reset();
     }
@@ -111,25 +113,23 @@ void Renderer::DrawScene(Scene& scene)
 
 void Renderer::BeginFrame()
 {
-    UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
-
-    ThrowIfFailed(m_commandAllocators[frameIndex]->Reset());
-    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[frameIndex].Get(), nullptr));
+    ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
+    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
 
     {
         CD3DX12_RESOURCE_BARRIER barriers[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET)
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET)
         };
 
         m_commandList->ResourceBarrier(_countof(barriers), barriers);
     }
 
-    m_srvHeap.BeginFrame(frameIndex);
-    m_allocator.BeginFrame(frameIndex);
+    m_srvHeap.BeginFrame(m_frameIndex);
+    m_allocator.BeginFrame(m_frameIndex);
 
     Descriptor::hOffset rtvHandle{};
     Descriptor::hOffset dsvHandle{};
-    assert(m_rtvHeap.At(frameIndex, rtvHandle));
+    assert(m_rtvHeap.At(m_frameIndex, rtvHandle));
     assert(m_dsvHeap.At(0u, dsvHandle));
 
     m_commandList->OMSetRenderTargets(1, &rtvHandle.cpuAddr, FALSE, &dsvHandle.cpuAddr);
@@ -144,11 +144,9 @@ void Renderer::BeginFrame()
 }
 void Renderer::EndFrame()
 {
-    UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
-
     {
         CD3DX12_RESOURCE_BARRIER barriers[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT)
+            CD3DX12_RESOURCE_BARRIER::Transition(m_renderTarget[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT)
         };
 
         m_commandList->ResourceBarrier(_countof(barriers), barriers);
@@ -164,13 +162,11 @@ void Renderer::EndFrame()
     MoveToNextFrame();
 }
 
-
-
 void Renderer::Resize(UINT width, UINT height)
 {
     WaitForGPU();
 
-    for (UINT i = 0; i < IApp::c_frameCount; i++)
+    for (UINT i = 0; i < IApp::ic_frameCount; i++)
     {
         m_renderTarget[i].Reset();
     }
@@ -179,12 +175,12 @@ void Renderer::Resize(UINT width, UINT height)
     {
         DXGI_SWAP_CHAIN_DESC1 desc{};
         m_swapchain->GetDesc1(&desc);
-        ThrowIfFailed(m_swapchain->ResizeBuffers(IApp::c_frameCount, width, height, desc.Format, desc.Flags));
+        ThrowIfFailed(m_swapchain->ResizeBuffers(IApp::ic_frameCount, width, height, desc.Format, desc.Flags));
     }
 
     UINT frameIndex = m_swapchain->GetCurrentBackBufferIndex();
 
-    for (UINT i = 0; i < IApp::c_frameCount; i++)
+    for (UINT i = 0; i < IApp::ic_frameCount; i++)
     {
         Descriptor::hOffset rtvHandle{};
         assert(m_rtvHeap.At(i, rtvHandle));
@@ -207,9 +203,6 @@ void Renderer::Resize(UINT width, UINT height)
         desc.Flags = D3D12_DSV_FLAG_NONE;
         m_device->CreateDepthStencilView(m_depthStencil.Get(), &desc, m_dsvHeap.GetCpuStart());
     }
-
-    m_viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
-    m_scissorRect = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
 }
 
 void Renderer::MoveToNextFrame()
@@ -222,6 +215,8 @@ void Renderer::MoveToNextFrame()
         ThrowIfFailed(m_fence->SetEventOnCompletion(fenceGen, m_fenceEvent));
         WaitForSingleObjectEx(m_fenceEvent, INFINITE, false);
     }
+
+    m_frameIndex = m_swapchain->GetCurrentBackBufferIndex();
 }
 void Renderer::WaitForGPU()
 {
@@ -243,7 +238,7 @@ void Renderer::CreateSwapChain(IDXGIFactory7* factory, HWND hwnd, UINT width, UI
         m_swapchain.Reset();
 
     DXGI_SWAP_CHAIN_DESC1 desc{};
-    desc.BufferCount = IApp::c_frameCount;
+    desc.BufferCount = IApp::ic_frameCount;
     desc.Width = width;
     desc.Height = height;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;

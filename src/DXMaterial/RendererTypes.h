@@ -1,7 +1,5 @@
 #pragma once
 
-
-
 struct frameConstants
 {
     DirectX::XMFLOAT4X4 viewMatrix{};
@@ -318,5 +316,26 @@ namespace NSRenderer
         [[nodiscard]] inline bool Assert() {
             return cmdList.Raw() != nullptr;
         }
+    };
+}
+
+class Scene;
+namespace RenderPass {
+
+
+    class IRenderPass
+    {
+    public:
+        virtual ~IRenderPass() = default;
+
+        virtual void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) = 0;
+        virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) = 0;
+        virtual void Destroy() = 0;
+
+        bool IsEnabled() const { return im_isEnabled; }
+        void SetEnabled(bool newVal) { im_isEnabled = newVal; }
+
+    private:
+        bool im_isEnabled{};
     };
 }

@@ -2,27 +2,8 @@
 
 #include "Pipeline.h"
 
-class Renderer;
-class Scene;
-
 namespace RenderPass
 {
-    class IRenderPass
-    {
-    public:
-        virtual ~IRenderPass() = default;
-
-        virtual void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) = 0;
-        virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) = 0;
-        virtual void Destroy() = 0;
-
-        bool IsEnabled() const { return im_isEnabled; }
-        void SetEnabled(bool newVal) { im_isEnabled = newVal; }
-
-    private:
-        bool im_isEnabled{};
-    };
-
     class GeometryPass : public IRenderPass
     {
     public:
@@ -46,7 +27,6 @@ namespace RenderPass
         void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) override;
 
-        float m_timeOfDay{};
         skyDomeConstants m_constantsUpload{};
     private:
         ComPtr<ID3D12RootSignature> m_rootSignature;
@@ -65,6 +45,7 @@ namespace RenderPass
         static constexpr UINT IDX_ROOT_DESC_TABLE_UAV = 3u;
         static constexpr UINT IDX_ROOT_DESC_TABLE_SRV = 4u;
 
+        float m_timeOfDayDefault{};
         skyDomeConstants m_constantsDefault{};
         static constexpr UINT IDX_CBV_FRAME = 0u;
         static constexpr UINT IDX_CBV_MESH = 1u;

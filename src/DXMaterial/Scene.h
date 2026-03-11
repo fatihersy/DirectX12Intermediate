@@ -38,9 +38,7 @@ class Frustum {
 class Scene {
 public:
     Scene(){};
-    Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory) : m_device(device), m_wicFactory(wicFactory)
-    {
-    }
+    Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, DirectX::XMVECTOR camEye, float camSpeed, float lookSens, float timeOfDay);
     ~Scene();
 
     void OnDestroy(NSRenderer::Ctx& rendererCtx);
@@ -79,8 +77,8 @@ public:
 
     float m_timeOfDay{};
 
-    DirectX::XMFLOAT4 lightDir{};
-    DirectX::XMFLOAT4 lightColor{};
+    DirectX::XMVECTOR m_lightDir{};
+    DirectX::XMVECTOR m_lightColor{};
 
     static constexpr float FAR_CLIP = 20000.f;
     static constexpr float NEAR_CLIP = .01f;

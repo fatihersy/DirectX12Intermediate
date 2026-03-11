@@ -59,7 +59,7 @@ platform::platform(UINT width, UINT height, std::wstring title, HINSTANCE hInsta
     windowClass.lpszClassName = L"WinMain";
     RegisterClassEx(&windowClass);
 
-    AdjustWindowRect(&iApp->m_defaultWindowedRECT, WS_OVERLAPPEDWINDOW, FALSE);
+    AdjustWindowRect(&iApp->im_defaultWindowedRECT, WS_OVERLAPPEDWINDOW, FALSE);
 
     m_hwnd = CreateWindow(
         windowClass.lpszClassName,
@@ -67,8 +67,8 @@ platform::platform(UINT width, UINT height, std::wstring title, HINSTANCE hInsta
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        iApp->m_defaultWindowedRECT.right - iApp->m_defaultWindowedRECT.left,
-        iApp->m_defaultWindowedRECT.bottom - iApp->m_defaultWindowedRECT.top,
+        iApp->im_defaultWindowedRECT.right - iApp->im_defaultWindowedRECT.left,
+        iApp->im_defaultWindowedRECT.bottom - iApp->im_defaultWindowedRECT.top,
         nullptr,
         nullptr,
         m_hInstance,
