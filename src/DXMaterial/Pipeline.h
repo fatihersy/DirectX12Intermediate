@@ -16,7 +16,7 @@ struct GRAPHICS_PIPELINE_STATE_DESC
     D3D12_PIPELINE_STATE_FLAGS Flags;
 };
 
-using FnSetFootSignature = std::function<void(CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC& desc)>;
+using FnSetFootSignature = std::function<void(D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error)>;
 
 class ShaderCompiler
 {
@@ -65,11 +65,11 @@ public:
     GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
     GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature setRootSignature);
 
-    inline void Bind(NSRenderer::Ctx& rendererCtx) const {
+    inline void Bind(NSRenderer::GraphicsCommandList cmdList) const {
         if (im_pipeline and im_rootSignature)
         {
-            rendererCtx.cmdList.SetPipelineState(im_pipeline.Get());
-            rendererCtx.cmdList.SetGraphicsRootSignature(im_rootSignature);
+            cmdList.SetPipelineState(im_pipeline.Get());
+            cmdList.SetGraphicsRootSignature(im_rootSignature);
             return;
         }
         throw std::runtime_error("Invalid use");
@@ -94,20 +94,12 @@ public:
     ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
     ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature);
 
-    inline void BindPipe(NSRenderer::Ctx& rendererCtx) const
+    inline void Bind(NSRenderer::GraphicsCommandList cmdList) const
     {
         if (im_pipeline)
         {
-            rendererCtx.cmdList.SetPipelineState(im_pipeline.Get());
-            return;
-        }
-        throw std::runtime_error("Invalid use");
-    }
-    inline void BindRoot(NSRenderer::Ctx& rendererCtx) const
-    {
-        if (im_rootSignature)
-        {
-            rendererCtx.cmdList.SetComputeRootSignature(im_rootSignature);
+            cmdList.SetPipelineState(im_pipeline.Get());
+            cmdList.SetComputeRootSignature(im_rootSignature);
             return;
         }
         throw std::runtime_error("Invalid use");

@@ -22,7 +22,7 @@ Model::Model(_In_ const char* name, ID3D12Device* device, _In_ IWICImagingFactor
 }
 
 _Use_decl_annotations_
-bool Model::Load(NSRenderer::Ctx& rendererCtx, const std::filesystem::path& path)
+bool Model::Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path)
 {
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(path.generic_string(),
@@ -46,7 +46,7 @@ bool Model::Load(NSRenderer::Ctx& rendererCtx, const std::filesystem::path& path
 }
 
 _Use_decl_annotations_
-void Model::ProcessNode(NSRenderer::Ctx& rendererCtx, aiNode* node, const aiScene* scene)
+void Model::ProcessNode(NSRenderer::Ctx rendererCtx, aiNode* node, const aiScene* scene)
 {
     assert(node and scene and node);
 
@@ -322,7 +322,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, _In_ aiNode* node
 }
 
 _Use_decl_annotations_
-void Model::UploadGPU(NSRenderer::Ctx& rendererCtx)
+void Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     assert(isOnCPU);
 
@@ -345,14 +345,14 @@ void Model::UploadGPU(NSRenderer::Ctx& rendererCtx)
         ));
     }
 
-    rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
 
     barriers.clear();
 
     for (Mesh& mesh : meshes)
     {
-        rendererCtx.cmdList.CopyResource(mesh.defaultVertexBuffer.Get(), mesh.uploadVertexBuffer.Get());
-        rendererCtx.cmdList.CopyResource(mesh.defaultIndexBuffer.Get(), mesh.uploadIndexBuffer.Get());
+        cmdList.CopyResource(mesh.defaultVertexBuffer.Get(), mesh.uploadVertexBuffer.Get());
+        cmdList.CopyResource(mesh.defaultIndexBuffer.Get(), mesh.uploadIndexBuffer.Get());
 
         barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
             mesh.defaultVertexBuffer.Get(),
@@ -366,17 +366,17 @@ void Model::UploadGPU(NSRenderer::Ctx& rendererCtx)
         ));
     }
 
-    rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
 
     for (Mesh& mesh : meshes)
     {
-        mesh.material.UploadGPU(m_device, rendererCtx);
+        mesh.material.UploadGPU(m_device, rendererCtx, cmdList);
     }
 
     isOnGPU = true;
 }
 
-void Model::Draw(NSRenderer::Ctx& rendererCtx)
+void Model::Draw(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
     DirectX::XMMATRIX globalPosition = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&m_position));
@@ -394,8 +394,7 @@ void Model::Draw(NSRenderer::Ctx& rendererCtx)
         DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
         DirectX::XMVECTOR det;
         DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
-        DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixTranspose(worldInverse);
-        DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, normalMatrix);
+        DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
 
         meshCB.baseColor = mesh.material.m_baseColor;
         meshCB.metallic = mesh.material.m_metallic;
@@ -403,13 +402,13 @@ void Model::Draw(NSRenderer::Ctx& rendererCtx)
         meshCB.opacity = mesh.material.m_opacity;
         meshCB.textureFlags = mesh.material.m_textureFlags;
 
-        rendererCtx.cmdList.SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
+        cmdList.SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
 
-        mesh.material.Bind(rendererCtx);
+        mesh.material.Bind(cmdList);
 
-        rendererCtx.cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-        rendererCtx.cmdList.IASetIndexBuffer(&mesh.indexBufferView);
-        rendererCtx.cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+        cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+        cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+        cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
     }
 }
 void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach)
@@ -463,7 +462,7 @@ void Model::ResetUploadHeaps() {
     isOnCPU = false;
 }
 
-void Model::UnloadGPU(NSRenderer::Ctx& rendererCtx)
+void Model::UnloadGPU(NSRenderer::Ctx rendererCtx)
 {
     for (Mesh& mesh : meshes)
     {
@@ -478,7 +477,7 @@ void Model::UnloadGPU(NSRenderer::Ctx& rendererCtx)
     isOnCPU = false;
 }
 
-Model&& Model::_As(NSRenderer::Ctx& rendererCtx, const char* name, EPrimitive type, void* pDesc)
+Model&& Model::_As(NSRenderer::Ctx rendererCtx, const char* name, EPrimitive type, void* pDesc)
 {
     assert(name and pDesc and type > EPrimitive::PRIMITIVE_TYPE_NONE and type < EPrimitive::PRIMITIVE_TYPE_MAX);
 

@@ -24,7 +24,7 @@ Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, DirectX::X
     m_lightColor = DirectX::XMVectorSet(0.9f, 0.9f, 0.9f, 1.0f);
 }
 
-void Scene::OnDestroy(NSRenderer::Ctx& rendererCtx)
+void Scene::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
     std::for_each(m_models.begin(), m_models.end(), [&rendererCtx](Model& model) {
         model.UnloadGPU(rendererCtx);

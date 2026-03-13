@@ -34,18 +34,16 @@ Pipeline::Pipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignatur
         rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
     }
 
-    CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc;
-    SetRootSignature(rsDesc);
-
     ComPtr<ID3D10Blob> signature;
     ComPtr<ID3D10Blob> error;
-    HRESULT hr = D3DX12SerializeVersionedRootSignature(&rsDesc, rsData.HighestVersion, &signature, &error);
-    if (FAILED(hr)) {
+    SetRootSignature(rsData.HighestVersion, signature, error);
+
+    if (!signature) {
         if (error) {
             const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
             g_FError(errorMsg);
         }
-        throw std::runtime_error("Failed to serialize sky dome root signature");
+        throw std::runtime_error("Failed to serialize root signature");
     }
     ThrowIfFailed(im_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSig)));
     rootSig->SetName(FString::wformat("%s::%s", pipelineName, "RootSignature").c_str());

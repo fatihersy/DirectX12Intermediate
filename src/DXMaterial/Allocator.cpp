@@ -1,9 +1,10 @@
 #include "stdafx.h"
 #include "Allocator.h"
 
-ConstBuffAlloc::ConstBuffAlloc(ID3D12Device* device, size_t totalSize)
+ConstBuffAlloc::ConstBuffAlloc(ID3D12Device* device, size_t totalSize, UINT frameCount)
 {
     m_blobTotalSize = totalSize;
+    m_blobFrameSize = totalSize / frameCount;
 
     D3D12_HEAP_PROPERTIES heapProps{};
     heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -92,7 +93,10 @@ Allocator::AllocCtx ConstBuffAlloc::Allocate(size_t size)
     constexpr size_t alignment = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
     size_t aligned = (m_blobOffset + alignment - 1) & ~(alignment - 1);
 
-    assert(aligned + size <= m_blobFrameEnd && "Frame Overflow");
+    if (aligned + size >= m_blobFrameEnd)
+    {
+        throw std::runtime_error("Frame Overflow");
+    }
 
     Allocator::AllocCtx ctx{};
     ctx.gpuAddr = m_gpuAddr + aligned;

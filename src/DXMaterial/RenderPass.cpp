@@ -10,16 +10,9 @@
 
 using namespace RenderPass;
 
-GeometryPass::GeometryPass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx)
-    : m_pipeline(GraphicsPipeline(device, L"GeometryPass::Graphics", [&device](CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC& desc)
+GeometryPass::GeometryPass(ID3D12Device14* device, NSRenderer::Ctx rendererCtx)
+    : m_pipeline(GraphicsPipeline(device, L"GeometryPass::Graphics", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error)
     {
-        D3D12_FEATURE_DATA_ROOT_SIGNATURE rsData{};
-        rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
-
-        if (FAILED(device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &rsData, sizeof(rsData)))) {
-            rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
-        }
-
         CD3DX12_DESCRIPTOR_RANGE1 srvRange[1]{};
         srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, static_cast<INT>(FTextureType::FTextureType_MAX), 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
 
@@ -41,7 +34,10 @@ GeometryPass::GeometryPass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx)
         sampler.RegisterSpace = 0;
         sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC desc;
         desc.Init_1_1(_countof(rp), rp, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
     }))
 {
     // Pipeline
@@ -103,9 +99,11 @@ GeometryPass::~GeometryPass(){
     
 }
 
-void GeometryPass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
+void GeometryPass::Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     if (not IsEnabled()) return;
+
+    m_pipeline.Bind(cmdList);
 
     // Per-frame constants
     Allocator::AllocCtx frameCBAC = rendererCtx.allocConstBuff(sizeof(frameConstants));
@@ -114,33 +112,31 @@ void GeometryPass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
 
         frameConstants& frameCB = frameCBAC.As<frameConstants>();
 
-        XMStoreFloat4x4(&frameCB.viewMatrix, XMMatrixTranspose(scene.m_camera.viewMatrix));
-        XMStoreFloat4x4(&frameCB.projectionMatrix, XMMatrixTranspose(scene.m_camera.projectionMatrix));
+        XMStoreFloat4x4(&frameCB.viewMatrix, scene.m_camera.viewMatrix);
+        XMStoreFloat4x4(&frameCB.projectionMatrix, scene.m_camera.projectionMatrix);
         XMStoreFloat3(&frameCB.camPos, scene.m_camera.camEye);
         XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
         XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
-    rendererCtx.cmdList.SetGraphicsRootConstantBufferView(0, frameCBAC.gpuAddr);
+    cmdList.SetGraphicsRootConstantBufferView(0, frameCBAC.gpuAddr);
 
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
     CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
     RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
 
-    rendererCtx.cmdList.RSSetViewports(1, &viewport);
-    rendererCtx.cmdList.RSSetScissorRects(1, &scissor);
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
 
-    m_pipeline.Bind(rendererCtx);
-
-    for (Model& model : scene.m_models)
+    for (size_t i = 1u; i < scene.m_models.size(); i++)
     {
-        model.Draw(rendererCtx);
+        scene.m_models[i].Draw(rendererCtx, cmdList);
     }
 }
-void GeometryPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx)
+void GeometryPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {}
 
-SkyDomePass::SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx)
+SkyDomePass::SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx rendererCtx)
 {
     // Sky Dome Pipeline Root
     {
@@ -361,37 +357,18 @@ SkyDomePass::~SkyDomePass()
 {
 }
 
-void SkyDomePass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
+void SkyDomePass::Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     if (not IsEnabled()) return;
 
-    Allocator::AllocCtx frameCBAC = rendererCtx.allocConstBuff(sizeof(frameConstants));
-    {
-        using namespace DirectX;
-
-        frameConstants& frameCB = frameCBAC.As<frameConstants>();
-
-        XMStoreFloat4x4(&frameCB.viewMatrix, XMMatrixTranspose(scene.m_camera.viewMatrix));
-        XMStoreFloat4x4(&frameCB.projectionMatrix, XMMatrixTranspose(scene.m_camera.projectionMatrix));
-        XMStoreFloat3(&frameCB.camPos, scene.m_camera.camEye);
-        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
-        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
-    }
-
-    Allocator::AllocCtx skyDomeCBAC = rendererCtx.allocConstBuff(sizeof(skyDomeConstants));
-    skyDomeConstants& skyDomeCB = skyDomeCBAC.As<skyDomeConstants>();
 
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
     CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
     RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
 
-    rendererCtx.cmdList.RSSetViewports(1, &viewport);
-    rendererCtx.cmdList.RSSetScissorRects(1, &scissor);
-
-    m_graphics.Bind(rendererCtx);
-    rendererCtx.cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_FRAME, frameCBAC.gpuAddr);
-    rendererCtx.cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_SKYDOME, skyDomeCBAC.gpuAddr);
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
 
     if (m_constantsUpload != m_constantsDefault or scene.m_timeOfDay != m_timeOfDayDefault)
     {
@@ -407,44 +384,61 @@ void SkyDomePass::Execute(Scene& scene, NSRenderer::Ctx& rendererCtx)
         DirectX::XMStoreFloat3(&m_constantsUpload.SunDir, vSunDir);
 
         m_constantsDefault = m_constantsUpload;
-        skyDomeCB = m_constantsDefault;
+        m_timeOfDayDefault = scene.m_timeOfDay;
 
-        UpdateSkyDome(rendererCtx);
+        UpdateSkyDome(rendererCtx, cmdList);
     }
 
-    std::for_each(scene.m_models.begin(), scene.m_models.end(), [this, &rendererCtx](Model& model)
+    Allocator::AllocCtx skyDomeCBAC = rendererCtx.allocConstBuff(sizeof(skyDomeConstants));
+    skyDomeConstants& skyDomeCB = skyDomeCBAC.As<skyDomeConstants>();
+    skyDomeCB = m_constantsDefault;
+
+    Allocator::AllocCtx frameCBAC = rendererCtx.allocConstBuff(sizeof(frameConstants));
     {
-        model.Draw([this, &rendererCtx](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
-        {
-            Allocator::AllocCtx allocCtx = rendererCtx.allocConstBuff(sizeof(meshConstants));
-            meshConstants& meshCB = allocCtx.As<meshConstants>();
-            rendererCtx.cmdList.SetGraphicsRootConstantBufferView(1, allocCtx.gpuAddr);
+        using namespace DirectX;
 
-            DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
-            DirectX::XMVECTOR det;
-            DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
-            DirectX::XMMATRIX normalMatrix = DirectX::XMMatrixTranspose(worldInverse);
-            DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, normalMatrix);
+        frameConstants& frameCB = frameCBAC.As<frameConstants>();
 
-            meshCB.baseColor = mesh.material.m_baseColor;
-            meshCB.metallic = mesh.material.m_metallic;
-            meshCB.roughness = mesh.material.m_roughness;
-            meshCB.opacity = mesh.material.m_opacity;
-            meshCB.textureFlags = mesh.material.m_textureFlags;
+        XMStoreFloat4x4(&frameCB.viewMatrix, scene.m_camera.viewMatrix);
+        XMStoreFloat4x4(&frameCB.projectionMatrix, scene.m_camera.projectionMatrix);
+        XMStoreFloat3(&frameCB.camPos, scene.m_camera.camEye);
+        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
+    }
 
-            rendererCtx.cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-            rendererCtx.cmdList.IASetIndexBuffer(&mesh.indexBufferView);
-            rendererCtx.cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
-        });
+    m_graphics.Bind(cmdList);
+    cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_FRAME, frameCBAC.gpuAddr);
+    cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_SKYDOME, skyDomeCBAC.gpuAddr);
+    cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_TABLE_SRV, rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE).gpuAddr);
+
+    scene.m_models[0].Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+    {
+        Allocator::AllocCtx allocCtx = rendererCtx.allocConstBuff(sizeof(meshConstants));
+        meshConstants& meshCB = allocCtx.As<meshConstants>();
+        cmdList.SetGraphicsRootConstantBufferView(IDX_CBV_MESH, allocCtx.gpuAddr);
+
+        DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
+        DirectX::XMVECTOR det;
+        DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
+        DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
+
+        meshCB.baseColor = mesh.material.m_baseColor;
+        meshCB.metallic = mesh.material.m_metallic;
+        meshCB.roughness = mesh.material.m_roughness;
+        meshCB.opacity = mesh.material.m_opacity;
+        meshCB.textureFlags = mesh.material.m_textureFlags;
+
+        cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+        cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+        cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
     });
 }
 
-void SkyDomePass::UpdateSkyDome(NSRenderer::Ctx& rendererCtx)
+void SkyDomePass::UpdateSkyDome(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     {
         CD3DX12_RESOURCE_BARRIER barriers[] = {
-            CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
-                CD3DX12_RESOURCE_BARRIER::Transition(
+            CD3DX12_RESOURCE_BARRIER::Transition(
                 m_trasmittanceLUT.Get(),
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS
@@ -455,42 +449,53 @@ void SkyDomePass::UpdateSkyDome(NSRenderer::Ctx& rendererCtx)
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS
             )
         };
-        rendererCtx.cmdList.ResourceBarrier(_countof(barriers), barriers);
+        cmdList.ResourceBarrier(_countof(barriers), barriers);
     }
 
-    m_transmittance.BindPipe(rendererCtx);
-    rendererCtx.cmdList.Dispatch(
+    Allocator::AllocCtx constantsAC = rendererCtx.allocConstBuff(sizeof(skyDomeConstants));
+    skyDomeConstants& cb = constantsAC.As<skyDomeConstants>();
+    cb = m_constantsDefault;
+
+    m_transmittance.Bind(cmdList);
+    cmdList.SetComputeRootConstantBufferView(IDX_CBV_SKYDOME, constantsAC.gpuAddr);
+    cmdList.SetComputeRootDescriptorTable(IDX_ROOT_DESC_TABLE_UAV, rendererCtx.offsetSRV(m_srvHandle, IDX_UAV_TRANSMITTANCE).gpuAddr);
+    cmdList.Dispatch(
         (256 + 7) / 8,
         (64 + 7) / 8,
         1
     );
 
-    m_scattering.BindPipe(rendererCtx);
-    rendererCtx.cmdList.Dispatch(
+    // Transition transmittance UAV -> SRV so scattering compute can read it
+    {
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_trasmittanceLUT.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+        );
+        cmdList.ResourceBarrier(1, &barrier);
+    }
+
+    m_scattering.Bind(cmdList);
+    cmdList.SetComputeRootConstantBufferView(IDX_CBV_SKYDOME, constantsAC.gpuAddr);
+    cmdList.SetComputeRootDescriptorTable(IDX_ROOT_DESC_TABLE_UAV, rendererCtx.offsetSRV(m_srvHandle, IDX_UAV_SCATTERING).gpuAddr);
+    cmdList.SetComputeRootDescriptorTable(IDX_ROOT_DESC_TABLE_SRV, rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE).gpuAddr);
+    cmdList.Dispatch(
         (32 + 3) / 4,
         (128 + 3) / 4,
         (256 + 3) / 4
     );
-        
+
     {
-        CD3DX12_RESOURCE_BARRIER barriers[] = {
-            CD3DX12_RESOURCE_BARRIER::UAV(m_trasmittanceLUT.Get()),
-                CD3DX12_RESOURCE_BARRIER::Transition(
-                m_trasmittanceLUT.Get(),
-                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-            ),
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                m_scatteringLUT.Get(),
-                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-            )
-        };
-        rendererCtx.cmdList.ResourceBarrier(_countof(barriers), barriers);
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_scatteringLUT.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+        );
+        cmdList.ResourceBarrier(1, &barrier);
     }
 }
 
-void SkyDomePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx)
+void SkyDomePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {
 
 }

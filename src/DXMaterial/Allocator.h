@@ -4,7 +4,7 @@ class ConstBuffAlloc
 {
 public:
     ConstBuffAlloc() {};
-    ConstBuffAlloc(ID3D12Device* device, size_t totalSize);
+    ConstBuffAlloc(ID3D12Device* device, size_t totalSize, UINT frameCount);
     ~ConstBuffAlloc();
 
     ConstBuffAlloc(const ConstBuffAlloc&) = delete;

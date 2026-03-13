@@ -117,15 +117,15 @@ HRESULT Material::LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, 
     return S_OK;
 }
 
-void Material::Bind(NSRenderer::Ctx& rendererCtx) const
+void Material::Bind(NSRenderer::GraphicsCommandList cmdList) const
 {
     if (not m_isOnGPU) return;
 
-    rendererCtx.cmdList.SetGraphicsRootDescriptorTable(2, m_srvHandle.gpuAddr);
+    cmdList.SetGraphicsRootDescriptorTable(2, m_srvHandle.gpuAddr);
     return;
 }
 
-void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx& rendererCtx)
+void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     assert(device);
     
@@ -201,7 +201,7 @@ void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx& rendererCtx)
         ));
     }
 
-    rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     barriers.clear();
 
     uint32_t texIndex = 0u;
@@ -222,7 +222,7 @@ void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx& rendererCtx)
         dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         dstLoc.SubresourceIndex = 0;
 
-        rendererCtx.cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+        cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 
         barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
             tex.defaultBuffer.Get(),
@@ -242,13 +242,13 @@ void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx& rendererCtx)
 
     if (not barriers.empty())
     {
-        rendererCtx.cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     }
 
     m_isOnGPU = true;
 }
 
-void Material::UnloadGPU(NSRenderer::Ctx& rendererCtx)
+void Material::UnloadGPU(NSRenderer::Ctx rendererCtx)
 {
     if (not m_isOnGPU) return;
     

@@ -50,7 +50,7 @@ void app::OnDestroy()
     ImGui::DestroyContext();
     m_imGuiSrvHeap.Reset();
 
-    m_renderer.Execute([this](NSRenderer::Ctx ctx){
+    m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList){
         m_scene.OnDestroy(ctx);
     });
 
@@ -216,7 +216,7 @@ void app::LoadPipeline() {
 }
 void app::LoadAssets()
 {
-    m_renderer.Execute([this](NSRenderer::Ctx& ctx)
+    m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
     {
         m_scene = Scene(m_device.Get(), m_wicFactory.Get(), { 0.f, 0.f, 100.f, 0.f }, 10.f, .1f, 12.f);
 
@@ -258,6 +258,13 @@ void app::LoadAssets()
                 idx++;
             }
         }
+
+        for (Model& model : m_scene.m_models) {
+            model.UploadGPU(ctx, cmdList);
+        }
+
+        m_renderer.AddPass<RenderPass::SkyDomePass>(m_device.Get(), ctx).SetEnabled(true);
+        m_renderer.AddPass<RenderPass::GeometryPass>(m_device.Get(), ctx).SetEnabled(true);
     });
 }
 

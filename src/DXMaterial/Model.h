@@ -74,17 +74,17 @@ public:
         else return -1;
     }
 
-    bool Load(_In_ NSRenderer::Ctx& rendererCtx, _In_ const std::filesystem::path& path);
-    void UploadGPU(_In_ NSRenderer::Ctx& rendererCtx);
-    void UnloadGPU(NSRenderer::Ctx& rendererCtx);
+    bool Load(_In_ NSRenderer::Ctx rendererCtx, _In_ const std::filesystem::path& path);
+    void UploadGPU(_In_ NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+    void UnloadGPU(NSRenderer::Ctx rendererCtx);
     void ResetUploadHeaps();
 
     template<typename T> requires IsPrimitiveMesh<T>
-        inline Model&& As(NSRenderer::Ctx& rendererCtx, PrimitiveTraits<T>& desc) {
+        inline Model&& As(NSRenderer::Ctx rendererCtx, PrimitiveTraits<T>& desc) {
             return _As(rendererCtx, "self", PrimitiveTraits<T>::type, &desc);
         }
 
-        void Draw(NSRenderer::Ctx& rendererCtx);
+        void Draw(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
         void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
 
         std::filesystem::path m_assetPath;
@@ -100,11 +100,11 @@ private:
     DirectX::XMFLOAT3 m_rotation{};
     DirectX::XMFLOAT3 m_scale{ 1.f, 1.f, 1.f };
 
-    void ProcessNode(_In_ NSRenderer::Ctx& rendererCtx, _In_ aiNode* node, _In_  const aiScene* scene);
+    void ProcessNode(_In_ NSRenderer::Ctx rendererCtx, _In_ aiNode* node, _In_  const aiScene* scene);
     void ProcessMesh(_In_ aiMesh* pAiMesh, _In_ const aiScene* scene, _In_ aiNode* node, _Out_ Mesh& outMesh);
 
     Mesh& CreateMeshFromMemory(const char* name, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices);
-    Model&& _As(NSRenderer::Ctx& rendererCtx, const char* name, EPrimitive type, void* pDesc);
+    Model&& _As(NSRenderer::Ctx rendererCtx, const char* name, EPrimitive type, void* pDesc);
 
     inline aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node) {
         aiMatrix4x4 transform = node->mTransformation;

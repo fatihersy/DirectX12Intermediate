@@ -9,7 +9,7 @@
 
 class Scene;
 
-using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx& ctx)>;
+using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)>;
 
 class Renderer
 {
@@ -30,9 +30,9 @@ public:
 
     void Execute(FnRendererExecutionBody Record);
 
-    template<typename T, typename... Args>
-    inline void AddPass(Args&&... args) {
-        m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
+    template<typename T, typename... Args> requires std::derived_from<T, RenderPass::IRenderPass>
+    inline RenderPass::IRenderPass& AddPass(Args&&... args) {
+        return *m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
     }
 
     inline Descriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
@@ -46,6 +46,17 @@ public:
     };
     inline Descriptor::hOffset OffsetSRV(const Descriptor::Handle& handle, uint32_t offset) const {
         return m_srvHeap.Offset(handle, offset);
+    }
+
+    inline NSRenderer::Ctx GetCtx() {
+        return NSRenderer::Ctx(
+            m_fallbackTextureSRVHandle,
+            [this](uint32_t amount) { return this->AllocSRVRing(amount); },
+            [this](uint32_t amount) { return this->AllocSRVStatic(amount); },
+            [this](Descriptor::Handle handle) { this->FreeSRVStatic(handle); },
+            [this](const Descriptor::Handle& handle, uint32_t offset) { return this->OffsetSRV(handle, offset); },
+            [this](size_t size) { return this->m_allocator.Allocate(size); }
+        );
     }
 
     inline ID3D12CommandQueue* ImGui_getCmdQueue() {
@@ -83,7 +94,6 @@ private:
     void CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription desc);
     void CreateDefaultTexture();
 
-    UINT m_frameIndex{};
     void MoveToNextFrame();
 
     static constexpr uint32_t FALLBACK_TEXTURE_SRV_INDEX = 0;

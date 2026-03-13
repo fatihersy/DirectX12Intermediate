@@ -43,22 +43,20 @@ struct skyDomeConstants
 static_assert(sizeof(skyDomeConstants) % 16 == 0);
 static_assert(offsetof(skyDomeConstants, SunDir) % 4 == 0);
 
-inline bool operator==(const skyDomeConstants& lhs, const skyDomeConstants& rhs) noexcept
+inline bool operator!=(const skyDomeConstants& lhs, const skyDomeConstants& rhs) noexcept
 {
-    bool isSame{};
+    if (not Float3Equals(lhs.BetaR, rhs.BetaR)) return true;
+    if (lhs.BetaMScatter != rhs.BetaMScatter) return true;
+    if (lhs.BetaMExtinct != rhs.BetaMExtinct) return true;
+    if (lhs.MieG != rhs.MieG) return true;
+    if (lhs.HR != rhs.HR) return true;
+    if (lhs.HM != rhs.HM) return true;
+    if (lhs.Rg != rhs.Rg) return true;
+    if (lhs.Rt != rhs.Rt) return true;
+    if (lhs.SunIntensity != rhs.SunIntensity) return true;
+    if (not Float3Equals(lhs.SunDir, rhs.SunDir)) return true;
 
-    if (not Float3Equals(lhs.BetaR, rhs.BetaR)) isSame = true;
-    else if (lhs.BetaMScatter != rhs.BetaMScatter) isSame = true;
-    else if (lhs.BetaMExtinct != rhs.BetaMExtinct) isSame = true;
-    else if (lhs.MieG != rhs.MieG) isSame = true;
-    else if (lhs.HR != rhs.HR) isSame = true;
-    else if (lhs.HM != rhs.HM) isSame = true;
-    else if (lhs.Rg != rhs.Rg) isSame = true;
-    else if (lhs.Rt != rhs.Rt) isSame = true;
-    else if (lhs.SunIntensity != rhs.SunIntensity) isSame = true;
-    else if (not Float3Equals(lhs.SunDir, rhs.SunDir)) isSame = true;
-
-    return isSame;
+    return false;
 }
 
 namespace Descriptor
@@ -287,7 +285,6 @@ namespace NSRenderer
     {
     public:
         Ctx(
-            GraphicsCommandList cmdList,
             Descriptor::Handle fallbackSRV,
             AllocSRVRing_t pfn_allocSRVRing,
             AllocSRVStatic_t pfn_allocSRVStatic,
@@ -295,16 +292,14 @@ namespace NSRenderer
             OffsetSRV_t pfn_offsetSRV,
             AllocConstBuff_t pfn_allocConstBuff
         )
-        : cmdList(cmdList),
-          fallbackSRV(fallbackSRV),
-          allocSRVRing(std::move(allocSRVRing)),
-          allocSRVStatic(std::move(allocSRVStatic)),
-          freeSRVStatic(std::move(freeSRVStatic)),
-          offsetSRV(std::move(offsetSRV)),
-          allocConstBuff(std::move(allocConstBuff))
+        : fallbackSRV(fallbackSRV),
+          allocSRVRing(std::move(pfn_allocSRVRing)),
+          allocSRVStatic(std::move(pfn_allocSRVStatic)),
+          freeSRVStatic(std::move(pfn_freeSRVStatic)),
+          offsetSRV(std::move(pfn_offsetSRV)),
+          allocConstBuff(std::move(pfn_allocConstBuff))
         {};
 
-        GraphicsCommandList cmdList;
         const Descriptor::Handle fallbackSRV;
 
         AllocSRVRing_t allocSRVRing;
@@ -312,10 +307,6 @@ namespace NSRenderer
         FreeSRVStatic_t freeSRVStatic;
         OffsetSRV_t offsetSRV;
         AllocConstBuff_t allocConstBuff;
-
-        [[nodiscard]] inline bool Assert() {
-            return cmdList.Raw() != nullptr;
-        }
     };
 }
 
@@ -328,9 +319,9 @@ namespace RenderPass {
     public:
         virtual ~IRenderPass() = default;
 
-        virtual void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) = 0;
-        virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) = 0;
-        virtual void Destroy() = 0;
+        virtual void Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
+        virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) = 0;
+        virtual void Destroy() {};
 
         bool IsEnabled() const { return im_isEnabled; }
         void SetEnabled(bool newVal) { im_isEnabled = newVal; }

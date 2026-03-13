@@ -66,11 +66,11 @@ public:
     
     HRESULT LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, INT tType);
 
-    void UploadGPU(ID3D12Device* device, NSRenderer::Ctx& rendererCtx);
-    void UnloadGPU(NSRenderer::Ctx& rendererCtx);
+    void UploadGPU(ID3D12Device* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+    void UnloadGPU(NSRenderer::Ctx rendererCtx);
     void ResetUploadHeaps();
 
-    void Bind(NSRenderer::Ctx& rendererCtx) const;
+    void Bind(NSRenderer::GraphicsCommandList cmdList) const;
 
     inline bool HasTextureType(FTextureType tType) {
         for (FTexture& tex : m_textures) {

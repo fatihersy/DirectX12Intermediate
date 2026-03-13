@@ -7,11 +7,11 @@ namespace RenderPass
     class GeometryPass : public IRenderPass
     {
     public:
-        GeometryPass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx);
+        GeometryPass(ID3D12Device14* device, NSRenderer::Ctx rendererCtx);
         ~GeometryPass() override;
 
-        void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) override;
-        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) override;
+        void Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
 
@@ -21,11 +21,11 @@ namespace RenderPass
     class SkyDomePass : public IRenderPass
     {
     public:
-        SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx& rendererCtx);
-        ~SkyDomePass();
+        SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx rendererCtx);
+        ~SkyDomePass() override;
 
-        void Execute(Scene& scene, NSRenderer::Ctx& rendererCtx) override;
-        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx& rendererCtx) override;
+        void Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
         skyDomeConstants m_constantsUpload{};
     private:
@@ -37,7 +37,7 @@ namespace RenderPass
         ComPtr<ID3D12Resource2> m_trasmittanceLUT;
         ComPtr<ID3D12Resource2> m_scatteringLUT;
 
-        void UpdateSkyDome(NSRenderer::Ctx& rendererCtx);
+        void UpdateSkyDome(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
 
         static constexpr UINT IDX_ROOT_CBV_FRAME = 0u;
         static constexpr UINT IDX_ROOT_CBV_MESH = 1u;

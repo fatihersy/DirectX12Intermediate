@@ -41,7 +41,7 @@ public:
     Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, DirectX::XMVECTOR camEye, float camSpeed, float lookSens, float timeOfDay);
     ~Scene();
 
-    void OnDestroy(NSRenderer::Ctx& rendererCtx);
+    void OnDestroy(NSRenderer::Ctx rendererCtx);
 
     void OnUpdate();
     void UpdateCamera();
@@ -54,6 +54,7 @@ public:
     {
         Model& model = m_models.emplace_back(Model(name, m_device, m_wicFactory));
         model.As<T>(rendererCtx, desc);
+        model.SetPosition(position);
         model.SetMetallic(metallic);
         model.SetRoughness(roughness);
         model.SetOpacity(opacity);
