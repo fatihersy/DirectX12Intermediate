@@ -36,39 +36,39 @@ public:
 
     void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Move(DirectX::XMFLOAT3 vector, double delta);
-    inline Model&& SetPosition(DirectX::XMFLOAT3 position)
+    Model&& SetPosition(DirectX::XMFLOAT3 position)
     {
         m_position.x = position.x;
         m_position.y = position.y;
         m_position.z = position.z;
         return std::move(*this);
     }
-    inline Model&& SetMetallic(float value) {
+    Model&& SetMetallic(float value) {
         meshes[0].material.m_metallic = value;
         return std::move(*this);
     }
-    inline Model&& SetRoughness(float value) {
+    Model&& SetRoughness(float value) {
         meshes[0].material.m_roughness = value;
         return std::move(*this);
     }
-    inline Model&& SetOpacity(float value) {
+    Model&& SetOpacity(float value) {
         meshes[0].material.m_opacity = value;
         return std::move(*this);
     }
 
-    inline DirectX::XMFLOAT3 GetPosition() const { return m_position; }
-    inline const std::vector<Mesh>& GetMeshes() { return meshes; };
-    inline float GetMetallic() const {
+    DirectX::XMFLOAT3 GetPosition() const { return m_position; }
+    const std::vector<Mesh>& GetMeshes() { return meshes; };
+    float GetMetallic() const {
         if (not meshes.empty())
             return meshes[0].material.m_metallic;
         else return -1;
     }
-    inline float GetRoughness() const {
+    float GetRoughness() const {
         if (not meshes.empty())
             return meshes[0].material.m_roughness;
         else return -1;
     }
-    inline float GetOpacity() const {
+    float GetOpacity() const {
         if (not meshes.empty())
             return meshes[0].material.m_opacity;
         else return -1;
@@ -80,7 +80,7 @@ public:
     void ResetUploadHeaps();
 
     template<typename T> requires IsPrimitiveMesh<T>
-        inline Model&& As(NSRenderer::Ctx rendererCtx, PrimitiveTraits<T>& desc) {
+        Model&& As(NSRenderer::Ctx rendererCtx, PrimitiveTraits<T>& desc) {
             return _As(rendererCtx, "self", PrimitiveTraits<T>::type, &desc);
         }
 
@@ -106,7 +106,7 @@ private:
     Mesh& CreateMeshFromMemory(const char* name, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices);
     Model&& _As(NSRenderer::Ctx rendererCtx, const char* name, EPrimitive type, void* pDesc);
 
-    inline aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node) {
+    aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node) {
         aiMatrix4x4 transform = node->mTransformation;
         aiNode* parent = node->mParent;
         while (parent) {

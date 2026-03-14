@@ -28,6 +28,9 @@
 #include <variant>
 #include <type_traits>
 #include <stdexcept>
+#include <any>
+#include <unordered_map>
+#include <optional>
 
 template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;

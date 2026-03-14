@@ -72,14 +72,14 @@ public:
 
     void Bind(NSRenderer::GraphicsCommandList cmdList) const;
 
-    inline bool HasTextureType(FTextureType tType) {
+    bool HasTextureType(FTextureType tType) {
         for (FTexture& tex : m_textures) {
             if (tex.textureType == tType)
                 return true;
         }
         return false;
     }
-    inline const FTexture* GetTextureByType(FTextureType tType) {
+    const FTexture* GetTextureByType(FTextureType tType) {
         for (FTexture& tex : m_textures) {
             if (tex.textureType == tType)
                 return &tex;
@@ -92,7 +92,7 @@ public:
 private:
     IWICImagingFactory2* m_wicFactory;
 
-    static inline DXGI_FORMAT FormatTOtype(FTextureType tType)
+    static DXGI_FORMAT FormatTOtype(FTextureType tType)
     {
         switch (tType)
         {

@@ -6,6 +6,7 @@
 #include "Allocator.h"
 #include "Pipeline.h"
 #include "Material.h"
+#include "Blackboard.h"
 
 class Scene;
 
@@ -31,26 +32,26 @@ public:
     void Execute(FnRendererExecutionBody Record);
 
     template<typename T, typename... Args> requires std::derived_from<T, RenderPass::IRenderPass>
-    inline RenderPass::IRenderPass& AddPass(Args&&... args) {
+    RenderPass::IRenderPass& AddPass(Args&&... args) {
         return *m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
     }
 
-    inline Descriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
+    Descriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
         return m_srvHeap.AllocateRing(amount);
     };
-    inline Descriptor::Handle AllocSRVStatic(uint32_t amount = 1u) {
+    Descriptor::Handle AllocSRVStatic(uint32_t amount = 1u) {
         return m_srvHeap.AllocateStatic(amount);
     };
-    inline void FreeSRVStatic(Descriptor::Handle handle) {
+    void FreeSRVStatic(Descriptor::Handle handle) {
         m_srvHeap.FreeStatic(handle);
     };
-    inline Descriptor::hOffset OffsetSRV(const Descriptor::Handle& handle, uint32_t offset) const {
+    Descriptor::hOffset OffsetSRV(const Descriptor::Handle& handle, uint32_t offset) const {
         return m_srvHeap.Offset(handle, offset);
     }
 
-    inline NSRenderer::Ctx GetCtx() {
+    NSRenderer::Ctx GetCtx() {
         return NSRenderer::Ctx(
-            m_fallbackTextureSRVHandle,
+            m_blackboard,
             [this](uint32_t amount) { return this->AllocSRVRing(amount); },
             [this](uint32_t amount) { return this->AllocSRVStatic(amount); },
             [this](Descriptor::Handle handle) { this->FreeSRVStatic(handle); },
@@ -59,7 +60,7 @@ public:
         );
     }
 
-    inline ID3D12CommandQueue* ImGui_getCmdQueue() {
+    ID3D12CommandQueue* ImGui_getCmdQueue() {
         return m_commandQueue.Get();
     }
 
@@ -88,7 +89,12 @@ private:
     FTexture m_fallbackTexture{};
     Descriptor::Handle m_fallbackTextureSRVHandle;
 
+    Blackboard m_blackboard;
+
     std::vector<std::unique_ptr<RenderPass::IRenderPass>> m_passes;
+
+    uint32_t m_width{};
+    uint32_t m_height{};
 
     void CreateSwapChain(IDXGIFactory7* factory, HWND hwnd, UINT width, UINT height);
     void CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription desc);

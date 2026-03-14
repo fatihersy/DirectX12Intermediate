@@ -154,9 +154,9 @@ SkyDomePass::SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx rendererCtx)
         srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
 
         CD3DX12_ROOT_PARAMETER1 rp[5]{};
-        rp[0].InitAsConstantBufferView(0, 0); // Frame
-        rp[1].InitAsConstantBufferView(1, 0); // Mesh
-        rp[2].InitAsConstantBufferView(2, 0); // Sky dome constants
+        rp[0].InitAsConstantBufferView(IDX_ROOT_CBV_FRAME, 0); // Frame
+        rp[1].InitAsConstantBufferView(IDX_ROOT_CBV_MESH, 0); // Mesh
+        rp[2].InitAsConstantBufferView(IDX_ROOT_CBV_SKYDOME, 0); // Sky dome constants
         rp[3].InitAsDescriptorTable(1, &uavRange);
         rp[4].InitAsDescriptorTable(1, &srvRange);
 

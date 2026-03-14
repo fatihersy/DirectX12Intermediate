@@ -22,12 +22,12 @@ public:
     static void GetHINSTANCE(HINSTANCE hInstance) { m_hInstance = hInstance; }
 
     template<typename... Args>
-    static inline void FDebug(const char* fmt, Args&&... args) {
+    static void FDebug(const char* fmt, Args&&... args) {
         PlatformConsoleWrite(FlogLevel::FLOG_DEBUG, FString::format(fmt, std::forward<Args>(args)...));
     }
 
     template<typename... Args>
-    static inline void FError(const char* fmt, Args&&... args) {
+    static void FError(const char* fmt, Args&&... args) {
         PlatformConsoleWrite(FlogLevel::FLOG_ERROR, FString::format(fmt, std::forward<Args>(args)...));
     }
 

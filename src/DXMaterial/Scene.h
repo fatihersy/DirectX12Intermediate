@@ -21,7 +21,7 @@ class Frustum {
     Frustum() {};
     Frustum(DirectX::XMMATRIX viewProj);
 
-    inline bool TestSphere(DirectX::FXMVECTOR center, float radius) const {
+    bool TestSphere(DirectX::FXMVECTOR center, float radius) const {
         using namespace DirectX;
         for (size_t i = 0; i < 6; i++)
         {

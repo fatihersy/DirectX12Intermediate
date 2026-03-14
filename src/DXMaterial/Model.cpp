@@ -558,7 +558,7 @@ Mesh& Model::CreateMeshFromMemory(const char* name, const std::vector<Vertex>& i
         nullptr,
         IID_PPV_ARGS(&mesh.uploadVertexBuffer)
     ));
-    mesh.uploadVertexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "uploadVertexBuffer").c_str());
+    mesh.uploadVertexBuffer->SetName(FString::wformat(L"%s::%s", std::wstring(mesh.name.begin(), mesh.name.end()), L"uploadVertexBuffer").c_str());
 
     ThrowIfFailed(m_device->CreateCommittedResource(
         &uploadHeapProp,
@@ -568,7 +568,7 @@ Mesh& Model::CreateMeshFromMemory(const char* name, const std::vector<Vertex>& i
         nullptr,
         IID_PPV_ARGS(&mesh.uploadIndexBuffer)
     ));
-    mesh.uploadIndexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "uploadIndexBuffer").c_str());
+    mesh.uploadIndexBuffer->SetName(FString::wformat(L"%s::%s", std::wstring(mesh.name.begin(), mesh.name.end()), L"uploadIndexBuffer").c_str());
 
     void* mappedVertexBuffer = nullptr;
     ThrowIfFailed(mesh.uploadVertexBuffer->Map(0u, nullptr, reinterpret_cast<void**>(&mappedVertexBuffer)));
@@ -590,7 +590,7 @@ Mesh& Model::CreateMeshFromMemory(const char* name, const std::vector<Vertex>& i
         nullptr,
         IID_PPV_ARGS(&mesh.defaultVertexBuffer)
     ));
-    mesh.defaultVertexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "defaultVertexBuffer").c_str());
+    mesh.defaultVertexBuffer->SetName(FString::wformat(L"%s::%s", std::wstring(mesh.name.begin(), mesh.name.end()), L"defaultVertexBuffer").c_str());
 
     mesh.vertexBufferView.BufferLocation = mesh.defaultVertexBuffer->GetGPUVirtualAddress();
     mesh.vertexBufferView.SizeInBytes = static_cast<UINT>(vbSize);
@@ -604,7 +604,7 @@ Mesh& Model::CreateMeshFromMemory(const char* name, const std::vector<Vertex>& i
         nullptr,
         IID_PPV_ARGS(&mesh.defaultIndexBuffer)
     ));
-    mesh.defaultIndexBuffer->SetName(FString::wformat("%s::%s", mesh.name, "defaultIndexBuffer").c_str());
+    mesh.defaultIndexBuffer->SetName(FString::wformat(L"%s::%s", std::wstring(mesh.name.begin(), mesh.name.end()), L"defaultIndexBuffer").c_str());
 
     mesh.indexBufferView.BufferLocation = mesh.defaultIndexBuffer->GetGPUVirtualAddress();
     mesh.indexBufferView.SizeInBytes = static_cast<UINT>(ibSize);

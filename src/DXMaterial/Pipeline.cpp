@@ -2,6 +2,8 @@
 #include "Pipeline.h"
 
 #include "DXSampleHelper.h"
+#include "IApp.h"
+#include "Tool.h"
 
 ShaderCompiler* ShaderCompiler::s_instance;
 
@@ -46,7 +48,7 @@ Pipeline::Pipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignatur
         throw std::runtime_error("Failed to serialize root signature");
     }
     ThrowIfFailed(im_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSig)));
-    rootSig->SetName(FString::wformat("%s::%s", pipelineName, "RootSignature").c_str());
+    rootSig->SetName(FString::wformat(L"%s::%s", std::wstring(pipelineName), L"RootSignature").c_str());
 
     m_rsVar = std::move(rootSig);
     im_rootSignature = std::get<ComPtr<ID3D12RootSignature>>(m_rsVar).Get();
@@ -186,6 +188,26 @@ void ShaderCompiler::CompileShader(IDxcBlobEncoding* sourceBlob, ComPtr<IDxcBlob
     ThrowIfFailed(hr);
 
     ThrowIfFailed(compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shader), nullptr));
+
+    ComPtr<IDxcBlob> pPDB;
+    ComPtr<IDxcBlobWide> pdbPath;
+    ThrowIfFailed(compileResult->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pPDB), pdbPath.GetAddressOf()));
+    if (pPDB and pPDB->GetBufferSize() > 0 and pdbPath)
+    {
+        std::filesystem::path path = IApp::GetInstance()->im_executablePath.append(L"..\\obj\\");
+        if (std::filesystem::exists(path))
+        {
+            std::wstring fullPath = FString::wformat(L"%s%s", path.wstring(), pdbPath->GetStringPointer());
+
+            FILE* pFile = nullptr;
+            _wfopen_s(&pFile, fullPath.c_str(), L"wb");
+            if (pFile)
+            {
+                fwrite(pPDB->GetBufferPointer(), 1, pPDB->GetBufferSize(), pFile);
+                fclose(pFile);
+            }
+        }
+    }
 
     if (FAILED(ShaderCompiler::GetInstance()->m_dxcValidator->Validate(shader.Get(), DxcValidatorFlags_Default, &opResult)))
         throw std::runtime_error("Cannot validate");

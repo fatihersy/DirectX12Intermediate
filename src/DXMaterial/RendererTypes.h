@@ -74,8 +74,23 @@ namespace Descriptor
     };
 }
 
+class Blackboard;
 namespace NSRenderer
 {
+    struct BlackboardKey
+    {
+        const char* name;
+        constexpr explicit BlackboardKey(const char* n) : name(n) {}
+    };
+
+    inline constexpr BlackboardKey kRenderer_frameIndex { "Renderer.FrameIndex" };
+    inline constexpr BlackboardKey kRenderer_width      { "Renderer.Width" };
+    inline constexpr BlackboardKey kRenderer_height     { "Renderer.Height" };
+    inline constexpr BlackboardKey kRenderer_fallbackSRV{ "Renderer.FallbackSRV" };
+
+    inline constexpr BlackboardKey kSkyDome_transmittanceLUT{ "SkyDome.TransmittanceLUT"};
+    inline constexpr BlackboardKey kSkyDome_scatteringLUT   { "SkyDome.ScatteringLUT"   };
+
     class GraphicsCommandList
     {
     public:
@@ -285,14 +300,14 @@ namespace NSRenderer
     {
     public:
         Ctx(
-            Descriptor::Handle fallbackSRV,
+            Blackboard& blackboard,
             AllocSRVRing_t pfn_allocSRVRing,
             AllocSRVStatic_t pfn_allocSRVStatic,
             FreeSRVStatic_t pfn_freeSRVStatic,
             OffsetSRV_t pfn_offsetSRV,
             AllocConstBuff_t pfn_allocConstBuff
         )
-        : fallbackSRV(fallbackSRV),
+        : blackboard(blackboard),
           allocSRVRing(std::move(pfn_allocSRVRing)),
           allocSRVStatic(std::move(pfn_allocSRVStatic)),
           freeSRVStatic(std::move(pfn_freeSRVStatic)),
@@ -300,7 +315,7 @@ namespace NSRenderer
           allocConstBuff(std::move(pfn_allocConstBuff))
         {};
 
-        const Descriptor::Handle fallbackSRV;
+        Blackboard& blackboard;
 
         AllocSRVRing_t allocSRVRing;
         AllocSRVStatic_t allocSRVStatic;
@@ -312,8 +327,6 @@ namespace NSRenderer
 
 class Scene;
 namespace RenderPass {
-
-
     class IRenderPass
     {
     public:

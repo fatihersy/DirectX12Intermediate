@@ -9,6 +9,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, U
 {
     m_factory = factory;
     m_device = device;
+    m_width = width;
+    m_height = height;
 
     constexpr size_t OneMb = 1u * 1024 * 1024;
     m_allocator = ConstBuffAlloc(m_device, OneMb, IApp::ic_frameCount);
@@ -74,6 +76,10 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, U
     }
 
     CreateDefaultTexture();
+
+    m_blackboard.Set<UINT>(NSRenderer::kRenderer_width, width);
+    m_blackboard.Set<UINT>(NSRenderer::kRenderer_height, height);
+    m_blackboard.Set<Descriptor::hOffset>(NSRenderer::kRenderer_fallbackSRV, OffsetSRV(m_fallbackTextureSRVHandle, 0));
 }
 Renderer::~Renderer() {}
 
@@ -110,12 +116,16 @@ void Renderer::OnDestroy()
 
 void Renderer::DrawScene(Scene& scene)
 {
+    m_blackboard.Set<UINT>(NSRenderer::kRenderer_frameIndex, m_swapchain->GetCurrentBackBufferIndex());
+
+    NSRenderer::Ctx rendererCtx = GetCtx();
+    NSRenderer::GraphicsCommandList cmdList = NSRenderer::GraphicsCommandList(m_commandList.Get());
+
     for (auto& pass : m_passes)
     {
-        pass->Execute(scene, GetCtx(), NSRenderer::GraphicsCommandList(m_commandList.Get()));
+        pass->Execute(scene, rendererCtx, cmdList);
     }
 }
-
 
 void Renderer::BeginFrame()
 {
@@ -211,6 +221,9 @@ void Renderer::Resize(UINT width, UINT height)
         desc.Flags = D3D12_DSV_FLAG_NONE;
         m_device->CreateDepthStencilView(m_depthStencil.Get(), &desc, m_dsvHeap.GetCpuStart());
     }
+
+    m_blackboard.Set<UINT>(NSRenderer::kRenderer_width, width);
+    m_blackboard.Set<UINT>(NSRenderer::kRenderer_height, height);
 
     {
         // Resize passes as well 

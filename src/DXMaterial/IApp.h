@@ -32,10 +32,9 @@ public:
     std::wstring im_executablePath;
     StepTimer im_timer;
 
-    inline std::wstring GetAssetFullPath(const LPCWSTR assetName) const {
+    std::wstring GetAssetFullPath(const LPCWSTR assetName) const {
         return im_assetsPath + assetName;
     }
-
     protected:
         static IApp* s_instance;
 };

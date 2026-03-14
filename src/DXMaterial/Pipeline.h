@@ -65,7 +65,7 @@ public:
     GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
     GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature setRootSignature);
 
-    inline void Bind(NSRenderer::GraphicsCommandList cmdList) const {
+    void Bind(NSRenderer::GraphicsCommandList cmdList) const {
         if (im_pipeline and im_rootSignature)
         {
             cmdList.SetPipelineState(im_pipeline.Get());
@@ -94,7 +94,7 @@ public:
     ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
     ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature);
 
-    inline void Bind(NSRenderer::GraphicsCommandList cmdList) const
+    void Bind(NSRenderer::GraphicsCommandList cmdList) const
     {
         if (im_pipeline)
         {

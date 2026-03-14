@@ -29,7 +29,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     im_assetsPath = std::filesystem::current_path().generic_wstring().append(L"/");
 
     WCHAR executablePath[512];
-    GetAssetsPath(executablePath, _countof(executablePath));
+    GetExecutablePath(executablePath, _countof(executablePath));
     im_executablePath = executablePath;
 
     ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));

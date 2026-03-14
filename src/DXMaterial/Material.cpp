@@ -4,6 +4,7 @@
 #include "DXSampleHelper.h"
 
 #include "IApp.h"
+#include "Blackboard.h"
 
 Material::Material(IWICImagingFactory2* wicFactory) : m_isOnCPU{}, m_isOnGPU{} {
     m_wicFactory = wicFactory;
@@ -106,8 +107,8 @@ HRESULT Material::LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, 
             return E_FAIL;
         }
 
-        tex.defaultBuffer->SetName(FString::wformat("%s::%s::defaultBuffer", m_name, TextureTypeToString(tex.textureType)).c_str());
-        tex.uploadBuffer->SetName(FString::wformat("%s::%s::uploadBuffer", m_name, TextureTypeToString(tex.textureType)).c_str());
+        tex.defaultBuffer->SetName(FString::wformat(L"%s::%s::defaultBuffer", std::wstring(m_name.begin(), m_name.end()), TextureTypeToString(tex.textureType)).c_str());
+        tex.uploadBuffer->SetName(FString::wformat(L"%s::%s::uploadBuffer", std::wstring(m_name.begin(), m_name.end()), TextureTypeToString(tex.textureType)).c_str());
     }
 
     m_isOnCPU = true;
@@ -147,7 +148,7 @@ void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx rendererCtx, NSRe
 
     m_srvHandle = rendererCtx.allocSRVStatic(static_cast<INT>(FTextureType::FTextureType_MAX));
 
-    const Descriptor::Handle fallbackHandle = rendererCtx.fallbackSRV;
+    const Descriptor::hOffset* fallbackHandle = rendererCtx.blackboard.GetConst<Descriptor::hOffset>(NSRenderer::kRenderer_fallbackSRV);
 
     D3D12_CPU_DESCRIPTOR_HANDLE handles[] = {
         rendererCtx.offsetSRV(m_srvHandle, 0u).cpuAddr,
@@ -185,7 +186,7 @@ void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx rendererCtx, NSRe
         handles,
         nullptr,
         1u,
-        &fallbackHandle.cpuAddr,
+        &fallbackHandle->cpuAddr,
         nullptr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
     );

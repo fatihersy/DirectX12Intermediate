@@ -9,22 +9,22 @@ namespace Descriptor
         IDescriptor(ID3D12Device14* device, LPCWSTR name, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT capacity, D3D12_DESCRIPTOR_HEAP_FLAGS flags);
         virtual ~IDescriptor();
 
-        inline const ID3D12Device* GetDevice() const { return im_device; }
-        inline const D3D12_DESCRIPTOR_HEAP_DESC GetDesc() const { return im_desc; }
-        inline const uint32_t GetDescriptorSize() const { return im_descriptorSize; }
+        const ID3D12Device* GetDevice() const { return im_device; }
+        const D3D12_DESCRIPTOR_HEAP_DESC GetDesc() const { return im_desc; }
+        const uint32_t GetDescriptorSize() const { return im_descriptorSize; }
 
-        inline const ID3D12DescriptorHeap* GetHeap() const { return im_heap.Get(); }
-        inline const D3D12_CPU_DESCRIPTOR_HANDLE GetCpuStart() const { return im_cpuStart; }
-        inline const D3D12_GPU_DESCRIPTOR_HANDLE GetGpuStart() const { return im_gpuStart; }
+        const ID3D12DescriptorHeap* GetHeap() const { return im_heap.Get(); }
+        const D3D12_CPU_DESCRIPTOR_HANDLE GetCpuStart() const { return im_cpuStart; }
+        const D3D12_GPU_DESCRIPTOR_HANDLE GetGpuStart() const { return im_gpuStart; }
 
-        inline const bool Validate(Handle handle) const
+        const bool Validate(Handle handle) const
         {
             const CD3DX12_CPU_DESCRIPTOR_HANDLE thisHeap(im_cpuStart, handle.index, im_descriptorSize);
 
             return thisHeap.ptr == handle.cpuAddr.ptr;
         }
 
-        inline bool At(uint32_t index, hOffset& offset) const
+        bool At(uint32_t index, hOffset& offset) const
         {
             if (index >= im_desc.NumDescriptors) return false;
             
@@ -34,7 +34,7 @@ namespace Descriptor
             return true;
         }
 
-        inline hOffset Offset(const Handle& from, uint32_t offset) const
+        hOffset Offset(const Handle& from, uint32_t offset) const
         {
             assert(offset < from.amount && "Descriptor is out of slots");
 
@@ -80,7 +80,7 @@ namespace Descriptor
         Handle AllocateStatic(uint32_t amount = 1u);
         void FreeStatic(Handle handle);
 
-        inline void BeginFrame(uint32_t frameIndex)
+        void BeginFrame(uint32_t frameIndex)
         {
             m_heapFrameIndexOffset = frameIndex * m_heapFrameCapacity;
             m_heapFrameEnd = m_heapFrameIndexOffset + m_heapFrameCapacity;
