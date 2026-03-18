@@ -23,6 +23,7 @@ public:
     void OnResize(UINT width, UINT height) override;
     void ToggleFullScreen() override;
 
+    uint32_t m_nextModelId{};
 private:
     ComPtr<IWICImagingFactory2> m_wicFactory;
     ComPtr<IDXGIFactory7> m_factory;
@@ -44,6 +45,5 @@ private:
     ComPtr<ID3D12DescriptorHeap> m_imGuiSrvHeap;
     std::vector<INT> m_freeImGuiSRVindices;
     UINT m_imGuiSrvDescriptorSize{};
-
 };
 

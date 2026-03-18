@@ -373,6 +373,8 @@ void Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandLi
         mesh.material.UploadGPU(m_device, rendererCtx, cmdList);
     }
 
+    m_registerKey = rendererCtx.registerModel(m_sceneKey, cmdList);
+
     isOnGPU = true;
 }
 
@@ -464,17 +466,19 @@ void Model::ResetUploadHeaps() {
 
 void Model::UnloadGPU(NSRenderer::Ctx rendererCtx)
 {
+    if (not isOnGPU) return;
+
     for (Mesh& mesh : meshes)
     {
-        mesh.uploadVertexBuffer.Reset();
-        mesh.uploadIndexBuffer.Reset();
         mesh.defaultVertexBuffer.Reset();
         mesh.defaultIndexBuffer.Reset();
         mesh.material.UnloadGPU(rendererCtx);
     }
 
+    rendererCtx.unloadModel(m_registerKey);
+    m_registerKey = {};
+
     isOnGPU = false;
-    isOnCPU = false;
 }
 
 Model&& Model::_As(NSRenderer::Ctx rendererCtx, const char* name, EPrimitive type, void* pDesc)

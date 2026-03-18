@@ -36,7 +36,8 @@ template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
 
 #include "StepTimer.h"
-#include "AllocatorTypes.h"
 #include "Tool.h"
+#include "SceneTypes.h"
+#include "AllocatorTypes.h"
 #include "MeshTypes.h"
 #include "RendererTypes.h"

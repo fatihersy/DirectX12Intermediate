@@ -28,19 +28,28 @@ static_assert(offsetof(meshConstants, textureFlags) % 4 == 0);
 struct skyDomeConstants
 {
     DirectX::XMFLOAT3 BetaR{};
-    FLOAT PadR{};
+    FLOAT Pad0{};
     FLOAT BetaMScatter{};
     FLOAT BetaMExtinct{};
     FLOAT MieG{};
-    FLOAT Pad0{};
     FLOAT HR{};
     FLOAT HM{};
     FLOAT Rg{};
     FLOAT Rt{};
     FLOAT SunIntensity{};
     DirectX::XMFLOAT3 SunDir{};
+    FLOAT Pad1{};
 };
 static_assert(sizeof(skyDomeConstants) % 16 == 0);
+static_assert(offsetof(skyDomeConstants, BetaR) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, BetaMScatter) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, BetaMExtinct) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, MieG) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, HR) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, HM) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, Rg) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, Rt) % 4 == 0);
+static_assert(offsetof(skyDomeConstants, SunIntensity) % 4 == 0);
 static_assert(offsetof(skyDomeConstants, SunDir) % 4 == 0);
 
 inline bool operator!=(const skyDomeConstants& lhs, const skyDomeConstants& rhs) noexcept
@@ -58,6 +67,25 @@ inline bool operator!=(const skyDomeConstants& lhs, const skyDomeConstants& rhs)
 
     return false;
 }
+
+struct envCaptureConstants
+{
+    DirectX::XMFLOAT4X4 view{};
+    DirectX::XMFLOAT4X4 proj{};
+    DirectX::XMFLOAT4 lightDir{};
+    DirectX::XMFLOAT4 lightColor{};
+    DirectX::XMFLOAT3 capturePos{};
+    float Pad0{};
+    DirectX::XMFLOAT3 camPos{};
+    float Pad1{};
+};
+static_assert(sizeof(envCaptureConstants) % 16 == 0);
+static_assert(offsetof(envCaptureConstants, view) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, proj) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, lightDir) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, lightColor) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, capturePos) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, camPos) % 4 == 0);
 
 namespace Descriptor
 {
@@ -83,13 +111,51 @@ namespace NSRenderer
         constexpr explicit BlackboardKey(const char* n) : name(n) {}
     };
 
+    struct EnvironmentCubemap
+    {
+        ComPtr<ID3D12Resource2> cubemapTexture;
+        ComPtr<ID3D12Resource2> cubemapDepth;
+
+        Descriptor::Handle rtvHandle;
+        Descriptor::Handle dsvHandle;
+        Descriptor::Handle srvHandle;
+        Descriptor::Handle uavHandle;
+
+        bool isOnGPU{};
+        bool isDirty{};
+        uint32_t generation{};
+
+        static constexpr UINT PER_FACE_RESOLUTION = 128u;
+        static constexpr UINT NUM_FACES = 6u;
+        static constexpr UINT MIP_COUNT = 8u;
+    };
+
+    struct Model
+    {
+        SceneModelKey sceneKey{};
+        EnvironmentCubemap m_envCubemap{};
+
+        struct Neighbor {
+            SceneModelKey sceneKey;
+            DirectX::XMFLOAT3 position;
+        };
+        std::vector<Neighbor> objsInFrustum;
+
+        bool isDirty{};
+    };
+
     inline constexpr BlackboardKey kRenderer_frameIndex { "Renderer.FrameIndex" };
     inline constexpr BlackboardKey kRenderer_width      { "Renderer.Width" };
     inline constexpr BlackboardKey kRenderer_height     { "Renderer.Height" };
-    inline constexpr BlackboardKey kRenderer_fallbackSRV{ "Renderer.FallbackSRV" };
+    inline constexpr BlackboardKey kRenderer_models     { "Renderer.Models" };
 
-    inline constexpr BlackboardKey kSkyDome_transmittanceLUT{ "SkyDome.TransmittanceLUT"};
-    inline constexpr BlackboardKey kSkyDome_scatteringLUT   { "SkyDome.ScatteringLUT"   };
+    inline constexpr BlackboardKey kRenderer_mainRTV            { "Renderer.MainRTV" };
+    inline constexpr BlackboardKey kRenderer_mainDSV            { "Renderer.MainDSV" };
+
+    inline constexpr BlackboardKey kSkyDome_transmitScatterSRVs{ "SkyDome.AtmosphereSRVs" };
+    inline constexpr BlackboardKey kSkyDome_constants{ "SkyDome.AtmosphereConstants"};
+
+    inline constexpr BlackboardKey kEnvCubemap_brdfLUTSRV { "EnvCubemap.BRDF_LUT_SRV" };
 
     class GraphicsCommandList
     {
@@ -234,31 +300,31 @@ namespace NSRenderer
             m_cmdList->OMSetBlendFactor(blendFactor);
         }
 
-        //void OMSetRenderTargets(
-        //    UINT numRenderTargetDescriptors,
-        //    const D3D12_CPU_DESCRIPTOR_HANDLE* pRenderTargetDescriptors,
-        //    BOOL RTsSingleHandleToDescriptorRange,
-        //    const D3D12_CPU_DESCRIPTOR_HANDLE* pDepthStencilDescriptor) const
-        //{
-        //     m_cmdList->OMSetRenderTargets(numRenderTargetDescriptors, pRenderTargetDescriptors, RTsSingleHandleToDescriptorRange, pDepthStencilDescriptor);
-        //}
+        void OMSetRenderTargets(
+            UINT numRenderTargetDescriptors,
+            const D3D12_CPU_DESCRIPTOR_HANDLE* pRenderTargetDescriptors,
+            BOOL RTsSingleHandleToDescriptorRange,
+            const D3D12_CPU_DESCRIPTOR_HANDLE* pDepthStencilDescriptor) const
+        {
+             m_cmdList->OMSetRenderTargets(numRenderTargetDescriptors, pRenderTargetDescriptors, RTsSingleHandleToDescriptorRange, pDepthStencilDescriptor);
+        }
 
-        //void ClearRenderTargetView(D3D12_CPU_DESCRIPTOR_HANDLE renderTargetView, const FLOAT colorRGBA[4], UINT numRects, const D3D12_RECT* pRects) const {
-        //    m_cmdList->ClearRenderTargetView(renderTargetView, colorRGBA, numRects, pRects);
-        //}
+        void ClearRenderTargetView(D3D12_CPU_DESCRIPTOR_HANDLE renderTargetView, const FLOAT colorRGBA[4], UINT numRects, const D3D12_RECT* pRects) const {
+            m_cmdList->ClearRenderTargetView(renderTargetView, colorRGBA, numRects, pRects);
+        }
 
-        //void ClearDepthStencilView(
-        //    D3D12_CPU_DESCRIPTOR_HANDLE depthStencilView,
-        //    D3D12_CLEAR_FLAGS clearFlags,
-        //    FLOAT depth, UINT8 stencil,
-        //    UINT numRects, const D3D12_RECT* pRects) const
-        //{
-        //    m_cmdList->ClearDepthStencilView(depthStencilView, clearFlags, depth, stencil, numRects, pRects);
-        //}
+        void ClearDepthStencilView(
+            D3D12_CPU_DESCRIPTOR_HANDLE depthStencilView,
+            D3D12_CLEAR_FLAGS clearFlags,
+            FLOAT depth, UINT8 stencil,
+            UINT numRects, const D3D12_RECT* pRects) const
+        {
+            m_cmdList->ClearDepthStencilView(depthStencilView, clearFlags, depth, stencil, numRects, pRects);
+        }
 
-        //void IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY primitiveTopology) const {
-        //    m_cmdList->IASetPrimitiveTopology(primitiveTopology);
-        //}
+        void IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY primitiveTopology) const {
+            m_cmdList->IASetPrimitiveTopology(primitiveTopology);
+        }
 
         //HRESULT Close() const {
         //  return m_cmdList->Close();
@@ -280,11 +346,12 @@ namespace NSRenderer
         ID3D12GraphicsCommandList10* m_cmdList = nullptr;
     };
 
-    using AllocSRVRing_t = std::function<Descriptor::Handle(uint32_t amount)>;
-    using AllocSRVStatic_t = std::function<Descriptor::Handle(uint32_t amount)>;
-    using FreeSRVStatic_t = std::function<void(Descriptor::Handle handle)>;
-    using OffsetSRV_t = std::function<Descriptor::hOffset(const Descriptor::Handle& handle, uint32_t offset)>;
-    using AllocConstBuff_t = std::function<Allocator::AllocCtx(size_t size)>;
+    using FnDescAlloc_t = std::function<Descriptor::Handle(uint32_t amount)>;
+    using FnDescFree_t = std::function<void(Descriptor::Handle& handle)>;
+    using FnDescOffset_t = std::function<Descriptor::hOffset(const Descriptor::Handle& handle, uint32_t offset)>;
+    using FnConstBuffAlloc_t = std::function<Allocator::AllocCtx(size_t size)>;
+    using FnRendererModelRegister_t = std::function<RegisterModelKey(SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
+    using FnRendererModelUnload_t = std::function<void(RegisterModelKey key)>;
 
     struct DepthStencilCreateDescription {
         DXGI_FORMAT format{};
@@ -292,7 +359,6 @@ namespace NSRenderer
         D3D12_DSV_DIMENSION dimention{};
         UINT width;
         UINT height;
-        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle;
         ComPtr<ID3D12Resource2>& outDSV;
     };
 
@@ -300,28 +366,52 @@ namespace NSRenderer
     {
     public:
         Ctx(
-            Blackboard& blackboard,
-            AllocSRVRing_t pfn_allocSRVRing,
-            AllocSRVStatic_t pfn_allocSRVStatic,
-            FreeSRVStatic_t pfn_freeSRVStatic,
-            OffsetSRV_t pfn_offsetSRV,
-            AllocConstBuff_t pfn_allocConstBuff
+            FnDescAlloc_t fn_allocSRVRing,
+            FnDescAlloc_t fn_allocSRVStatic,
+            FnDescAlloc_t fn_allocRTVStatic,
+            FnDescAlloc_t fn_allocDSVStatic,
+            FnDescFree_t fn_freeSRVStatic,
+            FnDescFree_t fn_freeRTVStatic,
+            FnDescFree_t fn_freeDSVStatic,
+            FnDescOffset_t fn_offsetSRV,
+            FnDescOffset_t fn_offsetRTV,
+            FnDescOffset_t fn_offsetDSV,
+            FnConstBuffAlloc_t fn_allocConstBuff,
+            FnRendererModelRegister_t fn_registerModel,
+            FnRendererModelUnload_t fn_unloadModel,
+            Descriptor::Handle fallbackSRVoffset
+
         )
-        : blackboard(blackboard),
-          allocSRVRing(std::move(pfn_allocSRVRing)),
-          allocSRVStatic(std::move(pfn_allocSRVStatic)),
-          freeSRVStatic(std::move(pfn_freeSRVStatic)),
-          offsetSRV(std::move(pfn_offsetSRV)),
-          allocConstBuff(std::move(pfn_allocConstBuff))
+        : allocSRVRing(std::move(fn_allocSRVRing)),
+          allocSRVStatic(std::move(fn_allocSRVStatic)),
+          allocRTVStatic(std::move(fn_allocRTVStatic)),
+          allocDSVStatic(std::move(fn_allocDSVStatic)),
+          freeSRVStatic(std::move(fn_freeSRVStatic)),
+          freeRTVStatic(std::move(fn_freeRTVStatic)),
+          freeDSVStatic(std::move(fn_freeDSVStatic)),
+          offsetSRV(std::move(fn_offsetSRV)),
+          offsetRTV(std::move(fn_offsetRTV)),
+          offsetDSV(std::move(fn_offsetDSV)),
+          allocConstBuff(std::move(fn_allocConstBuff)),
+          registerModel(std::move(fn_registerModel)),
+          unloadModel(std::move(fn_unloadModel)),
+          fallbackSRV(fallbackSRVoffset)
         {};
 
-        Blackboard& blackboard;
-
-        AllocSRVRing_t allocSRVRing;
-        AllocSRVStatic_t allocSRVStatic;
-        FreeSRVStatic_t freeSRVStatic;
-        OffsetSRV_t offsetSRV;
-        AllocConstBuff_t allocConstBuff;
+        FnDescAlloc_t allocSRVRing;
+        FnDescAlloc_t allocSRVStatic;
+        FnDescAlloc_t allocRTVStatic;
+        FnDescAlloc_t allocDSVStatic;
+        FnDescFree_t freeSRVStatic;
+        FnDescFree_t freeRTVStatic;
+        FnDescFree_t freeDSVStatic;
+        FnDescOffset_t offsetSRV;
+        FnDescOffset_t offsetRTV;
+        FnDescOffset_t offsetDSV;
+        FnConstBuffAlloc_t allocConstBuff;
+        FnRendererModelRegister_t registerModel;
+        FnRendererModelUnload_t unloadModel;
+        Descriptor::Handle fallbackSRV;
     };
 }
 
@@ -332,7 +422,9 @@ namespace RenderPass {
     public:
         virtual ~IRenderPass() = default;
 
-        virtual void Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
+        virtual void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
+
+        virtual void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
         virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) = 0;
         virtual void Destroy() {};
 

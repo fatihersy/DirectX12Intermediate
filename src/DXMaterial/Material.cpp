@@ -148,45 +148,19 @@ void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx rendererCtx, NSRe
 
     m_srvHandle = rendererCtx.allocSRVStatic(static_cast<INT>(FTextureType::FTextureType_MAX));
 
-    const Descriptor::hOffset* fallbackHandle = rendererCtx.blackboard.GetConst<Descriptor::hOffset>(NSRenderer::kRenderer_fallbackSRV);
-
-    D3D12_CPU_DESCRIPTOR_HANDLE handles[] = {
-        rendererCtx.offsetSRV(m_srvHandle, 0u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 1u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 2u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 3u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 4u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 5u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 6u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 7u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 8u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 9u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 10u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 11u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 12u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 13u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 14u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 15u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 16u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 17u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 18u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 19u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 20u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 21u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 22u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 23u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 24u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 25u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 26u).cpuAddr,
-        rendererCtx.offsetSRV(m_srvHandle, 27u).cpuAddr,
-    };
+    auto handles = []<size_t... N>(std::index_sequence<N...>, NSRenderer::Ctx rendererCtx, Descriptor::Handle srv)
+    {
+        return std::array<D3D12_CPU_DESCRIPTOR_HANDLE, sizeof...(N)> {
+            rendererCtx.offsetSRV(srv, static_cast<uint32_t>(N)).cpuAddr...
+        };
+    }(std::make_index_sequence<static_cast<size_t>(FTextureType::FTextureType_MAX)>{}, rendererCtx, m_srvHandle);
 
     device->CopyDescriptors(
         static_cast<INT>(FTextureType::FTextureType_MAX),
-        handles,
+        handles.data(),
         nullptr,
         1u,
-        &fallbackHandle->cpuAddr,
+        &rendererCtx.fallbackSRV.cpuAddr,
         nullptr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
     );

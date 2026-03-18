@@ -86,17 +86,12 @@ ConstBuffAlloc& ConstBuffAlloc::operator=(ConstBuffAlloc&& other) noexcept
 
 Allocator::AllocCtx ConstBuffAlloc::Allocate(size_t size)
 {
-    if (not m_cpuAddr or not m_bufferDefault)
-    {
-        throw std::runtime_error("Allocator has invalid address");
-    }
+    assert(m_cpuAddr and m_bufferDefault);
+
     constexpr size_t alignment = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
     size_t aligned = (m_blobOffset + alignment - 1) & ~(alignment - 1);
 
-    if (aligned + size >= m_blobFrameEnd)
-    {
-        throw std::runtime_error("Frame Overflow");
-    }
+    assert(aligned + size < m_blobFrameEnd);
 
     Allocator::AllocCtx ctx{};
     ctx.gpuAddr = m_gpuAddr + aligned;

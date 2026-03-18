@@ -3,7 +3,6 @@
 #include <assimp/scene.h>
 
 #include "Material.h"
-#include "Allocator.h"
 
 class Mesh
 {
@@ -33,6 +32,8 @@ public:
     Model();
     Model(_In_ const char* name, _In_ ID3D12Device* device, _In_ IWICImagingFactory2* wicFactory);
     std::string m_name;
+    SceneModelKey m_sceneKey;
+    RegisterModelKey m_registerKey;
 
     void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Move(DirectX::XMFLOAT3 vector, double delta);
@@ -80,16 +81,17 @@ public:
     void ResetUploadHeaps();
 
     template<typename T> requires IsPrimitiveMesh<T>
-        Model&& As(NSRenderer::Ctx rendererCtx, PrimitiveTraits<T>& desc) {
-            return _As(rendererCtx, "self", PrimitiveTraits<T>::type, &desc);
-        }
+    Model&& As(NSRenderer::Ctx rendererCtx, PrimitiveTraits<T>& desc) {
+        return _As(rendererCtx, "self", PrimitiveTraits<T>::type, &desc);
+    }
 
-        void Draw(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
-        void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
+    void Draw(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+    void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
 
-        std::filesystem::path m_assetPath;
-        bool isOnGPU{};
-        bool isOnCPU{};
+    std::filesystem::path m_assetPath;
+    bool isOnGPU{};
+    bool isOnCPU{};
+    SphereCollision collision;
 
 private:
     IWICImagingFactory2* m_wicFactory;

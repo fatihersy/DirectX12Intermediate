@@ -109,3 +109,31 @@ struct PrimitiveTraits<SCone> {
 static_assert(offsetof(PrimitiveTraits<SCone>, desc) == 0);
 
 template<typename T> concept IsPrimitiveMesh = PrimitiveTraits<std::decay_t<T>>::type != EPrimitive::PRIMITIVE_TYPE_NONE;
+
+struct SceneModelKey {
+    uint32_t id{};
+    size_t index{};
+};
+struct RegisterModelKey {
+    uint32_t id{};
+    size_t index{};
+};
+
+inline bool operator==(SceneModelKey& lhs, SceneModelKey& rhs) {
+    return lhs.id == rhs.id and lhs.index == rhs.index;
+}
+inline bool operator!=(SceneModelKey& lhs, SceneModelKey& rhs) {
+    return lhs.id != rhs.id or lhs.index != rhs.index;
+}
+inline bool operator==(RegisterModelKey& lhs, RegisterModelKey& rhs) {
+    return lhs.id == rhs.id and lhs.index == rhs.index;
+}
+inline bool operator!=(RegisterModelKey& lhs, RegisterModelKey& rhs) {
+    return lhs.id != rhs.id or lhs.index != rhs.index;
+}
+
+struct SphereCollision {
+    float radius{};
+    UINT sliceCount{};
+    UINT stackCount{};
+};

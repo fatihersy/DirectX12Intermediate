@@ -209,7 +209,6 @@ void app::LoadPipeline() {
         }
         ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&m_device)));
         m_device->SetName(L"app::m_device");
-
     }
 
     m_renderer.Init(m_factory.Get(), m_device.Get(), plat.GetHWND(), im_width, im_height);
@@ -220,22 +219,24 @@ void app::LoadAssets()
     {
         m_scene = Scene(m_device.Get(), m_wicFactory.Get(), { 0.f, 0.f, 100.f, 0.f }, 10.f, .1f, 12.f);
 
-        m_scene.AddObject<SDome>(ctx, "Sky Dome", {}, SDome{
+        Model& skyDome = m_scene.AddObject<SDome>(ctx, "Sky Dome", {}, SDome{
             .radius = 10000.f,
             .sliceCount = 64,
             .stackCount = 32
         });
+        skyDome.m_sceneKey.id = this->m_nextModelId++;
+        skyDome.m_sceneKey.index = 0u;
 
         {
             const float stride = 11.f;
             const float gridStartPosX = 5.f * stride / -2.f;
             const float gridStartPosY = 5.f * stride / -2.f;
 
-            int32_t idx{};
-            for (size_t i = 0; i < 36u; i++)
+            int32_t idx{1u};
+            for (int32_t itr = 0; itr < 36u; itr++)
             {
-                const int32_t col = idx % 6;
-                const int32_t row = idx / 6;
+                const int32_t col = itr % 6;
+                const int32_t row = itr / 6;
                 const float metallic = col * .2f;
                 const float roughness = row * .2f;
                 const float posX = -col * stride - gridStartPosX;
@@ -255,16 +256,24 @@ void app::LoadAssets()
                     metallic,
                     roughness
                 );
+                model.m_sceneKey.id = this->m_nextModelId++;
+                model.m_sceneKey.index = idx;
+
+                model.collision.radius = desc.desc.radius;
+                model.collision.sliceCount = desc.desc.sliceCount;
+                model.collision.stackCount = desc.desc.stackCount;
                 idx++;
             }
         }
 
-        for (Model& model : m_scene.m_models) {
-            model.UploadGPU(ctx, cmdList);
-        }
+        int32_t idx{};
+        for (Model& model : m_scene.m_models)
+        {
+            assert(model.m_sceneKey.index == idx);
 
-        m_renderer.AddPass<RenderPass::SkyDomePass>(m_device.Get(), ctx).SetEnabled(true);
-        m_renderer.AddPass<RenderPass::GeometryPass>(m_device.Get(), ctx).SetEnabled(true);
+            model.UploadGPU(ctx, cmdList);
+            idx++;
+        }
     });
 }
 

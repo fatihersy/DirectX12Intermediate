@@ -1,7 +1,5 @@
 #pragma once
 
-#include "RendererTypes.h"
-
 class Blackboard
 {
 public:
@@ -46,10 +44,17 @@ public:
     }
 
     template<typename T>
-    std::optional<T> GetOpt(NSRenderer::BlackboardKey key) const
+    std::optional<std::reference_wrapper<T>> GetOpt(NSRenderer::BlackboardKey key)
     {
-        const T* ptr = Get<T>(key);
-        return ptr ? std::optional<T>(*ptr) : std::nullopt;
+        T* ptr = GetMut<T>(key);
+        return ptr ? std::optional<std::reference_wrapper<T>>{*ptr} : std::nullopt;
+    }
+
+    template<typename T>
+    std::optional<std::reference_wrapper<const T>> GetOpt(NSRenderer::BlackboardKey key) const
+    {
+        const T* ptr = GetConst<T>(key);
+        return ptr ? std::optional<std::reference_wrapper<const T>>{*ptr} : std::nullopt;
     }
 
     bool Contains(NSRenderer::BlackboardKey key)

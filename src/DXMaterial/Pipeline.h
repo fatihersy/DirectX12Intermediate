@@ -16,8 +16,6 @@ struct GRAPHICS_PIPELINE_STATE_DESC
     D3D12_PIPELINE_STATE_FLAGS Flags;
 };
 
-using FnSetFootSignature = std::function<void(D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error)>;
-
 class ShaderCompiler
 {
 public:
@@ -40,12 +38,17 @@ private:
     static ShaderCompiler* s_instance;
 };
 
+
+using FnSetRootSignature = std::function<HRESULT(D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error)>;
+
+void MakeRootSignature(ID3D12Device* device, LPCWSTR rootName, ComPtr<ID3D12RootSignature>& outSignature, FnSetRootSignature SetRootSignature);
+
 class Pipeline
 {
 public:
     Pipeline(){};
     Pipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
-    Pipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature);
+    Pipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetRootSignature SetRootSignature);
     ~Pipeline();
 
 protected:
@@ -63,7 +66,7 @@ class GraphicsPipeline : public Pipeline
 public:
     GraphicsPipeline(){};
     GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
-    GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature setRootSignature);
+    GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetRootSignature setRootSignature);
 
     void Bind(NSRenderer::GraphicsCommandList cmdList) const {
         if (im_pipeline and im_rootSignature)
@@ -92,7 +95,7 @@ class ComputePipeline : public Pipeline
 public:
     ComputePipeline(){};
     ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature);
-    ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature);
+    ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetRootSignature SetRootSignature);
 
     void Bind(NSRenderer::GraphicsCommandList cmdList) const
     {

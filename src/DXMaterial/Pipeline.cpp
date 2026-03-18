@@ -21,34 +21,47 @@ ShaderCompiler::~ShaderCompiler() {
     s_instance = nullptr;
 }
 
+void MakeRootSignature(ID3D12Device* device, LPCWSTR rootName, ComPtr<ID3D12RootSignature>& outSignature, FnSetRootSignature SetRootSignature)
+{
+    D3D12_FEATURE_DATA_ROOT_SIGNATURE featureVersion{};
+    featureVersion.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+
+    if (FAILED(device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureVersion, sizeof(featureVersion))))
+    {
+        featureVersion.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+    }
+
+    ComPtr<ID3D10Blob> signature;
+    ComPtr<ID3D10Blob> error;
+
+    if (FAILED(SetRootSignature(featureVersion.HighestVersion, signature, error)))
+    {
+        if (not error)
+        {
+            const char * errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
+            g_FError(errorMsg);
+        }
+        throw std::runtime_error("Failed to serialize root signature");
+    }
+    ThrowIfFailed(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&outSignature)));
+    outSignature->SetName(rootName);
+}
+
 Pipeline::Pipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature) : im_device(device), im_name(pipelineName)
 {
     im_rootSignature = rootSignature;
     m_rsVar = rootSignature;
 }
-Pipeline::Pipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature) : im_device(device), im_name(pipelineName)
+Pipeline::Pipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetRootSignature SetRootSignature) : im_device(device), im_name(pipelineName)
 {
     ComPtr<ID3D12RootSignature> rootSig;
-    D3D12_FEATURE_DATA_ROOT_SIGNATURE rsData{};
-    rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
 
-    if (FAILED(im_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &rsData, sizeof(rsData)))) {
-        rsData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
-    }
-
-    ComPtr<ID3D10Blob> signature;
-    ComPtr<ID3D10Blob> error;
-    SetRootSignature(rsData.HighestVersion, signature, error);
-
-    if (!signature) {
-        if (error) {
-            const char* errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-            g_FError(errorMsg);
-        }
-        throw std::runtime_error("Failed to serialize root signature");
-    }
-    ThrowIfFailed(im_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rootSig)));
-    rootSig->SetName(FString::wformat(L"%s::%s", std::wstring(pipelineName), L"RootSignature").c_str());
+    MakeRootSignature(
+        device,
+        FString::wformat(L"%s::%s", std::wstring(pipelineName), L"RootSignature").c_str(),
+        rootSig,
+        SetRootSignature
+    );
 
     m_rsVar = std::move(rootSig);
     im_rootSignature = std::get<ComPtr<ID3D12RootSignature>>(m_rsVar).Get();
@@ -71,14 +84,14 @@ Pipeline::~Pipeline()
 }
 
 ComputePipeline::ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature) : Pipeline(device, pipelineName, rootSignature) {};
-ComputePipeline::ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature)
+ComputePipeline::ComputePipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetRootSignature SetRootSignature)
     : Pipeline(device, pipelineName, SetRootSignature)
 {
 
 }
 
 GraphicsPipeline::GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, ID3D12RootSignature* rootSignature) : Pipeline(device, pipelineName, rootSignature) {};
-GraphicsPipeline::GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetFootSignature SetRootSignature)
+GraphicsPipeline::GraphicsPipeline(ID3D12Device* device, LPCWSTR pipelineName, FnSetRootSignature SetRootSignature)
     : Pipeline(device, pipelineName, SetRootSignature)
 {
 

@@ -27,13 +27,11 @@ Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, DirectX::X
 void Scene::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
     std::for_each(m_models.begin(), m_models.end(), [&rendererCtx](Model& model) {
+        model.ResetUploadHeaps();
         model.UnloadGPU(rendererCtx);
     });
 }
-Scene::~Scene()
-{
-
-}
+Scene::~Scene(){}
 
 void Scene::OnUpdate()
 {
@@ -55,6 +53,30 @@ void Scene::UpdateCamera()
     m_camera.camUp = DirectX::XMVector3Normalize(m_camera.camUp);
 
     m_camera.viewMatrix = DirectX::XMMatrixLookAtLH(m_camera.camEye, lookAt, m_camera.camUp);
+}
+
+void Scene::CullScene(const Camera* cam, SceneModelKey exclude)
+{
+    const Camera* camera = cam ? cam : &m_camera;
+
+    m_modelsCulled.clear();
+
+    Frustum frustum(camera->viewMatrix * camera->projectionMatrix);
+
+    for (size_t itr = 0; itr < m_models.size(); itr++)
+    {
+        Model& model = m_models[itr];
+
+        if(itr == exclude.index and model.m_sceneKey.id == exclude.id) continue;
+
+        DirectX::XMFLOAT3 fPos = model.GetPosition();
+        DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&fPos);
+
+        if (frustum.TestSphere(pos, model.collision.radius))
+        {
+            m_modelsCulled.push_back(model.m_sceneKey);
+        }
+    }
 }
 
 Frustum::Frustum(DirectX::XMMATRIX viewProj)

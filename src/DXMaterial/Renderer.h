@@ -23,6 +23,8 @@ public:
     void BeginFrame();
     void EndFrame();
     void DrawScene(Scene& scene);
+    RegisterModelKey RegisterModel(SceneModelKey key, NSRenderer::GraphicsCommandList cmdList);
+    void UnloadModel(RegisterModelKey key);
 
     void Resize(UINT width, UINT height);
     void WaitForGPU();
@@ -42,21 +44,47 @@ public:
     Descriptor::Handle AllocSRVStatic(uint32_t amount = 1u) {
         return m_srvHeap.AllocateStatic(amount);
     };
+    Descriptor::Handle AllocRTVStatic(uint32_t amount = 1u) {
+        return m_rtvHeap.Allocate(amount);
+    };
+    Descriptor::Handle AllocDSVStatic(uint32_t amount = 1u) {
+        return m_dsvHeap.Allocate(amount);
+    };
     void FreeSRVStatic(Descriptor::Handle handle) {
         m_srvHeap.FreeStatic(handle);
+    };
+    void FreeRTVStatic(Descriptor::Handle handle) {
+        m_rtvHeap.Free(handle);
+    };
+    void FreeDSVStatic(Descriptor::Handle handle) {
+        m_dsvHeap.Free(handle);
     };
     Descriptor::hOffset OffsetSRV(const Descriptor::Handle& handle, uint32_t offset) const {
         return m_srvHeap.Offset(handle, offset);
     }
+    Descriptor::hOffset OffsetRTV(const Descriptor::Handle& handle, uint32_t offset) const {
+        return m_rtvHeap.Offset(handle, offset);
+    }
+    Descriptor::hOffset OffsetDSV(const Descriptor::Handle& handle, uint32_t offset) const {
+        return m_dsvHeap.Offset(handle, offset);
+    }
 
     NSRenderer::Ctx GetCtx() {
         return NSRenderer::Ctx(
-            m_blackboard,
             [this](uint32_t amount) { return this->AllocSRVRing(amount); },
             [this](uint32_t amount) { return this->AllocSRVStatic(amount); },
-            [this](Descriptor::Handle handle) { this->FreeSRVStatic(handle); },
+            [this](uint32_t amount) { return this->AllocRTVStatic(amount); },
+            [this](uint32_t amount) { return this->AllocDSVStatic(amount); },
+            [this](Descriptor::Handle& handle) { this->FreeSRVStatic(handle); },
+            [this](Descriptor::Handle& handle) { this->FreeRTVStatic(handle); },
+            [this](Descriptor::Handle& handle) { this->FreeDSVStatic(handle); },
             [this](const Descriptor::Handle& handle, uint32_t offset) { return this->OffsetSRV(handle, offset); },
-            [this](size_t size) { return this->m_allocator.Allocate(size); }
+            [this](const Descriptor::Handle& handle, uint32_t offset) { return this->OffsetRTV(handle, offset); },
+            [this](const Descriptor::Handle& handle, uint32_t offset) { return this->OffsetDSV(handle, offset); },
+            [this](size_t size) { return this->m_allocator.Allocate(size); },
+            [this](SceneModelKey key, NSRenderer::GraphicsCommandList cmdList) { return this->RegisterModel(key, cmdList); },
+            [this](RegisterModelKey key) { return this->UnloadModel(key); },
+            m_fallbackTextureSRVHandle
         );
     }
 
@@ -69,7 +97,11 @@ private:
     IDXGIFactory7* m_factory = nullptr;
 
     ComPtr<IDXGISwapChain4> m_swapchain;
+
+    Descriptor::Handle m_rtHandle;
     ComPtr<ID3D12Resource2> m_renderTarget[IApp::ic_frameCount];
+
+    Descriptor::Handle m_dsHandle;
     ComPtr<ID3D12Resource2> m_depthStencil;
 
     ComPtr<ID3D12CommandAllocator> m_commandAllocators[IApp::ic_frameCount];

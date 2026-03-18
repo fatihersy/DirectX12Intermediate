@@ -2,15 +2,19 @@
 
 #include "Pipeline.h"
 
+class Model;
+
 namespace RenderPass
 {
     class GeometryPass : public IRenderPass
     {
     public:
-        GeometryPass(ID3D12Device14* device, NSRenderer::Ctx rendererCtx);
+        GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~GeometryPass() override;
 
-        void Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+
+        void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
@@ -21,10 +25,12 @@ namespace RenderPass
     class SkyDomePass : public IRenderPass
     {
     public:
-        SkyDomePass(ID3D12Device14* device, NSRenderer::Ctx rendererCtx);
+        SkyDomePass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~SkyDomePass() override;
 
-        void Execute(Scene& scene, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+
+        void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
         skyDomeConstants m_constantsUpload{};
@@ -41,7 +47,7 @@ namespace RenderPass
 
         static constexpr UINT IDX_ROOT_CBV_FRAME = 0u;
         static constexpr UINT IDX_ROOT_CBV_MESH = 1u;
-        static constexpr UINT IDX_ROOT_CBV_SKYDOME = 2u;
+        static constexpr UINT IDX_ROOT_CBV_ATMOSPHERE = 2u;
         static constexpr UINT IDX_ROOT_DESC_TABLE_UAV = 3u;
         static constexpr UINT IDX_ROOT_DESC_TABLE_SRV = 4u;
 
@@ -49,12 +55,58 @@ namespace RenderPass
         skyDomeConstants m_constantsDefault{};
         static constexpr UINT IDX_CBV_FRAME = 0u;
         static constexpr UINT IDX_CBV_MESH = 1u;
-        static constexpr UINT IDX_CBV_SKYDOME = 2u;
+        static constexpr UINT IDX_CBV_ATMOSPHERE = 2u;
 
         Descriptor::Handle m_srvHandle;
         static constexpr UINT IDX_UAV_TRANSMITTANCE = 0u;
         static constexpr UINT IDX_UAV_SCATTERING = 1u;
         static constexpr UINT IDX_SRV_TRANSMITTANCE = 2u;
         static constexpr UINT IDX_SRV_SCATTERING = 3u;
+    };
+
+    class EnvironmentCubemapPass : public IRenderPass
+    {
+    public:
+        EnvironmentCubemapPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
+        ~EnvironmentCubemapPass() override;
+
+        void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+
+        void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+
+        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
+        void Destroy() override;
+
+    private:
+        ComPtr<ID3D12RootSignature> m_rootSignature;
+        GraphicsPipeline m_skyPipeline;
+        GraphicsPipeline m_geometryPipeline;
+        skyDomeConstants m_skyConstantsDefault;
+
+        ComPtr<ID3D12RootSignature> m_prefilterRootSignature;
+        ComputePipeline m_prefilterPipeline;
+
+        ComPtr<ID3D12RootSignature> m_brdfRootSignature;
+        ComputePipeline m_brdfPipeline;
+        ComPtr<ID3D12Resource2> m_brdfLUT;
+        Descriptor::Handle m_brdfSRVHandle;
+        Descriptor::Handle m_brdfUAVHandle;
+
+        void Capture(Model& model, Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        void PrefilterCubemap(NSRenderer::EnvironmentCubemap& envMap, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        void GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+
+        Descriptor::Handle m_srvHandle;
+        static constexpr UINT IDX_ROOT_CBV_CAPTURE = 0u;
+        static constexpr UINT IDX_ROOT_CBV_MESH = 1u;
+        static constexpr UINT IDX_ROOT_DESC_MODEL_SRV = 2u;
+        static constexpr UINT IDX_ROOT_CBV_ATMOSPHERE = 3u;
+        static constexpr UINT IDX_ROOT_DESC_ATMOS_SRV = 4u;
+
+        static constexpr UINT IDX_CBV_CAPTURE = 0u;
+        static constexpr UINT IDX_CBV_MESH = 1u;
+        static constexpr UINT IDX_CBV_ATMOSPHERE = 2u;
+
+        static constexpr UINT BRDF_LUT_SIZE = 256u;
     };
 }

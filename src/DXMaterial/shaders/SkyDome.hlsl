@@ -53,17 +53,17 @@ float ClampCosine(float c) { return clamp(c, -1.0f, 1.0f); }
 cbuffer AtmosCB : register(b2)
 {
     float3 BetaR;
-    float PadR;
+    float Pad0;
     float BetaMScatter;
     float BetaMExtinct;
     float MieG;
-    float Pad0;
     float HR;
     float HM;
     float Rg;
     float Rt;
     float SunIntensity;
     float3 SunDir;
+    float Pad1;
 };
 
 float GetRG2()

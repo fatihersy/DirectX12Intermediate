@@ -37,7 +37,10 @@ ConstantBuffer<FrameConstants> frameCB : register(b0); // Per-frame constants.
 ConstantBuffer<MeshConstants> meshCB : register(b1); // Per-mesh constants.
 
 Texture2D textures[28] : register(t0); // Texture array: slot = FTextureType enum value.
-SamplerState texSampler : register(s0); // Linear sampler for textures.
+TextureCube envCubemap : register(t28); // Pre-filtered environment cubemap for IBL.
+Texture2D brdfLUT : register(t29); // BRDF integration LUT for split-sum IBL.
+SamplerState texSampler : register(s0); // Linear sampler for material textures.
+SamplerState envSampler : register(s1); // Linear clamp sampler for IBL lookups.
 
 // Texture flag constants (match FTextureType enum bits).
 static const uint TEX_FLAG_NONE                    = ( 1 << 0 );
@@ -108,6 +111,16 @@ float3 FresnelSchlick(float cosTheta, float3 F0)
 {
     return F0 + (1.0f - F0) * pow(clamp(1.0f - cosTheta, 0.0f, 1.0f), 5.0f);
 }
+
+// Fresnel with roughness term for IBL ambient (accounts for rough surfaces
+// reflecting less at grazing angles than smooth ones).
+float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness)
+{
+    float3 oneMinusR = max(1.0f - roughness, F0);
+    return F0 + (oneMinusR - F0) * pow(clamp(1.0f - cosTheta, 0.0f, 1.0f), 5.0f);
+}
+
+static const float MAX_REFLECTION_LOD = 7.0f; // MIP_COUNT - 1 (128 → 8 mips, 0..7)
 
 // Sample and unpack normal map (assumes directX format: RG = tangent normal, B=1).
 float3 SampleNormalMap(float2 uv, float3x3 TBN)
@@ -218,10 +231,28 @@ float4 mainPS(PSInput input) : SV_TARGET
     float3 diffuse = kD * albedo.rgb / PI; // Lambertian diffuse (divide by PI for energy conservation).
     float3 Lo = (diffuse + specular) * radiance * NdotL;
 
-    // Simple ambient (approximates IBL; multiply by AO for occlusion).
-    float3 ambient = float3(0.1f, 0.1f, 0.1f) * albedo.rgb * ao; // Low ambient; tune for scene.
+    // === IMAGE-BASED LIGHTING (Split-Sum Approximation) ===
+    // Fresnel at normal incidence, adjusted for roughness
+    float3 F_ibl = FresnelSchlickRoughness(NdotV, F0, roughness);
+    float3 kS_ibl = F_ibl;
+    float3 kD_ibl = (1.0f - kS_ibl) * (1.0f - metallic);
 
-    // Total color: Ambient + direct lights.
+    // Diffuse IBL: sample the pre-filtered cubemap at the highest mip (most blurred)
+    // as an approximation of the irradiance integral.
+    float3 irradiance = envCubemap.SampleLevel(envSampler, N, MAX_REFLECTION_LOD).rgb;
+    float3 diffuseIBL = kD_ibl * irradiance * albedo.rgb;
+
+    // Specular IBL: sample pre-filtered env map at roughness-dependent mip level
+    float3 R = reflect(-V, N);
+    float3 prefilteredColor = envCubemap.SampleLevel(envSampler, R, roughness * MAX_REFLECTION_LOD).rgb;
+
+    // BRDF LUT lookup: x = NdotV, y = roughness → (scale, bias) for F0
+    float2 envBRDF = brdfLUT.SampleLevel(envSampler, float2(NdotV, roughness), 0).rg;
+    float3 specularIBL = prefilteredColor * (F_ibl * envBRDF.x + envBRDF.y);
+
+    float3 ambient = (diffuseIBL + specularIBL) * ao;
+
+    // Total color: IBL ambient + direct lights.
     float3 color = ambient + Lo;
 
     // === POST-PROCESSING ===

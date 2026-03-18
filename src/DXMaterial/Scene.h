@@ -2,39 +2,6 @@
 
 #include "Model.h"
 
-struct Camera
-{
-    DirectX::XMMATRIX viewMatrix;
-    DirectX::XMMATRIX projectionMatrix;
-    DirectX::XMVECTOR camEye;
-    DirectX::XMVECTOR camFwd;
-    DirectX::XMVECTOR camUp;
-
-    float camYaw{};
-    float camPitch{};
-
-    float camSpeed{};
-    float lookSensitivity{};
-};
-
-class Frustum {
-    Frustum() {};
-    Frustum(DirectX::XMMATRIX viewProj);
-
-    bool TestSphere(DirectX::FXMVECTOR center, float radius) const {
-        using namespace DirectX;
-        for (size_t i = 0; i < 6; i++)
-        {
-            float dist = XMVectorGetX(XMPlaneDot(Planes[i], center));
-            if (dist < -radius)
-                return false;
-        }
-        return true;
-    }
-
-    DirectX::XMVECTOR Planes[6]{};
-};
-
 class Scene {
 public:
     Scene(){};
@@ -45,6 +12,17 @@ public:
 
     void OnUpdate();
     void UpdateCamera();
+
+    bool ValidateKey(SceneModelKey key) {
+        return m_models.at(key.index).m_sceneKey.id == key.id;
+    }
+    bool ValidateKeys(SceneModelKey lhs, RegisterModelKey rhs) {
+        return m_models.at(lhs.index).m_sceneKey.id == lhs.id
+               and
+               m_models.at(lhs.index).m_registerKey.id == rhs.id
+               and
+               lhs.index == rhs.index;
+    }
 
     ID3D12Device14* m_device = nullptr;
     IWICImagingFactory2* m_wicFactory = nullptr;
@@ -73,7 +51,10 @@ public:
         return false;
     }
 
+    void CullScene(const Camera* cam = nullptr, SceneModelKey excludeModel = {UINT32_MAX, UINT32_MAX});
+
     std::vector<Model> m_models;
+    std::vector<SceneModelKey> m_modelsCulled;
     Camera m_camera;
 
     float m_timeOfDay{};

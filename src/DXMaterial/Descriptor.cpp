@@ -44,8 +44,7 @@ SsearchBlockResult GetFirstContiguousBlock(std::vector<uint32_t>& vec, uint32_t 
 
 IDescriptor::IDescriptor(ID3D12Device14* device, LPCWSTR name, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT capacity, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
 {
-    if (not device)
-        throw std::runtime_error("Device is invalid");
+    assert(device);
 
     im_device = device;
 
@@ -84,7 +83,7 @@ Handle StaticHeap::Allocate(uint32_t amount)
     assert(m_freeList.size() >= amount && "Insufficient free index");
 
     SsearchBlockResult result = GetFirstContiguousBlock(m_freeList, amount);
-    if (not result.success) throw std::runtime_error("Cannot allocate a contiguous block");
+    assert(result.success);
 
     result.handleIndexBegin = std::clamp(
         result.handleIndexBegin,
@@ -115,10 +114,7 @@ void StaticHeap::Free(Handle handle)
 
     std::vector<uint32_t>::iterator pItr = std::lower_bound(m_freeList.begin(), m_freeList.end(), handle.index);
 
-    if (pItr != m_freeList.end() and (*pItr) < handle.index + handle.amount)
-    {
-        throw std::runtime_error("It is illegal to double free a descriptor allocation.");
-    }
+    assert(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount);
 
     for (uint32_t i = 0u; i < handle.amount; i++)
     {
@@ -163,7 +159,7 @@ Handle RingHeap::AllocateStatic(uint32_t amount)
     assert(m_freeList.size() > amount && "Insufficient free index");
 
     SsearchBlockResult result = GetFirstContiguousBlock(m_freeList, amount);
-    if (not result.success) throw std::runtime_error("Cannot allocate a contiguous block");
+    assert(result.success);
 
     const std::vector<uint32_t>::iterator blockBegin = m_freeList.begin() + result.vectorIndexBegin;
     m_freeList.erase(blockBegin, blockBegin + amount);
@@ -182,10 +178,7 @@ void RingHeap::FreeStatic(Handle handle)
 
     std::vector<uint32_t>::const_iterator pItr = std::lower_bound(m_freeList.begin(), m_freeList.end(), handle.index);
 
-    if (pItr != m_freeList.end() and (*pItr) < handle.index + handle.amount)
-    {
-        throw std::runtime_error("It is illegal to double free a descriptor allocation.");
-    }
+    assert(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount);
 
     for (uint32_t i = 0u; i < handle.amount; i++) {
         pItr = m_freeList.insert(pItr, handle.index + (handle.amount - 1u - i));
