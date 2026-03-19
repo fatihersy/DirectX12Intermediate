@@ -207,19 +207,19 @@ VSOutput VS_EnvSky(uint vertexID : SV_VertexID)
     // Reconstruct view-space ray direction from NDC
     // For 90° FOV, aspect 1:1, the projection maps x/z and y/z to [-1,1]
     float3 viewRay = float3(posNDC.x, posNDC.y, 1.0f); // In view space
-    viewRay = normalize(viewRay);
 
     // Rotate from view space to world space using the inverse of the
     // upper-left 3x3 of the view matrix (view matrix is orthonormal).
-    // HLSL default column-major reads the CPU's row-major matrix transposed,
-    // so ViewMatrix[i].xyz gives column i of the original = row i of V^T.
-    // Building a 3x3 from these rows directly yields V^T = V_inverse.
-    float3x3 invViewRot = float3x3(
+    // HLSL default column-major reads the CPU's row-major data transposed,
+    // so ViewMatrix[i].xyz gives row i of the logical view matrix V
+    // (right, up, forward basis vectors). To invert the rotation (view→world),
+    // we need V^T * viewRay, which equals mul(viewRay, V) in HLSL.
+    float3x3 viewRot = float3x3(
         ViewMatrix[0].xyz,
         ViewMatrix[1].xyz,
         ViewMatrix[2].xyz
     );
-    output.viewDir = mul(invViewRot, viewRay);
+    output.viewDir = mul(viewRay, viewRot);
 
     return output;
 }
