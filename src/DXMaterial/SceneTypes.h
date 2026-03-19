@@ -41,7 +41,7 @@ public:
         using namespace DirectX;
         for (size_t i = 0; i < 6; i++)
         {
-            float dist = XMVectorGetX(XMPlaneDot(Planes[i], center));
+            float dist = XMVectorGetX(XMPlaneDotCoord(Planes[i], center));
             if (dist < -radius)
                 return false;
         }

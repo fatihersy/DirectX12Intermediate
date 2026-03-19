@@ -93,6 +93,19 @@ public:
     bool isOnCPU{};
     SphereCollision collision;
 
+    bool TestFlag(EModelFlag flag) const {
+        return m_flags.test(static_cast<uint32_t>(flag));
+    }
+    void SetFlag(EModelFlag flag) {
+        m_flags.set(static_cast<uint32_t>(flag));
+    }
+    void ResetFlag(EModelFlag flag) {
+        m_flags.reset(static_cast<uint32_t>(flag));
+    }
+    void FlipFlag(EModelFlag flag) {
+        m_flags.flip(static_cast<uint32_t>(flag));
+    }
+
 private:
     IWICImagingFactory2* m_wicFactory;
     ID3D12Device* m_device;
@@ -117,5 +130,7 @@ private:
         }
         return transform;
     }
+
+    std::bitset<32> m_flags;
 };
 

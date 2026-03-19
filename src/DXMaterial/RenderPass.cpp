@@ -750,11 +750,13 @@ void EnvironmentCubemapPass::Execute(Scene& scene, Blackboard& blackboard, NSRen
     auto bbModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     assert(bbModels.has_value());
 
-    for (size_t itr_000 = 1u; itr_000 < bbModels->get().size(); ++itr_000)
+    for (size_t itr_000{}; itr_000 < bbModels->get().size(); ++itr_000)
     {
         NSRenderer::Model& bbModel = bbModels->get()[itr_000];
         Model& sceneModel = scene.m_models.at(bbModel.sceneKey.index);
         assert(scene.ValidateKeys(bbModel.sceneKey, sceneModel.m_registerKey));
+
+        if (sceneModel.TestFlag(EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP)) continue;
 
         if (bbModel.isDirty)
         {
@@ -864,7 +866,14 @@ void EnvironmentCubemapPass::Capture(Model& model, Scene& scene, Blackboard& bla
                 SceneModelKey& key = scene.m_modelsCulled[itr];
                 assert(scene.ValidateKey(key));
 
-                scene.m_models[key.index].Draw(rendererCtx, cmdList);
+                Model& sceModel = scene.m_models[key.index];
+
+                auto bbModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+                NSRenderer::Model& bbModel = bbModels->get()[key.index];
+
+                if (bbModel.TestFlag(ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) continue;
+
+                sceModel.Draw(rendererCtx, cmdList);
             }
         }
 

@@ -92,6 +92,35 @@ public:
         return m_commandQueue.Get();
     }
 
+    bool bbModelTestFlag(Scene& scene, SceneModelKey key, ERegModelFlag flag)
+    {
+        auto bbModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        NSRenderer::Model& bbModel = bbModels->get()[key.index];
+
+        return bbModel.TestFlag(flag);
+    }
+    void bbModelSetFlag(RegisterModelKey key, ERegModelFlag flag)
+    {
+        auto bbModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        NSRenderer::Model& bbModel = bbModels->get()[key.index];
+
+        bbModel.SetFlag(flag);
+    }
+    void bbModelResetFlag(Scene& scene, SceneModelKey key, ERegModelFlag flag)
+    {
+        auto bbModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        NSRenderer::Model& bbModel = bbModels->get()[key.index];
+
+        bbModel.ResetFlag(flag);
+    }
+    void bbModelFlipFlag(Scene& scene, SceneModelKey key, ERegModelFlag flag)
+    {
+        auto bbModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        NSRenderer::Model& bbModel = bbModels->get()[key.index];
+
+        bbModel.FlipFlag(flag);
+    }
+
 private:
     ID3D12Device14* m_device = nullptr;
     IDXGIFactory7* m_factory = nullptr;

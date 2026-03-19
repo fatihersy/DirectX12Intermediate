@@ -226,14 +226,19 @@ void app::LoadAssets()
         });
         skyDome.m_sceneKey.id = this->m_nextModelId++;
         skyDome.m_sceneKey.index = 0u;
+        skyDome.SetFlag(EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP);
+
+        skyDome.UploadGPU(ctx, cmdList);
+        assert(m_scene.ValidateKeys(skyDome.m_sceneKey, skyDome.m_registerKey));
+        m_renderer.bbModelSetFlag(skyDome.m_registerKey, ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE);
 
         {
             const float stride = 11.f;
             const float gridStartPosX = 5.f * stride / -2.f;
             const float gridStartPosY = 5.f * stride / -2.f;
 
-            int32_t idx{1u};
-            for (int32_t itr = 0; itr < 36u; itr++)
+            int32_t idx{1};
+            for (int32_t itr{}; itr < 36; itr++)
             {
                 const int32_t col = itr % 6;
                 const int32_t row = itr / 6;
@@ -266,13 +271,13 @@ void app::LoadAssets()
             }
         }
 
-        int32_t idx{};
-        for (Model& model : m_scene.m_models)
+        for (size_t itr = 1u; itr < m_scene.m_models.size(); itr++)
         {
-            assert(model.m_sceneKey.index == idx);
+            Model& model = m_scene.m_models[itr];
+
+            assert(model.m_sceneKey.index == itr);
 
             model.UploadGPU(ctx, cmdList);
-            idx++;
         }
     });
 }

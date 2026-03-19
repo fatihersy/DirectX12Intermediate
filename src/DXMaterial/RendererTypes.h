@@ -141,7 +141,23 @@ namespace NSRenderer
         };
         std::vector<Neighbor> objsInFrustum;
 
+        bool TestFlag(ERegModelFlag flag) const {
+            return m_flags.test(static_cast<uint32_t>(flag));
+        }
+        void SetFlag(ERegModelFlag flag) {
+            m_flags.set(static_cast<uint32_t>(flag));
+        }
+        void ResetFlag(ERegModelFlag flag) {
+            m_flags.reset(static_cast<uint32_t>(flag));
+        }
+        void FlipFlag(ERegModelFlag flag) {
+            m_flags.flip(static_cast<uint32_t>(flag));
+        }
+
         bool isDirty{};
+
+    private:
+        std::bitset<32> m_flags;
     };
 
     inline constexpr BlackboardKey kRenderer_frameIndex { "Renderer.FrameIndex" };

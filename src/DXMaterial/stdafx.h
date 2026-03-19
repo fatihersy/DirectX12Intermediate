@@ -31,6 +31,7 @@
 #include <any>
 #include <unordered_map>
 #include <optional>
+#include <bitset>
 
 template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;

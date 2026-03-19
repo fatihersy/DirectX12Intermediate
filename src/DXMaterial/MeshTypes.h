@@ -44,6 +44,19 @@ struct SCone {
     UINT stackCount{};
 };
 
+enum class EModelFlag : uint32_t {
+    MODEL_FLAG_NONE = 0,
+    MODEL_FLAG_NO_ENV_CUBEMAP = 1,
+    MODEL_FLAG_MAX,
+    MODEL_FLAG_Force32Bit = UINT32_MAX,
+};
+enum class ERegModelFlag : uint32_t {
+    MODEL_FLAG_NONE = 0,
+    MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE = 1,
+    MODEL_FLAG_MAX,
+    MODEL_FLAG_Force32Bit = UINT32_MAX,
+};
+
 enum class EPrimitive : uint32_t {
     PRIMITIVE_TYPE_NONE,
     PRIMITIVE_TYPE_DOME,
