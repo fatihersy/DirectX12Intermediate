@@ -1,222 +1,73 @@
 #pragma once
 
-enum class FTextureType : UINT {
-    FTextureType_NONE = 0,
-    FTextureType_DIFFUSE = 1,
-    FTextureType_SPECULAR = 2,
-    FTextureType_AMBIENT = 3,
-    FTextureType_EMISSIVE = 4,
-    FTextureType_HEIGHT = 5,
-    FTextureType_NORMALS = 6,
-    FTextureType_SHININESS = 7,
-    FTextureType_OPACITY = 8,
-    FTextureType_DISPLACEMENT = 9,
-    FTextureType_LIGHTMAP = 10,
-    FTextureType_REFLECTION = 11,
-    FTextureType_BASE_COLOR = 12,
-    FTextureType_NORMAL_CAMERA = 13,
-    FTextureType_EMISSION_COLOR = 14,
-    FTextureType_METALNESS = 15,
-    FTextureType_DIFFUSE_ROUGHNESS = 16,
-    FTextureType_AMBIENT_OCCLUSION = 17,
-    FTextureType_UNKNOWN = 18,
-    FTextureType_SHEEN = 19,
-    FTextureType_CLEARCOAT = 20,
-    FTextureType_TRANSMISSION = 21,
-    FTextureType_MAYA_BASE = 22,
-    FTextureType_MAYA_SPECULAR = 23,
-    FTextureType_MAYA_SPECULAR_COLOR = 24,
-    FTextureType_MAYA_SPECULAR_ROUGHNESS = 25,
-    FTextureType_ANISOTROPY = 26,
-    FTextureType_GLTF_METALLIC_ROUGHNESS = 27,
-    FTextureType_MAX = 28,
-    FTextureType_Force32Bit = INT_MAX
-};
-
-struct frameConstants
+namespace NSDescriptor
 {
-    DirectX::XMFLOAT4X4 viewMatrix{};
-    DirectX::XMFLOAT4X4 projectionMatrix{};
-    DirectX::XMFLOAT4 lightDir{};
-    DirectX::XMFLOAT4 lightColor{};
-    DirectX::XMFLOAT3 camPos{};
-    UINT PADDING_1{};
-};
-static_assert(sizeof(frameConstants) % 16 == 0);
-static_assert(offsetof(frameConstants, PADDING_1) % 4 == 0);
-
-struct meshConstants
-{
-    DirectX::XMFLOAT4X4 worldMatrix{};
-    DirectX::XMFLOAT3X4 normalMatrix{};
-    DirectX::XMFLOAT4 baseColor{};
-    FLOAT metallic{};
-    FLOAT roughness{};
-    FLOAT opacity{};
-    UINT textureFlags{};
-};
-static_assert(sizeof(meshConstants) % 16 == 0);
-static_assert(offsetof(meshConstants, textureFlags) % 4 == 0);
-
-struct skyDomeConstants
-{
-    DirectX::XMFLOAT3 BetaR{};
-    FLOAT Pad0{};
-    FLOAT BetaMScatter{};
-    FLOAT BetaMExtinct{};
-    FLOAT MieG{};
-    FLOAT HR{};
-    FLOAT HM{};
-    FLOAT Rg{};
-    FLOAT Rt{};
-    FLOAT SunIntensity{};
-    DirectX::XMFLOAT3 SunDir{};
-    FLOAT Pad1{};
-};
-static_assert(sizeof(skyDomeConstants) % 16 == 0);
-static_assert(offsetof(skyDomeConstants, BetaR) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, BetaMScatter) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, BetaMExtinct) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, MieG) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, HR) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, HM) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, Rg) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, Rt) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, SunIntensity) % 4 == 0);
-static_assert(offsetof(skyDomeConstants, SunDir) % 4 == 0);
-
-inline bool operator!=(const skyDomeConstants& lhs, const skyDomeConstants& rhs) noexcept
-{
-    if (not Float3Equals(lhs.BetaR, rhs.BetaR)) return true;
-    if (lhs.BetaMScatter != rhs.BetaMScatter) return true;
-    if (lhs.BetaMExtinct != rhs.BetaMExtinct) return true;
-    if (lhs.MieG != rhs.MieG) return true;
-    if (lhs.HR != rhs.HR) return true;
-    if (lhs.HM != rhs.HM) return true;
-    if (lhs.Rg != rhs.Rg) return true;
-    if (lhs.Rt != rhs.Rt) return true;
-    if (lhs.SunIntensity != rhs.SunIntensity) return true;
-    if (not Float3Equals(lhs.SunDir, rhs.SunDir)) return true;
-
-    return false;
-}
-
-struct envCaptureConstants
-{
-    DirectX::XMFLOAT4X4 view{};
-    DirectX::XMFLOAT4X4 proj{};
-    DirectX::XMFLOAT4 lightDir{};
-    DirectX::XMFLOAT4 lightColor{};
-    DirectX::XMFLOAT3 capturePos{};
-    float Pad0{};
-    DirectX::XMFLOAT3 camPos{};
-    float Pad1{};
-};
-static_assert(sizeof(envCaptureConstants) % 16 == 0);
-static_assert(offsetof(envCaptureConstants, view) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, proj) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, lightDir) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, lightColor) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, capturePos) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, camPos) % 4 == 0);
-
-namespace Descriptor
-{
-    struct Handle {
+    struct Handle
+    {
         D3D12_CPU_DESCRIPTOR_HANDLE cpuAddr{};
         D3D12_GPU_DESCRIPTOR_HANDLE gpuAddr{};
         uint32_t index = UINT32_MAX;
         uint32_t amount{};
     };
-    struct hOffset {
+
+    struct Offset
+    {
         D3D12_CPU_DESCRIPTOR_HANDLE cpuAddr{};
         D3D12_GPU_DESCRIPTOR_HANDLE gpuAddr{};
         uint32_t index = UINT32_MAX;
     };
 }
 
-struct FTexture {
-    FTextureType textureType = FTextureType::FTextureType_NONE;
-    ComPtr<ID3D12Resource2> defaultBuffer;
-    ComPtr<ID3D12Resource2> uploadBuffer;
-    Descriptor::hOffset srvOffset;
-    DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    UINT width{};
-    UINT height{};
-    UINT RowPitch{};
-};
+namespace NSTexture
+{
+    enum class ETextureType : UINT {
+        ETextureType_NONE = 0,
+        ETextureType_DIFFUSE = 1,
+        ETextureType_SPECULAR = 2,
+        ETextureType_AMBIENT = 3,
+        ETextureType_EMISSIVE = 4,
+        ETextureType_HEIGHT = 5,
+        ETextureType_NORMALS = 6,
+        ETextureType_SHININESS = 7,
+        ETextureType_OPACITY = 8,
+        ETextureType_DISPLACEMENT = 9,
+        ETextureType_LIGHTMAP = 10,
+        ETextureType_REFLECTION = 11,
+        ETextureType_BASE_COLOR = 12,
+        ETextureType_NORMAL_CAMERA = 13,
+        ETextureType_EMISSION_COLOR = 14,
+        ETextureType_METALNESS = 15,
+        ETextureType_DIFFUSE_ROUGHNESS = 16,
+        ETextureType_AMBIENT_OCCLUSION = 17,
+        ETextureType_UNKNOWN = 18,
+        ETextureType_SHEEN = 19,
+        ETextureType_CLEARCOAT = 20,
+        ETextureType_TRANSMISSION = 21,
+        ETextureType_MAYA_BASE = 22,
+        ETextureType_MAYA_SPECULAR = 23,
+        ETextureType_MAYA_SPECULAR_COLOR = 24,
+        ETextureType_MAYA_SPECULAR_ROUGHNESS = 25,
+        ETextureType_ANISOTROPY = 26,
+        ETextureType_GLTF_METALLIC_ROUGHNESS = 27,
+        ETextureType_MAX = 28,
+        ETextureType_Force32Bit = UINT_MAX
+    };
 
-class Blackboard;
+    struct Texture
+    {
+        ETextureType textureType = ETextureType::ETextureType_NONE;
+        ComPtr<ID3D12Resource2> defaultBuffer;
+        ComPtr<ID3D12Resource2> uploadBuffer;
+        NSDescriptor::Offset srvOffset;
+        DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        UINT width{};
+        UINT height{};
+        UINT RowPitch{};
+    };
+}
+
 namespace NSRenderer
 {
-    struct BlackboardKey
-    {
-        const char* name;
-        constexpr explicit BlackboardKey(const char* n) : name(n) {}
-    };
-
-    struct EnvironmentCubemap
-    {
-        ComPtr<ID3D12Resource2> cubemapTexture;
-        ComPtr<ID3D12Resource2> cubemapDepth;
-
-        Descriptor::Handle rtvHandle;
-        Descriptor::Handle dsvHandle;
-        Descriptor::Handle srvHandle;
-        Descriptor::Handle uavHandle;
-
-        bool isOnGPU{};
-        bool isDirty{};
-        uint32_t generation{};
-
-        static constexpr UINT PER_FACE_RESOLUTION = 128u;
-        static constexpr UINT NUM_FACES = 6u;
-        static constexpr UINT MIP_COUNT = 8u;
-    };
-
-    struct Model
-    {
-        SceneModelKey sceneKey{};
-        EnvironmentCubemap m_envCubemap{};
-
-        struct Neighbor {
-            SceneModelKey sceneKey;
-            DirectX::XMFLOAT3 position;
-        };
-        std::vector<Neighbor> objsInFrustum;
-
-        bool TestFlag(ERegModelFlag flag) const {
-            return m_flags.test(static_cast<uint32_t>(flag));
-        }
-        void SetFlag(ERegModelFlag flag) {
-            m_flags.set(static_cast<uint32_t>(flag));
-        }
-        void ResetFlag(ERegModelFlag flag) {
-            m_flags.reset(static_cast<uint32_t>(flag));
-        }
-        void FlipFlag(ERegModelFlag flag) {
-            m_flags.flip(static_cast<uint32_t>(flag));
-        }
-
-        bool isDirty{};
-
-    private:
-        std::bitset<32> m_flags;
-    };
-
-    inline constexpr BlackboardKey kRenderer_frameIndex { "Renderer.FrameIndex" };
-    inline constexpr BlackboardKey kRenderer_width      { "Renderer.Width" };
-    inline constexpr BlackboardKey kRenderer_height     { "Renderer.Height" };
-    inline constexpr BlackboardKey kRenderer_models     { "Renderer.Models" };
-
-    inline constexpr BlackboardKey kRenderer_mainRTV            { "Renderer.MainRTV" };
-    inline constexpr BlackboardKey kRenderer_mainDSV            { "Renderer.MainDSV" };
-
-    inline constexpr BlackboardKey kSkyDome_transmitScatterSRVs{ "SkyDome.AtmosphereSRVs" };
-    inline constexpr BlackboardKey kSkyDome_constants{ "SkyDome.AtmosphereConstants"};
-
-    inline constexpr BlackboardKey kEnvCubemap_brdfLUTSRV { "EnvCubemap.BRDF_LUT_SRV" };
-
     class GraphicsCommandList
     {
     public:
@@ -366,7 +217,7 @@ namespace NSRenderer
             BOOL RTsSingleHandleToDescriptorRange,
             const D3D12_CPU_DESCRIPTOR_HANDLE* pDepthStencilDescriptor) const
         {
-             m_cmdList->OMSetRenderTargets(numRenderTargetDescriptors, pRenderTargetDescriptors, RTsSingleHandleToDescriptorRange, pDepthStencilDescriptor);
+            m_cmdList->OMSetRenderTargets(numRenderTargetDescriptors, pRenderTargetDescriptors, RTsSingleHandleToDescriptorRange, pDepthStencilDescriptor);
         }
 
         void ClearRenderTargetView(D3D12_CPU_DESCRIPTOR_HANDLE renderTargetView, const FLOAT colorRGBA[4], UINT numRects, const D3D12_RECT* pRects) const {
@@ -406,12 +257,10 @@ namespace NSRenderer
         ID3D12GraphicsCommandList10* m_cmdList = nullptr;
     };
 
-    using FnDescAlloc_t = std::function<Descriptor::Handle(uint32_t amount)>;
-    using FnDescFree_t = std::function<void(Descriptor::Handle& handle)>;
-    using FnDescOffset_t = std::function<Descriptor::hOffset(const Descriptor::Handle& handle, uint32_t offset)>;
-    using FnConstBuffAlloc_t = std::function<Allocator::AllocCtx(size_t size)>;
-    using FnRendererModelRegister_t = std::function<RegisterModelKey(SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
-    using FnRendererModelUnload_t = std::function<void(RegisterModelKey key)>;
+    using FnDescAlloc_t = std::function<NSDescriptor::Handle(uint32_t amount)>;
+    using FnDescFree_t = std::function<void(NSDescriptor::Handle& handle)>;
+    using FnDescOffset_t = std::function<NSDescriptor::Offset(const NSDescriptor::Handle& handle, uint32_t offset)>;
+    using FnConstAlloc_t = std::function<NSAllocator::Ctx(size_t size)>;
 
     struct DepthStencilCreateDescription {
         DXGI_FORMAT format{};
@@ -436,26 +285,19 @@ namespace NSRenderer
             FnDescOffset_t fn_offsetSRV,
             FnDescOffset_t fn_offsetRTV,
             FnDescOffset_t fn_offsetDSV,
-            FnConstBuffAlloc_t fn_allocConstBuff,
-            FnRendererModelRegister_t fn_registerModel,
-            FnRendererModelUnload_t fn_unloadModel,
-            Descriptor::Handle fallbackSRVoffset
-
+            FnConstAlloc_t fn_constAlloc
         )
         : allocSRVRing(std::move(fn_allocSRVRing)),
-          allocSRVStatic(std::move(fn_allocSRVStatic)),
-          allocRTVStatic(std::move(fn_allocRTVStatic)),
-          allocDSVStatic(std::move(fn_allocDSVStatic)),
-          freeSRVStatic(std::move(fn_freeSRVStatic)),
-          freeRTVStatic(std::move(fn_freeRTVStatic)),
-          freeDSVStatic(std::move(fn_freeDSVStatic)),
-          offsetSRV(std::move(fn_offsetSRV)),
-          offsetRTV(std::move(fn_offsetRTV)),
-          offsetDSV(std::move(fn_offsetDSV)),
-          allocConstBuff(std::move(fn_allocConstBuff)),
-          registerModel(std::move(fn_registerModel)),
-          unloadModel(std::move(fn_unloadModel)),
-          fallbackSRV(fallbackSRVoffset)
+            allocSRVStatic(std::move(fn_allocSRVStatic)),
+            allocRTVStatic(std::move(fn_allocRTVStatic)),
+            allocDSVStatic(std::move(fn_allocDSVStatic)),
+            freeSRVStatic(std::move(fn_freeSRVStatic)),
+            freeRTVStatic(std::move(fn_freeRTVStatic)),
+            freeDSVStatic(std::move(fn_freeDSVStatic)),
+            offsetSRV(std::move(fn_offsetSRV)),
+            offsetRTV(std::move(fn_offsetRTV)),
+            offsetDSV(std::move(fn_offsetDSV)),
+            constAlloc(std::move(fn_constAlloc))
         {};
 
         FnDescAlloc_t allocSRVRing;
@@ -468,30 +310,6 @@ namespace NSRenderer
         FnDescOffset_t offsetSRV;
         FnDescOffset_t offsetRTV;
         FnDescOffset_t offsetDSV;
-        FnConstBuffAlloc_t allocConstBuff;
-        FnRendererModelRegister_t registerModel;
-        FnRendererModelUnload_t unloadModel;
-        Descriptor::Handle fallbackSRV;
-    };
-}
-
-class Scene;
-namespace RenderPass {
-    class IRenderPass
-    {
-    public:
-        virtual ~IRenderPass() = default;
-
-        virtual void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
-
-        virtual void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
-        virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) = 0;
-        virtual void Destroy() {};
-
-        bool IsEnabled() const { return im_isEnabled; }
-        void SetEnabled(bool newVal) { im_isEnabled = newVal; }
-
-    private:
-        bool im_isEnabled{};
+        FnConstAlloc_t constAlloc;
     };
 }

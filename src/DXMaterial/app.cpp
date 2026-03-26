@@ -38,8 +38,6 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     m_keyboard = std::make_unique<DirectX::Keyboard>();
     m_mouse = std::make_unique<DirectX::Mouse>();
     m_mouse->SetWindow(plat.GetHWND());
-
-    m_shaderCompiler = std::make_unique<ShaderCompiler>();
 }
 app::~app() {
     s_instance = nullptr;

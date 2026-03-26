@@ -60,11 +60,15 @@ function mox_runpy_prebuild(command)
 end
 
 -- For you usable functions
-function mox_project(name, output_name)
+function mox_project(name, output_name, target_subdir)
     hmox_project_name = name
 
     if output_name==nil then
         output_name = name
+    end
+
+    if target_subdir==nil then
+        target_subdir = "bin/"
     end
 
     project(name)
@@ -73,7 +77,7 @@ function mox_project(name, output_name)
         targetsuffix ""
         characterset "Unicode"
 
-        targetdir "%{wks.location}/build/%{cfg.architecture}-%{cfg.buildcfg}/bin/"
+        targetdir ("%{wks.location}/build/%{cfg.architecture}-%{cfg.buildcfg}/" .. target_subdir)
         objdir    "%{wks.location}/build/%{cfg.architecture}-%{cfg.buildcfg}/obj/%{prj.name}/"
 
         debugdir  "%{wks.location}/app"

@@ -1,51 +1,5 @@
 #pragma once
 
-#include "RendererTypes.h"
-
-enum class FTextureType : UINT {
-    FTextureType_NONE = 0,
-    FTextureType_DIFFUSE = 1,
-    FTextureType_SPECULAR = 2,
-    FTextureType_AMBIENT = 3,
-    FTextureType_EMISSIVE = 4,
-    FTextureType_HEIGHT = 5,
-    FTextureType_NORMALS = 6,
-    FTextureType_SHININESS = 7,
-    FTextureType_OPACITY = 8,
-    FTextureType_DISPLACEMENT = 9,
-    FTextureType_LIGHTMAP = 10,
-    FTextureType_REFLECTION = 11,
-    FTextureType_BASE_COLOR = 12,
-    FTextureType_NORMAL_CAMERA = 13,
-    FTextureType_EMISSION_COLOR = 14,
-    FTextureType_METALNESS = 15,
-    FTextureType_DIFFUSE_ROUGHNESS = 16,
-    FTextureType_AMBIENT_OCCLUSION = 17,
-    FTextureType_UNKNOWN = 18,
-    FTextureType_SHEEN = 19,
-    FTextureType_CLEARCOAT = 20,
-    FTextureType_TRANSMISSION = 21,
-    FTextureType_MAYA_BASE = 22,
-    FTextureType_MAYA_SPECULAR = 23,
-    FTextureType_MAYA_SPECULAR_COLOR = 24,
-    FTextureType_MAYA_SPECULAR_ROUGHNESS = 25,
-    FTextureType_ANISOTROPY = 26,
-    FTextureType_GLTF_METALLIC_ROUGHNESS = 27,
-    FTextureType_MAX = 28,
-    FTextureType_Force32Bit = INT_MAX
-};
-
-struct FTexture {
-    FTextureType textureType = FTextureType::FTextureType_NONE;
-    ComPtr<ID3D12Resource2> defaultBuffer;
-    ComPtr<ID3D12Resource2> uploadBuffer;
-    Descriptor::hOffset srvOffset;
-    DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    UINT width{};
-    UINT height{};
-    UINT RowPitch{};
-};
-
 class Material
 {
 public:

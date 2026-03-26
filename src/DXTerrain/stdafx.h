@@ -37,11 +37,11 @@
 template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
 
-constexpr std::wstring_view PROJECT_NAME = L"DXMaterial";
+constexpr std::wstring_view PROJECT_NAME = L"DXTerrain";
 
 #include "StepTimer.h"
-#include "Tool.h"
-#include "SceneTypes.h"
+#include "Tools.h"
+//#include "SceneTypes.h"
 #include "AllocatorTypes.h"
-#include "MeshTypes.h"
+//#include "MeshTypes.h"
 #include "RendererTypes.h"

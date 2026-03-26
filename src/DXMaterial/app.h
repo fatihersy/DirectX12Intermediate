@@ -36,7 +36,6 @@ private:
 
     Scene m_scene;
     Renderer m_renderer;
-    std::unique_ptr<ShaderCompiler> m_shaderCompiler;
     std::unique_ptr<DirectX::Keyboard> m_keyboard;
     std::unique_ptr<DirectX::Mouse> m_mouse;
     DirectX::Keyboard::KeyboardStateTracker m_keyboardTracker;

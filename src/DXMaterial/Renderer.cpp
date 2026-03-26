@@ -12,6 +12,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND hwnd, U
     m_width = width;
     m_height = height;
 
+    m_shaderCompiler = std::make_unique<ShaderCompiler>();
+
     constexpr size_t OneMb = 1u * 1024 * 1024;
     m_allocator = ConstBuffAlloc(m_device, OneMb, IApp::ic_frameCount);
 
@@ -471,9 +473,9 @@ void Renderer::CreateSwapChain(IDXGIFactory7* factory, HWND hwnd, UINT width, UI
     desc.SampleDesc.Count = 1;
 
     ComPtr<IDXGISwapChain1> swapChain;
-    ThrowIfFailed(m_factory->CreateSwapChainForHwnd(m_commandQueue.Get(), hwnd, &desc, nullptr, nullptr, &swapChain));
+    ThrowIfFailed(pFactory->CreateSwapChainForHwnd(m_commandQueue.Get(), hwnd, &desc, nullptr, nullptr, &swapChain));
 
-    ThrowIfFailed(m_factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
+    ThrowIfFailed(pFactory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
     ThrowIfFailed(swapChain.As(&m_swapchain));
 }
 void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription dsvDesc)

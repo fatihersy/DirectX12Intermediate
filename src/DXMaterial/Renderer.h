@@ -4,9 +4,8 @@
 
 #include "Descriptor.h"
 #include "Allocator.h"
-#include "Pipeline.h"
-#include "Material.h"
 #include "Blackboard.h"
+#include "ShaderCompiler.h"
 
 class Scene;
 
@@ -153,6 +152,8 @@ private:
     Blackboard m_blackboard;
 
     std::vector<std::unique_ptr<RenderPass::IRenderPass>> m_passes;
+
+    std::unique_ptr<ShaderCompiler> m_shaderCompiler;
 
     uint32_t m_width{};
     uint32_t m_height{};

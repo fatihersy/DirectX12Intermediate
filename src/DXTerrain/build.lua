@@ -1,10 +1,10 @@
 
 -- Arguments: Project name, Output name, Output directory (binary only)
-mox_project("DXMaterial", "dx_material", "bin/DXMaterial/")
+mox_project("DXTerrain", "dx_terrain", "bin/DXTerrain/")
 mox_cpp("C++20")
 mox_windowed()
 mox_use_vcpkg()
-uuid("d54bdce0-8b62-11f0-b558-0800200c9a66")
+uuid("356f4221-1407-43e9-879d-4bac273b14cc")
 
 architecture "x64"
 system "windows"
