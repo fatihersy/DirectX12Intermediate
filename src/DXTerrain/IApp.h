@@ -27,6 +27,7 @@ public:
     std::wstring im_assetsPath;
 
     constexpr static UINT ic_framesInFlight = 2u;
+    constexpr static UINT ic_maxObjects = 128u;
 
 protected:
     static IApp* s_instance;

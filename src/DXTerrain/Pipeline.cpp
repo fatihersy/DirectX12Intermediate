@@ -21,10 +21,13 @@ void MakeRootSignature(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSi
 
     if (FAILED(SetRootSignature(featureVersion.HighestVersion, signature, error)))
     {
-        if (not error)
+        if (not error and error->GetBufferSize() > 0)
         {
-            const char * errorMsg = reinterpret_cast<const char*>(error->GetBufferPointer());
-            OutputDebugStringA(errorMsg);
+            const char* errstr = reinterpret_cast<const char*>(error->GetBufferPointer());
+            size_t errlen = error->GetBufferSize();
+            std::string stdstr = std::string(errstr, errlen).append("\n");
+
+            OutputDebugStringA(stdstr.c_str());
         }
         throw std::runtime_error("Failed to serialize root signature");
     }
@@ -43,7 +46,7 @@ IPipeline::IPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature Se
 {
     MakeRootSignature(
         device,
-        KTool::wformat(L"%s::%s", name, L"im_rootSignature").c_str(),
+        NSTool::wformat(L"%s::%s", name, L"im_rootSignature").c_str(),
         im_rootSignature,
         SetRootSignature
     );
@@ -100,7 +103,7 @@ GraphicsPipeline&& GraphicsPipeline::Init(
     desc.Flags = inDesc.Flags;
 
     ThrowIfFailed(im_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&im_pipeline)));
-    im_pipeline->SetName(KTool::wformat(L"%s::%s", im_name.data(), L"im_pipeline").c_str());
+    im_pipeline->SetName(NSTool::wformat(L"%s::%s", im_name.data(), L"im_pipeline").c_str());
 
     return std::move(*this);
 }
@@ -121,7 +124,7 @@ ComputePipeline&& ComputePipeline::Init(D3D12_PIPELINE_STATE_FLAGS flags, LPCWST
     desc.Flags = flags;
 
     ThrowIfFailed(im_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&im_pipeline)));
-    im_pipeline->SetName(KTool::wformat(L"%s::%s", im_name.data(), L"im_pipeline").c_str());
+    im_pipeline->SetName(NSTool::wformat(L"%s::%s", im_name.data(), L"im_pipeline").c_str());
 
     return std::move(*this);
 }

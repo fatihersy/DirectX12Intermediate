@@ -45,7 +45,14 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
     ComPtr<IDxcBlobUtf8> error;
     ThrowIfFailed(compileResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error), nullptr));
 
-    if (error and error->GetStringLength() > 0) OutputDebugStringA(error->GetStringPointer());
+    if (error and error->GetStringLength() > 0)
+    {
+        const char* errstr = reinterpret_cast<const char*>(error->GetBufferPointer());
+        size_t errlen = error->GetBufferSize();
+        std::string stdstr = std::string(errstr, errlen).append("\n");
+
+        OutputDebugStringA(stdstr.c_str());
+    }
 
     compileResult->GetStatus(&hr);
     ThrowIfFailed(hr);
@@ -62,7 +69,7 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
         std::filesystem::path path = IApp::GetInstance()->im_executablePath.append(L"..\\..\\obj\\").append(PROJECT_NAME).append(L"\\");
         if (std::filesystem::exists(path))
         {
-            std::wstring fullPath = KTool::wformat(L"%s%s", path.wstring(), pdbPath->GetStringPointer());
+            std::wstring fullPath = NSTool::wformat(L"%s%s", path.wstring(), pdbPath->GetStringPointer());
 
             FILE* pFile = nullptr;
             _wfopen_s(&pFile, fullPath.c_str(), L"wb");
@@ -90,7 +97,9 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
             {
                 const char* errstr = reinterpret_cast<const char*>(errorBlobUtf8->GetBufferPointer());
                 size_t errlen = errorBlobUtf8->GetBufferSize();
-                OutputDebugStringA(errstr);
+                std::string stdstr = std::string(errstr, errlen).append("\n");
+
+                OutputDebugStringA(stdstr.c_str());
             }
         }
     }

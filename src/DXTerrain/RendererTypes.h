@@ -20,42 +20,42 @@ namespace NSDescriptor
 
 namespace NSTexture
 {
-    enum class ETextureType : UINT {
-        ETextureType_NONE = 0,
-        ETextureType_DIFFUSE = 1,
-        ETextureType_SPECULAR = 2,
-        ETextureType_AMBIENT = 3,
-        ETextureType_EMISSIVE = 4,
-        ETextureType_HEIGHT = 5,
-        ETextureType_NORMALS = 6,
-        ETextureType_SHININESS = 7,
-        ETextureType_OPACITY = 8,
-        ETextureType_DISPLACEMENT = 9,
-        ETextureType_LIGHTMAP = 10,
-        ETextureType_REFLECTION = 11,
-        ETextureType_BASE_COLOR = 12,
-        ETextureType_NORMAL_CAMERA = 13,
-        ETextureType_EMISSION_COLOR = 14,
-        ETextureType_METALNESS = 15,
-        ETextureType_DIFFUSE_ROUGHNESS = 16,
-        ETextureType_AMBIENT_OCCLUSION = 17,
-        ETextureType_UNKNOWN = 18,
-        ETextureType_SHEEN = 19,
-        ETextureType_CLEARCOAT = 20,
-        ETextureType_TRANSMISSION = 21,
-        ETextureType_MAYA_BASE = 22,
-        ETextureType_MAYA_SPECULAR = 23,
-        ETextureType_MAYA_SPECULAR_COLOR = 24,
-        ETextureType_MAYA_SPECULAR_ROUGHNESS = 25,
-        ETextureType_ANISOTROPY = 26,
-        ETextureType_GLTF_METALLIC_ROUGHNESS = 27,
-        ETextureType_MAX = 28,
-        ETextureType_Force32Bit = UINT_MAX
+    enum class EType : UINT {
+        EType_NONE = 0,
+        EType_DIFFUSE = 1,
+        EType_SPECULAR = 2,
+        EType_AMBIENT = 3,
+        EType_EMISSIVE = 4,
+        EType_HEIGHT = 5,
+        EType_NORMALS = 6,
+        EType_SHININESS = 7,
+        EType_OPACITY = 8,
+        EType_DISPLACEMENT = 9,
+        EType_LIGHTMAP = 10,
+        EType_REFLECTION = 11,
+        EType_BASE_COLOR = 12,
+        EType_NORMAL_CAMERA = 13,
+        EType_EMISSION_COLOR = 14,
+        EType_METALNESS = 15,
+        EType_DIFFUSE_ROUGHNESS = 16,
+        EType_AMBIENT_OCCLUSION = 17,
+        EType_UNKNOWN = 18,
+        EType_SHEEN = 19,
+        EType_CLEARCOAT = 20,
+        EType_TRANSMISSION = 21,
+        EType_MAYA_BASE = 22,
+        EType_MAYA_SPECULAR = 23,
+        EType_MAYA_SPECULAR_COLOR = 24,
+        EType_MAYA_SPECULAR_ROUGHNESS = 25,
+        EType_ANISOTROPY = 26,
+        EType_GLTF_METALLIC_ROUGHNESS = 27,
+        EType_MAX = 28,
+        EType_Force32Bit = UINT_MAX
     };
 
     struct Texture
     {
-        ETextureType textureType = ETextureType::ETextureType_NONE;
+        EType textureType = EType::EType_NONE;
         ComPtr<ID3D12Resource2> defaultBuffer;
         ComPtr<ID3D12Resource2> uploadBuffer;
         NSDescriptor::Offset srvOffset;
@@ -66,8 +66,176 @@ namespace NSTexture
     };
 }
 
+struct frameConstants
+{
+    DirectX::XMFLOAT4X4 view{};
+    DirectX::XMFLOAT4X4 proj{};
+    DirectX::XMFLOAT4 lightDir{};
+    DirectX::XMFLOAT4 lightColor{};
+    DirectX::XMFLOAT3 eye{};
+    uint32_t PADDING_0{};
+};
+static_assert(sizeof(frameConstants) % 16 == 0);
+static_assert(offsetof(frameConstants, view) % 4 == 0);
+static_assert(offsetof(frameConstants, proj) % 4 == 0);
+static_assert(offsetof(frameConstants, lightDir) % 4 == 0);
+static_assert(offsetof(frameConstants, lightColor) % 4 == 0);
+static_assert(offsetof(frameConstants, eye) % 4 == 0);
+static_assert(offsetof(frameConstants, PADDING_0) % 4 == 0);
+
+struct meshConstants
+{
+    DirectX::XMFLOAT4X4 worldMatrix{};
+    DirectX::XMFLOAT3X4 normalMatrix{};
+    DirectX::XMFLOAT4 baseColor{};
+    float metallic{};
+    float roughness{};
+    float opacity{};
+    uint32_t textureFlags{};
+};
+static_assert(sizeof(meshConstants) % 16 == 0);
+static_assert(offsetof(meshConstants, worldMatrix) % 4 == 0);
+static_assert(offsetof(meshConstants, normalMatrix) % 4 == 0);
+static_assert(offsetof(meshConstants, baseColor) % 4 == 0);
+static_assert(offsetof(meshConstants, metallic) % 4 == 0);
+static_assert(offsetof(meshConstants, roughness) % 4 == 0);
+static_assert(offsetof(meshConstants, opacity) % 4 == 0);
+static_assert(offsetof(meshConstants, textureFlags) % 4 == 0);
+
+struct atmosphereConstants
+{
+    DirectX::XMFLOAT3 BetaR{};
+    float PADDING_0{};
+    float BetaMScatter{};
+    float BetaMExtinct{};
+    float MieG{};
+    float HR{};
+    float HM{};
+    float Rg{};
+    float Rt{};
+    float SunIntencity{};
+    DirectX::XMFLOAT3 SunDir{};
+    float PADDING_1{};
+};
+static_assert(sizeof(atmosphereConstants) % 16 == 0);
+static_assert(offsetof(atmosphereConstants, BetaR) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, PADDING_0) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, BetaMScatter) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, BetaMExtinct) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, MieG) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, HR) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, HM) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, Rg) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, Rt) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, SunIntencity) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, SunDir) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, PADDING_1) % 4 == 0);
+
+inline bool operator!=(const atmosphereConstants& lhs, const atmosphereConstants& rhs) noexcept
+{
+    if (not NSTool::Float3Equals(lhs.BetaR, rhs.BetaR)) return true;
+    if (lhs.BetaMScatter != rhs.BetaMScatter) return true;
+    if (lhs.BetaMExtinct != rhs.BetaMExtinct) return true;
+    if (lhs.MieG         != rhs.MieG) return true;
+    if (lhs.HR           != rhs.HR) return true;
+    if (lhs.HM           != rhs.HM) return true;
+    if (lhs.Rg           != rhs.Rg) return true;
+    if (lhs.Rt           != rhs.Rt) return true;
+    if (lhs.SunIntencity != rhs.SunIntencity) return true;
+    if (not NSTool::Float3Equals(lhs.SunDir, rhs.SunDir)) return true;
+
+    return false;
+}
+
+struct envCaptureConstants
+{
+    DirectX::XMFLOAT4X4 view{};
+    DirectX::XMFLOAT4X4 proj{};
+    DirectX::XMFLOAT4 lightDir{};
+    DirectX::XMFLOAT4 lightColor{};
+    DirectX::XMFLOAT3 capturePos{};
+    float PADDING_0{};
+    DirectX::XMFLOAT3 camPos{};
+    float PADDING_1{};
+};
+static_assert(sizeof(envCaptureConstants) % 16 == 0);
+static_assert(offsetof(envCaptureConstants, view) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, proj) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, lightDir) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, lightColor) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, capturePos) % 4 == 0);
+static_assert(offsetof(envCaptureConstants, camPos) % 4 == 0);
+
+class Blackboard;
 namespace NSRenderer
 {
+    struct BlackboardKey
+    {
+        const char* name;
+        constexpr explicit BlackboardKey(const char* n) : name(n) {}
+    };
+
+    struct EnvironmentCubemap
+    {
+        ComPtr<ID3D12Resource2> cubemapTexture;
+        ComPtr<ID3D12Resource2> cubemapDepth;
+
+        NSDescriptor::Handle rtvHandle;
+        NSDescriptor::Handle dsvHandle;
+        NSDescriptor::Handle srvHandle;
+        NSDescriptor::Handle uavHandle;
+
+        bool isOnGPU{};
+        bool isDirty{};
+        uint32_t generation{};
+
+        static constexpr UINT PER_FACE_RESOLUTION = 128u;
+        static constexpr UINT NUM_FACES = 6u;
+        static constexpr UINT MIP_COUNT = 8u;
+    };
+
+    struct Model
+    {
+        SceneModelKey sceneKey;
+        EnvironmentCubemap m_envCubemap{};
+
+        struct Neighbor {
+            SceneModelKey sceneKey;
+            DirectX::XMFLOAT3 position;
+        };
+        std::vector<Neighbor> objsInFrustum;
+
+        bool TestFlag(ERegModelFlag flag) const {
+            return m_flags.test(static_cast<uint32_t>(flag));
+        }
+        void SetFlag(ERegModelFlag flag) {
+            m_flags.set(static_cast<uint32_t>(flag));
+        }
+        void ResetFlag(ERegModelFlag flag) {
+            m_flags.reset(static_cast<uint32_t>(flag));
+        }
+        void FlipFlag(ERegModelFlag flag) {
+            m_flags.flip(static_cast<uint32_t>(flag));
+        }
+
+        bool isDirty{};
+
+    private:
+        std::bitset<32> m_flags{};
+    };
+
+    inline constexpr BlackboardKey kRenderer_frameIndex { "Renderer.frameIndex" };
+    inline constexpr BlackboardKey kRenderer_width      { "Renderer.width" };
+    inline constexpr BlackboardKey kRenderer_height     { "Renderer.height" };
+    inline constexpr BlackboardKey kRenderer_models     { "Renderer.models" };
+    inline constexpr BlackboardKey kRenderer_mainRTV    { "Renderer.mainRTV" };
+    inline constexpr BlackboardKey kRenderer_mainDSV    { "Renderer.mainDSV" };
+
+    inline constexpr BlackboardKey kSkydome_transmitScatterSRV{ "Skydome.transmitScatterSRV" };
+    inline constexpr BlackboardKey kSkydome_constants         { "Skydome.constants" };
+
+    inline constexpr BlackboardKey kEnvCubemap_brdfLUTsrv{ "EnvCubemap.brdfLUTsrv" };
+
     class GraphicsCommandList
     {
     public:
@@ -261,6 +429,8 @@ namespace NSRenderer
     using FnDescFree_t = std::function<void(NSDescriptor::Handle& handle)>;
     using FnDescOffset_t = std::function<NSDescriptor::Offset(const NSDescriptor::Handle& handle, uint32_t offset)>;
     using FnConstAlloc_t = std::function<NSAllocator::Ctx(size_t size)>;
+    using FnRendererModelRegister_t = std::function<RegisterModelKey(SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
+    using FnRendererModelUnload_t = std::function<void(RegisterModelKey key)>;
 
     struct DepthStencilCreateDescription {
         DXGI_FORMAT format{};
@@ -285,9 +455,12 @@ namespace NSRenderer
             FnDescOffset_t fn_offsetSRV,
             FnDescOffset_t fn_offsetRTV,
             FnDescOffset_t fn_offsetDSV,
-            FnConstAlloc_t fn_constAlloc
+            FnConstAlloc_t fn_constAlloc,
+            FnRendererModelRegister_t fn_registerModel,
+            FnRendererModelUnload_t fn_unloadModel,
+            NSDescriptor::Handle in_fallbackSRV
         )
-        : allocSRVRing(std::move(fn_allocSRVRing)),
+        :   allocSRVRing(std::move(fn_allocSRVRing)),
             allocSRVStatic(std::move(fn_allocSRVStatic)),
             allocRTVStatic(std::move(fn_allocRTVStatic)),
             allocDSVStatic(std::move(fn_allocDSVStatic)),
@@ -297,7 +470,10 @@ namespace NSRenderer
             offsetSRV(std::move(fn_offsetSRV)),
             offsetRTV(std::move(fn_offsetRTV)),
             offsetDSV(std::move(fn_offsetDSV)),
-            constAlloc(std::move(fn_constAlloc))
+            constAlloc(std::move(fn_constAlloc)),
+            registerModel(std::move(fn_registerModel)),
+            unloadModel(std::move(fn_unloadModel)),
+            fallbackSRV(in_fallbackSRV)
         {};
 
         FnDescAlloc_t allocSRVRing;
@@ -311,5 +487,8 @@ namespace NSRenderer
         FnDescOffset_t offsetRTV;
         FnDescOffset_t offsetDSV;
         FnConstAlloc_t constAlloc;
+        FnRendererModelRegister_t registerModel;
+        FnRendererModelUnload_t unloadModel;
+        NSDescriptor::Handle fallbackSRV;
     };
 }

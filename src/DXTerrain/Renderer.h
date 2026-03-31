@@ -4,6 +4,7 @@
 
 #include "Descriptor.h"
 #include "Allocator.h"
+#include "Blackboard.h"
 #include "ShaderCompiler.h"
 
 using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)>;
@@ -18,6 +19,9 @@ public:
 
     void BeginFrame();
     void EndFrame();
+    //void DrawScene();
+    RegisterModelKey RegisterModel(SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList);
+    void UnloadModel(RegisterModelKey key);
 
     void Resize(UINT width, UINT height);
 
@@ -58,17 +62,20 @@ public:
 
     NSRenderer::Ctx GetCtx() {
         return NSRenderer::Ctx(
-            [this](uint32_t amount){ return this->AllocSRVRing(amount); },
-            [this](uint32_t amount){ return this->AllocSRVStatic(amount); },
-            [this](uint32_t amount){ return this->AllocRTVStatic(amount); },
-            [this](uint32_t amount){ return this->AllocDSVStatic(amount); },
-            [this](NSDescriptor::Handle& handle) { return this->FreeSRVStatic(handle); },
-            [this](NSDescriptor::Handle& handle) { return this->FreeRTVStatic(handle); },
-            [this](NSDescriptor::Handle& handle) { return this->FreeDSVStatic(handle); },
-            [this](const NSDescriptor::Handle& handle, uint32_t offset) { return this->OffsetSRV(handle, offset); },
-            [this](const NSDescriptor::Handle& handle, uint32_t offset) { return this->OffsetRTV(handle, offset); },
-            [this](const NSDescriptor::Handle & handle, uint32_t offset) { return this->OffsetDSV(handle, offset); },
-            [this](size_t size) { return this->m_constantAllocator.Allocate(size); }
+            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocSRVRing(amount);               },
+            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocSRVStatic(amount);             },
+            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocRTVStatic(amount);             },
+            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocDSVStatic(amount);             },
+            [this](NSDescriptor::Handle& handle)                                                       { return this->FreeSRVStatic(handle);              },
+            [this](NSDescriptor::Handle& handle)                                                       { return this->FreeRTVStatic(handle);              },
+            [this](NSDescriptor::Handle& handle)                                                       { return this->FreeDSVStatic(handle);              },
+            [this](const NSDescriptor::Handle& handle, uint32_t offset)        -> NSDescriptor::Offset { return this->OffsetSRV(handle, offset);          },
+            [this](const NSDescriptor::Handle& handle, uint32_t offset)        -> NSDescriptor::Offset { return this->OffsetRTV(handle, offset);          },
+            [this](const NSDescriptor::Handle & handle, uint32_t offset)       -> NSDescriptor::Offset { return this->OffsetDSV(handle, offset);          },
+            [this](size_t size)                                                -> NSAllocator::Ctx     { return this->m_constantAllocator.Allocate(size); },
+            [this](SceneModelKey key, NSRenderer::GraphicsCommandList cmdList) -> RegisterModelKey     { return this->RegisterModel(key, cmdList);        },
+            [this](RegisterModelKey key)                                                               {        this->UnloadModel(key);                   },
+            m_fallbackTextureSRVhandle
         );
     }
 private:
@@ -100,8 +107,12 @@ private:
     NSTexture::Texture m_fallbackTexture;
     NSDescriptor::Handle m_fallbackTextureSRVhandle;
 
-    uint32_t m_width;
-    uint32_t m_height;
+    Blackboard m_blackboard;
+
+    std::unique_ptr<ShaderCompiler> m_shaderCompiler;
+
+    uint32_t m_width{};
+    uint32_t m_height{};
 
     void CreateSwapChain(HWND hwnd, UINT width, UINT height);
     void CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription desc);
@@ -109,8 +120,6 @@ private:
 
     void MoveToNextFrame();
     void WaitForGPU();
-
-    std::unique_ptr<ShaderCompiler> m_shaderCompiler;
 
     constexpr static float CLEAR_COLOR[4] = { .8f, .4f, .45f, 1.f };
 };

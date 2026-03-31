@@ -27,6 +27,9 @@ app::app(UINT width, UINT height, std::wstring_view title, HINSTANCE hInstance, 
     im_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
     im_assetsPath = std::filesystem::current_path().generic_wstring().append(L"\\");
 
+    ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+    ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory)));
+
     WCHAR executablePath[512];
     GetExecutablePath(executablePath, _countof(executablePath));
     im_executablePath = executablePath;
