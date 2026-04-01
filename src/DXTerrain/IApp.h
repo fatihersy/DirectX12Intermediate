@@ -2,7 +2,7 @@
 class IApp
 {
 public:
-    IApp(UINT width, UINT height, std::wstring_view title) : im_width(width), im_height(height), im_title(title) {}
+    IApp(UINT width, UINT height, std::wstring title) : im_width(width), im_height(height), im_title(title) {}
     virtual ~IApp() {}
 
     static IApp* GetInstance()
@@ -21,7 +21,7 @@ public:
     float im_aspectRatio{};
     UINT im_width{};
     UINT im_height{};
-    std::wstring_view im_title;
+    std::wstring im_title;
 
     std::wstring im_executablePath;
     std::wstring im_assetsPath;

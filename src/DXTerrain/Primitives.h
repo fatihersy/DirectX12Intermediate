@@ -11,14 +11,14 @@ public:
         float radius,
         UINT sliceCount,
         UINT stackCount,
-        std::vector<Vertex>& outVertices,
+        std::vector<NSMesh::Vertex>& outVertices,
         std::vector<UINT>& outIndices)
     {
         outVertices.clear();
         outIndices.clear();
 
         // Top pole vertex
-        Vertex topVertex;
+        NSMesh::Vertex topVertex;
         topVertex.position = DirectX::XMFLOAT3(0.0f, radius, 0.0f);
         topVertex.normal = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
         topVertex.tangent = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
@@ -38,7 +38,7 @@ public:
             {
                 float theta = j * thetaStep;
 
-                Vertex v;
+                NSMesh::Vertex v;
 
                 // Spherical to Cartesian
                 v.position.x = radius * sinf(phi) * cosf(theta);
@@ -72,7 +72,7 @@ public:
         }
 
         // Bottom pole vertex
-        Vertex bottomVertex;
+        NSMesh::Vertex bottomVertex;
         bottomVertex.position = DirectX::XMFLOAT3(0.0f, -radius, 0.0f);
         bottomVertex.normal = DirectX::XMFLOAT3(0.0f, -1.0f, 0.0f);
         bottomVertex.tangent = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
@@ -121,7 +121,7 @@ public:
         float width,
         float height,
         float depth,
-        std::vector<Vertex>& outVertices,
+        std::vector<NSMesh::Vertex>& outVertices,
         std::vector<UINT>& outIndices)
     {
         outVertices.clear();
@@ -132,7 +132,7 @@ public:
         float d = depth * 0.5f;
 
         // 24 vertices (4 per face for proper UVs and normals)
-        Vertex vertices[24];
+        NSMesh::Vertex vertices[24];
 
         // Front face (+Z)
         vertices[0] = { {-w, -h, d}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, {0, 1} };
@@ -191,7 +191,7 @@ public:
         float depth,
         UINT widthSubdivisions,
         UINT depthSubdivisions,
-        std::vector<Vertex>& outVertices,
+        std::vector<NSMesh::Vertex>& outVertices,
         std::vector<UINT>& outIndices)
     {
         outVertices.clear();
@@ -217,7 +217,7 @@ public:
             {
                 float x = -halfWidth + j * dx;
 
-                Vertex v;
+                NSMesh::Vertex v;
                 v.position = DirectX::XMFLOAT3(x, 0.0f, z);
                 v.normal = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
                 v.tangent = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
@@ -258,7 +258,7 @@ public:
         float height,
         UINT sliceCount,
         UINT stackCount,
-        std::vector<Vertex>& outVertices,
+        std::vector<NSMesh::Vertex>& outVertices,
         std::vector<UINT>& outIndices)
     {
         outVertices.clear();
@@ -277,7 +277,7 @@ public:
             float dTheta = 2.0f * DirectX::XM_PI / sliceCount;
             for (UINT j = 0; j <= sliceCount; ++j)
             {
-                Vertex v;
+                NSMesh::Vertex v;
 
                 float c = cosf(j * dTheta);
                 float s = sinf(j * dTheta);
@@ -337,7 +337,7 @@ public:
         float height,
         UINT sliceCount,
         UINT stackCount,
-        std::vector<Vertex>& outVertices,
+        std::vector<NSMesh::Vertex>& outVertices,
         std::vector<UINT>& outIndices)
     {
         CreateCylinder(0.0f, bottomRadius, height, sliceCount, stackCount, outVertices, outIndices);
@@ -347,14 +347,14 @@ public:
         float radius,
         UINT sliceCount,
         UINT stackCount,
-        std::vector<Vertex>& outVertices,
+        std::vector<NSMesh::Vertex>& outVertices,
         std::vector<UINT>& outIndices)
     {
         outVertices.clear();
         outIndices.clear();
 
         // Top pole vertex
-        Vertex topVertex;
+        NSMesh::Vertex topVertex;
         topVertex.position = DirectX::XMFLOAT3(0.0f, radius, 0.0f);
         topVertex.normal = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
         topVertex.tangent = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
@@ -374,7 +374,7 @@ public:
             {
                 float theta = j * thetaStep;
 
-                Vertex v;
+                NSMesh::Vertex v;
 
                 // Spherical to Cartesian
                 v.position.x = radius * sinf(phi) * cosf(theta);
@@ -439,7 +439,7 @@ private:
         float height,
         UINT sliceCount,
         bool isTop,
-        std::vector<Vertex>& vertices,
+        std::vector<NSMesh::Vertex>& vertices,
         std::vector<UINT>& indices)
     {
         UINT baseIndex = static_cast<UINT>(vertices.size());
@@ -450,7 +450,7 @@ private:
         float dTheta = 2.0f * DirectX::XM_PI / sliceCount;
 
         // Cap center vertex
-        Vertex centerVertex;
+        NSMesh::Vertex centerVertex;
         centerVertex.position = DirectX::XMFLOAT3(0.0f, y, 0.0f);
         centerVertex.normal = DirectX::XMFLOAT3(0.0f, isTop ? 1.0f : -1.0f, 0.0f);
         centerVertex.tangent = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
@@ -464,7 +464,7 @@ private:
             float x = radius * cosf(i * dTheta);
             float z = radius * sinf(i * dTheta);
 
-            Vertex v;
+            NSMesh::Vertex v;
             v.position = DirectX::XMFLOAT3(x, y, z);
             v.normal = DirectX::XMFLOAT3(0.0f, isTop ? 1.0f : -1.0f, 0.0f);
             v.tangent = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);

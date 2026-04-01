@@ -10,7 +10,7 @@ IApp* IApp::s_instance = nullptr;
 
 Platform plat;
 
-app::app(UINT width, UINT height, std::wstring_view title, HINSTANCE hInstance, int nCmdShow) : IApp(width, height, title)
+app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow) : IApp(width, height, title)
 {
     s_instance = this;
 

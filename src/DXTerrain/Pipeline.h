@@ -32,7 +32,7 @@ protected:
     ID3D12Device* im_device = nullptr;
     ComPtr<ID3D12PipelineState> im_pipeline;
     ComPtr<ID3D12RootSignature> im_rootSignature;
-    std::wstring_view im_name;
+    std::wstring im_name;
 };
 
 class GraphicsPipeline : public IPipeline

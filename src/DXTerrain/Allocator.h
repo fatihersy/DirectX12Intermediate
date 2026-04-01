@@ -25,9 +25,9 @@ private:
     D3D12_GPU_VIRTUAL_ADDRESS m_gpuAddr{};
     void* m_cpuAddr = nullptr;
 
-    size_t m_blobTotalSize;
-    size_t m_blobFrameSize;
-    size_t m_blobFrameEnd;
-    size_t m_blobOffset;
+    size_t m_blobTotalSize{};
+    size_t m_blobFrameSize{};
+    size_t m_blobFrameEnd{};
+    size_t m_blobOffset{};
 };
 

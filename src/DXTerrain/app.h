@@ -7,7 +7,7 @@
 class app : public IApp
 {
 public:
-    app(UINT width, UINT height, std::wstring_view title, HINSTANCE hInstance, int nCmdShow);
+    app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow);
     ~app();
 
     void Run();

@@ -10,7 +10,7 @@ class Mesh
 {
 public:
     Mesh(IWICImagingFactory2* wicFactory) : material(wicFactory) {};
-    std::wstring_view m_name;
+    std::wstring m_name;
 
     Material material;
     ComPtr<ID3D12Resource> defaultVertexBuffer;
@@ -34,9 +34,9 @@ public:
     Model(){}
     Model(ID3D12Device14* device, IWICImagingFactory2* wicFactory, const wchar_t* name);
 
-    std::wstring_view m_name;
-    SceneModelKey m_sceneKey;
-    RegisterModelKey m_registerKey;
+    std::wstring m_name;
+    NSMesh::SceneModelKey m_sceneKey;
+    NSMesh::RegisterModelKey m_registerKey;
 
     void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Move(DirectX::XMFLOAT3 vector, float delta);
@@ -97,8 +97,8 @@ public:
     void UnloadGPU(NSRenderer::Ctx rendererCtx);
     void ResetUploadHeaps();
 
-    template<typename T> requires IsPrimitiveMesh<T>
-    Model&& As(NSRenderer::Ctx rendererCtx, PrimitiveTraits<T>& desc) {
+    template<typename T> requires NSMesh::IsPrimitiveMesh<T>
+    Model&& As(NSRenderer::Ctx rendererCtx, NSMesh::PrimitiveTraits<T>& desc) {
         return _As(rendererCtx, L"self", desc.type, reinterpret_cast<void*>(desc));
     }
 
@@ -108,18 +108,18 @@ public:
     std::filesystem::path m_assetsPath;
     bool isOnGPU{};
     bool isOnCPU{};
-    SphereCollision collision;
+    NSMesh::SphereCollision collision;
 
-    bool TestFlag(EModelFlag flag) const {
+    bool TestFlag(NSMesh::EModelFlag flag) const {
         return m_flags.test(static_cast<uint32_t>(flag));
     }
-    void SetFlag(EModelFlag flag) {
+    void SetFlag(NSMesh::EModelFlag flag) {
         m_flags.set(static_cast<uint32_t>(flag));
     }
-    void ResetFlag(EModelFlag flag) {
+    void ResetFlag(NSMesh::EModelFlag flag) {
         m_flags.reset(static_cast<uint32_t>(flag));
     }
-    void FlipFlag(EModelFlag flag) {
+    void FlipFlag(NSMesh::EModelFlag flag) {
         m_flags.flip(static_cast<uint32_t>(flag));
     }
 
@@ -135,8 +135,8 @@ private:
     void ProcessNode(NSRenderer::Ctx rendererCtx, aiNode* node, const aiScene* scene);
     void ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mesh& outMesh);
 
-    Mesh& CreateMeshFromMemory(const char* name, const std::vector<Vertex>& inVertices, const std::vector<UINT>& inIndices);
-    Model&& _As(NSRenderer::Ctx rendererCtx, const wchar_t* name, EPrimitive type, void* pDesc);
+    Mesh& CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMesh::Vertex>& inVertices, const std::vector<UINT>& inIndices);
+    Model&& _As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSMesh::EPrimitive type, void* pDesc);
 
     std::bitset<32> m_flags{};
 };

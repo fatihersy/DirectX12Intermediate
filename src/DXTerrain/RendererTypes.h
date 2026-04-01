@@ -196,25 +196,25 @@ namespace NSRenderer
 
     struct Model
     {
-        SceneModelKey sceneKey;
+        NSMesh::SceneModelKey sceneKey;
         EnvironmentCubemap m_envCubemap{};
 
         struct Neighbor {
-            SceneModelKey sceneKey;
+            NSMesh::SceneModelKey sceneKey;
             DirectX::XMFLOAT3 position;
         };
         std::vector<Neighbor> objsInFrustum;
 
-        bool TestFlag(ERegModelFlag flag) const {
+        bool TestFlag(NSMesh::ERegModelFlag flag) const {
             return m_flags.test(static_cast<uint32_t>(flag));
         }
-        void SetFlag(ERegModelFlag flag) {
+        void SetFlag(NSMesh::ERegModelFlag flag) {
             m_flags.set(static_cast<uint32_t>(flag));
         }
-        void ResetFlag(ERegModelFlag flag) {
+        void ResetFlag(NSMesh::ERegModelFlag flag) {
             m_flags.reset(static_cast<uint32_t>(flag));
         }
-        void FlipFlag(ERegModelFlag flag) {
+        void FlipFlag(NSMesh::ERegModelFlag flag) {
             m_flags.flip(static_cast<uint32_t>(flag));
         }
 
@@ -429,8 +429,8 @@ namespace NSRenderer
     using FnDescFree_t = std::function<void(NSDescriptor::Handle& handle)>;
     using FnDescOffset_t = std::function<NSDescriptor::Offset(const NSDescriptor::Handle& handle, uint32_t offset)>;
     using FnConstAlloc_t = std::function<NSAllocator::Ctx(size_t size)>;
-    using FnRendererModelRegister_t = std::function<RegisterModelKey(SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
-    using FnRendererModelUnload_t = std::function<void(RegisterModelKey key)>;
+    using FnRendererModelRegister_t = std::function<NSMesh::RegisterModelKey(NSMesh::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
+    using FnRendererModelUnload_t = std::function<void(NSMesh::RegisterModelKey key)>;
 
     struct DepthStencilCreateDescription {
         DXGI_FORMAT format{};

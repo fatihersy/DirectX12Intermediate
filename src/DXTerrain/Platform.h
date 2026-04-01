@@ -9,7 +9,7 @@ struct SWindow {
     int nCmdShow{};
     UINT width{};
     UINT height{};
-    std::wstring_view title;
+    std::wstring title;
 };
 
 class Platform

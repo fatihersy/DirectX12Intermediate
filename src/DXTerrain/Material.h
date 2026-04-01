@@ -3,7 +3,7 @@
 class Material
 {
 public:
-    std::wstring_view m_name;
+    std::wstring m_name;
     std::vector<NSTexture::Texture> m_textures;
     NSDescriptor::Handle m_srvHandle;
 

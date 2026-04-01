@@ -20,8 +20,8 @@ public:
     void BeginFrame();
     void EndFrame();
     //void DrawScene();
-    RegisterModelKey RegisterModel(SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList);
-    void UnloadModel(RegisterModelKey key);
+    NSMesh::RegisterModelKey RegisterModel(NSMesh::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList);
+    void UnloadModel(NSMesh::RegisterModelKey key);
 
     void Resize(UINT width, UINT height);
 
@@ -62,19 +62,19 @@ public:
 
     NSRenderer::Ctx GetCtx() {
         return NSRenderer::Ctx(
-            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocSRVRing(amount);               },
-            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocSRVStatic(amount);             },
-            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocRTVStatic(amount);             },
-            [this](uint32_t amount)                                            -> NSDescriptor::Handle { return this->AllocDSVStatic(amount);             },
-            [this](NSDescriptor::Handle& handle)                                                       { return this->FreeSRVStatic(handle);              },
-            [this](NSDescriptor::Handle& handle)                                                       { return this->FreeRTVStatic(handle);              },
-            [this](NSDescriptor::Handle& handle)                                                       { return this->FreeDSVStatic(handle);              },
-            [this](const NSDescriptor::Handle& handle, uint32_t offset)        -> NSDescriptor::Offset { return this->OffsetSRV(handle, offset);          },
-            [this](const NSDescriptor::Handle& handle, uint32_t offset)        -> NSDescriptor::Offset { return this->OffsetRTV(handle, offset);          },
-            [this](const NSDescriptor::Handle & handle, uint32_t offset)       -> NSDescriptor::Offset { return this->OffsetDSV(handle, offset);          },
-            [this](size_t size)                                                -> NSAllocator::Ctx     { return this->m_constantAllocator.Allocate(size); },
-            [this](SceneModelKey key, NSRenderer::GraphicsCommandList cmdList) -> RegisterModelKey     { return this->RegisterModel(key, cmdList);        },
-            [this](RegisterModelKey key)                                                               {        this->UnloadModel(key);                   },
+            [this](uint32_t amount)                                                    -> NSDescriptor::Handle     { return this->AllocSRVRing(amount);               },
+            [this](uint32_t amount)                                                    -> NSDescriptor::Handle     { return this->AllocSRVStatic(amount);             },
+            [this](uint32_t amount)                                                    -> NSDescriptor::Handle     { return this->AllocRTVStatic(amount);             },
+            [this](uint32_t amount)                                                    -> NSDescriptor::Handle     { return this->AllocDSVStatic(amount);             },
+            [this](NSDescriptor::Handle& handle)                                                                   { return this->FreeSRVStatic(handle);              },
+            [this](NSDescriptor::Handle& handle)                                                                   { return this->FreeRTVStatic(handle);              },
+            [this](NSDescriptor::Handle& handle)                                                                   { return this->FreeDSVStatic(handle);              },
+            [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset     { return this->OffsetSRV(handle, offset);          },
+            [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset     { return this->OffsetRTV(handle, offset);          },
+            [this](const NSDescriptor::Handle & handle, uint32_t offset)               -> NSDescriptor::Offset     { return this->OffsetDSV(handle, offset);          },
+            [this](size_t size)                                                        -> NSAllocator::Ctx         { return this->m_constantAllocator.Allocate(size); },
+            [this](NSMesh::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList) -> NSMesh::RegisterModelKey { return this->RegisterModel(key, cmdList);        },
+            [this](NSMesh::RegisterModelKey key)                                                                   {        this->UnloadModel(key);                   },
             m_fallbackTextureSRVhandle
         );
     }
