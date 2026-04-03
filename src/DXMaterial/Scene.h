@@ -21,7 +21,7 @@ public:
                and
                m_models.at(lhs.index).m_registerKey.id == rhs.id
                and
-               lhs.index == rhs.index;
+               lhs.id == rhs.id;
     }
 
     ID3D12Device14* m_device = nullptr;

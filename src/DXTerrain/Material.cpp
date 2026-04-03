@@ -9,7 +9,7 @@
 Material::Material(IWICImagingFactory2* wicFactory) : m_wicFactory(wicFactory)
 {}
 
-HRESULT Material::LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, INT textureType)
+HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder, INT textureType)
 {
     NSTexture::EType tType = static_cast<NSTexture::EType>(textureType);
 
@@ -125,7 +125,7 @@ HRESULT Material::LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, 
     return S_OK;
 }
 
-void Material::UploadGPU(ID3D12Device* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     assert(device and m_isOnCPU);
 

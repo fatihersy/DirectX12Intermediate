@@ -196,25 +196,25 @@ namespace NSRenderer
 
     struct Model
     {
-        NSMesh::SceneModelKey sceneKey;
+        NSModel::SceneModelKey sceneKey;
         EnvironmentCubemap m_envCubemap{};
 
         struct Neighbor {
-            NSMesh::SceneModelKey sceneKey;
+            NSModel::SceneModelKey sceneKey;
             DirectX::XMFLOAT3 position;
         };
         std::vector<Neighbor> objsInFrustum;
 
-        bool TestFlag(NSMesh::ERegModelFlag flag) const {
+        bool TestFlag(NSModel::ERegModelFlag flag) const {
             return m_flags.test(static_cast<uint32_t>(flag));
         }
-        void SetFlag(NSMesh::ERegModelFlag flag) {
+        void SetFlag(NSModel::ERegModelFlag flag) {
             m_flags.set(static_cast<uint32_t>(flag));
         }
-        void ResetFlag(NSMesh::ERegModelFlag flag) {
+        void ResetFlag(NSModel::ERegModelFlag flag) {
             m_flags.reset(static_cast<uint32_t>(flag));
         }
-        void FlipFlag(NSMesh::ERegModelFlag flag) {
+        void FlipFlag(NSModel::ERegModelFlag flag) {
             m_flags.flip(static_cast<uint32_t>(flag));
         }
 
@@ -224,15 +224,15 @@ namespace NSRenderer
         std::bitset<32> m_flags{};
     };
 
-    inline constexpr BlackboardKey kRenderer_frameIndex { "Renderer.frameIndex" };
-    inline constexpr BlackboardKey kRenderer_width      { "Renderer.width" };
-    inline constexpr BlackboardKey kRenderer_height     { "Renderer.height" };
-    inline constexpr BlackboardKey kRenderer_models     { "Renderer.models" };
-    inline constexpr BlackboardKey kRenderer_mainRTV    { "Renderer.mainRTV" };
-    inline constexpr BlackboardKey kRenderer_mainDSV    { "Renderer.mainDSV" };
+    inline constexpr BlackboardKey kRenderer_frameIndex{ "Renderer.frameIndex" };
+    inline constexpr BlackboardKey kRenderer_width{ "Renderer.width" };
+    inline constexpr BlackboardKey kRenderer_height{ "Renderer.height" };
+    inline constexpr BlackboardKey kRenderer_models{ "Renderer.models" };
+    inline constexpr BlackboardKey kRenderer_mainRTV{ "Renderer.mainRTV" };
+    inline constexpr BlackboardKey kRenderer_mainDSV{ "Renderer.mainDSV" };
 
     inline constexpr BlackboardKey kSkydome_transmitScatterSRV{ "Skydome.transmitScatterSRV" };
-    inline constexpr BlackboardKey kSkydome_constants         { "Skydome.constants" };
+    inline constexpr BlackboardKey kSkydome_constants{ "Skydome.constants" };
 
     inline constexpr BlackboardKey kEnvCubemap_brdfLUTsrv{ "EnvCubemap.brdfLUTsrv" };
 
@@ -429,8 +429,8 @@ namespace NSRenderer
     using FnDescFree_t = std::function<void(NSDescriptor::Handle& handle)>;
     using FnDescOffset_t = std::function<NSDescriptor::Offset(const NSDescriptor::Handle& handle, uint32_t offset)>;
     using FnConstAlloc_t = std::function<NSAllocator::Ctx(size_t size)>;
-    using FnRendererModelRegister_t = std::function<NSMesh::RegisterModelKey(NSMesh::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
-    using FnRendererModelUnload_t = std::function<void(NSMesh::RegisterModelKey key)>;
+    using FnRendererModelRegister_t = std::function<NSModel::RegisterModelKey(NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
+    using FnRendererModelUnload_t = std::function<void(NSModel::RegisterModelKey key)>;
 
     struct DepthStencilCreateDescription {
         DXGI_FORMAT format{};
@@ -490,5 +490,27 @@ namespace NSRenderer
         FnRendererModelRegister_t registerModel;
         FnRendererModelUnload_t unloadModel;
         NSDescriptor::Handle fallbackSRV;
+    };
+}
+
+class Scene;
+namespace NSRenderPass
+{
+    class IRenderPass
+    {
+    public:
+        virtual ~IRenderPass() = default;
+
+        virtual void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
+        virtual void OnDestroy() = 0;
+
+        virtual void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
+        virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) = 0;
+
+        bool IsEnabled() const { return im_isEnabled; };
+        void SetIsEnabled(bool val) { im_isEnabled = val; };
+
+    private:
+        bool im_isEnabled{};
     };
 }

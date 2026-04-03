@@ -31,12 +31,12 @@ public:
 class Model
 {
 public:
-    Model(){}
-    Model(ID3D12Device14* device, IWICImagingFactory2* wicFactory, const wchar_t* name);
+    Model();
+    Model(ID3D12Device14* device, IWICImagingFactory2* wicFactory, std::wstring_view name);
 
     std::wstring m_name;
-    NSMesh::SceneModelKey m_sceneKey;
-    NSMesh::RegisterModelKey m_registerKey;
+    NSModel::SceneModelKey m_sceneKey;
+    NSModel::RegisterModelKey m_registerKey;
 
     void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Move(DirectX::XMFLOAT3 vector, float delta);
@@ -97,31 +97,30 @@ public:
     void UnloadGPU(NSRenderer::Ctx rendererCtx);
     void ResetUploadHeaps();
 
-    template<typename T> requires NSMesh::IsPrimitiveMesh<T>
-    Model&& As(NSRenderer::Ctx rendererCtx, NSMesh::PrimitiveTraits<T>& desc) {
-        return _As(rendererCtx, L"self", desc.type, reinterpret_cast<void*>(desc));
-    }
+    template<typename T> requires NSModel::IsPrimitiveMesh<T>
+        Model&& As(NSRenderer::Ctx rendererCtx, NSModel::PrimitiveTraits<T>& desc) {
+            return _As(rendererCtx, L"self", desc.type, reinterpret_cast<void*>(desc));
+        }
 
-    void Draw(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
-    void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
+        void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
 
-    std::filesystem::path m_assetsPath;
-    bool isOnGPU{};
-    bool isOnCPU{};
-    NSMesh::SphereCollision collision;
+        std::filesystem::path m_assetsPath;
+        bool isOnGPU{};
+        bool isOnCPU{};
+        NSModel::SphereCollision collision;
 
-    bool TestFlag(NSMesh::EModelFlag flag) const {
-        return m_flags.test(static_cast<uint32_t>(flag));
-    }
-    void SetFlag(NSMesh::EModelFlag flag) {
-        m_flags.set(static_cast<uint32_t>(flag));
-    }
-    void ResetFlag(NSMesh::EModelFlag flag) {
-        m_flags.reset(static_cast<uint32_t>(flag));
-    }
-    void FlipFlag(NSMesh::EModelFlag flag) {
-        m_flags.flip(static_cast<uint32_t>(flag));
-    }
+        bool TestFlag(NSModel::EModelFlag flag) const {
+            return m_flags.test(static_cast<uint32_t>(flag));
+        }
+        void SetFlag(NSModel::EModelFlag flag) {
+            m_flags.set(static_cast<uint32_t>(flag));
+        }
+        void ResetFlag(NSModel::EModelFlag flag) {
+            m_flags.reset(static_cast<uint32_t>(flag));
+        }
+        void FlipFlag(NSModel::EModelFlag flag) {
+            m_flags.flip(static_cast<uint32_t>(flag));
+        }
 
 private:
     IWICImagingFactory2* m_wicFactory = nullptr;
@@ -135,8 +134,8 @@ private:
     void ProcessNode(NSRenderer::Ctx rendererCtx, aiNode* node, const aiScene* scene);
     void ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mesh& outMesh);
 
-    Mesh& CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMesh::Vertex>& inVertices, const std::vector<UINT>& inIndices);
-    Model&& _As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSMesh::EPrimitive type, void* pDesc);
+    Mesh& CreateMeshFromMemory(std::wstring_view name, const std::vector<NSModel::Vertex>& inVertices, const std::vector<UINT>& inIndices);
+    Model&& _As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel::EPrimitive type, void* pDesc);
 
     std::bitset<32> m_flags{};
 };

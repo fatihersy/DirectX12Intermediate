@@ -32,22 +32,34 @@ cmox_src_folder = "src"
 -- PROJECT ARCHITECTURE
 -- "single"         Only one build.lua file will be loaded.
 --                  The file needs to be in the src folder.
---                  Used for singel project repos
+--                  Used for single project repos
 --
--- "flat"           The hirarch of the project is flat.
---                  build.lua files will be loaded from from
+-- "flat"           The hierarchy of the project is flat.
+--                  build.lua files will be loaded from
 --                  subdirs of the src folder. Each dir can
 --                  be a project.
 --
 -- "hierarchical"   Adds one more indirection layer to the
 --                  "flat" architecture. The first folder
---                  will be the group name. Groups are treatet
---                  similar to the flat modell
+--                  will be the group name. Groups are treated
+--                  similar to the flat model
 --
 -- "manual"         Projects are not loaded by the MoxPP
 --                  provide the "cmox_function_includeprojects"
 --                  function.
 cmox_project_architecture = "flat"
+
+-- BUILD SYSTEM
+-- "visualstudio"   Generate Visual Studio solution/project files
+-- "makefile"       Generate GNU Makefiles (gmake2)
+cmox_build_system = "visualstudio"
+
+-- COMPILER
+-- Set to nil to auto-detect based on platform
+-- For Visual Studio: nil (default msvc), "clang-cl" (LLVM/Clang with MSVC compatibility)
+-- For makefiles on Windows: "msvc", "gcc", "clang"
+-- For makefiles on Linux: "gcc", "clang"
+cmox_compiler = "msvc"
 
 -- VISUAL STUDIO VERSION (Windows only)
 -- Defines the Visual Studio version year to use for project generation
@@ -74,12 +86,12 @@ cmox_unit_test_src = "test"
 
 -- This function is called when the workspace is configured
 function cmox_function_setupworkspace()
-    startproject "DXMaterial" -- recommended to configure this for visual studio
+    startproject "DXMaterial"
 end
 
 -- This function is called for each project when it's beeing configured
 function cmox_function_setupproject()
-    
+
 end
 
 -- This function is called in manual configuration to include

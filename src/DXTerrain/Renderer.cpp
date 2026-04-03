@@ -349,12 +349,12 @@ void Renderer::EndFrame()
     MoveToNextFrame();
 }
 
-NSMesh::RegisterModelKey Renderer::RegisterModel(NSMesh::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList)
+NSModel::RegisterModelKey Renderer::RegisterModel(NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList)
 {
     std::vector<NSRenderer::Model>* models = m_blackboard.GetMut<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     assert(models);
 
-    NSMesh::RegisterModelKey outKey{ sceneKey.id, models->size() };
+    NSModel::RegisterModelKey outKey{ sceneKey.id, models->size() };
     NSRenderer::Model& rendererModel = models->emplace_back();
     rendererModel.sceneKey = sceneKey;
 
@@ -494,7 +494,7 @@ NSMesh::RegisterModelKey Renderer::RegisterModel(NSMesh::SceneModelKey sceneKey,
 
     return outKey;
 }
-void Renderer::UnloadModel(NSMesh::RegisterModelKey key)
+void Renderer::UnloadModel(NSModel::RegisterModelKey key)
 {
     auto modelsOpt = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     assert(modelsOpt.has_value() and "Blackboard key is has no value");

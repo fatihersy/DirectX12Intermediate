@@ -68,10 +68,20 @@ newoption {
 }
 newoption {
     trigger = "mox_vs_toolset",
-    value = "TOOLSET",
     description = "Visual Studio platform toolset (e.g. v143, v142, v141)",
     category = "MoxPP",
-    default = ""
+}
+newoption {
+    trigger = "mox_compiler",
+    description = "Compiler to use for makefile builds (msvc, gcc, clang, ClangCL)",
+    category = "MoxPP",
+}
+newoption {
+    trigger = "mox_target_os",
+    value = "OS",
+    description = "Target operating system (windows, linux)",
+    category = "MoxPP",
+    default = "windows"
 }
 
 -- Extract if conan is release only
@@ -80,8 +90,12 @@ hmox_conan_release_only = _OPTIONS["mox_conan_release_only"] == "True"
 -- vcpkg configuration
 if _OPTIONS["mox_vcpkg_root"] and _OPTIONS["mox_vcpkg_root"] ~= "" then
     hmox_vcpkg_root = _OPTIONS["mox_vcpkg_root"]
-    hmox_vcpkg_triplet = "x64-windows"  -- Adjust based on platform if needed
-    
+
+    -- Derive vcpkg triplet from architecture and target OS
+    local vcpkg_arch_map = { x86 = "x86", x86_64 = "x64", ARM = "arm", ARM64 = "arm64" }
+    local vcpkg_arch = vcpkg_arch_map[_OPTIONS["mox_premake_arch"]] or "x64"
+    hmox_vcpkg_triplet = vcpkg_arch .. "-" .. _OPTIONS["mox_target_os"]
+
     -- vcpkg_installed is passed as root, packages are at {triplet}/include, etc.
     _G.vcpkg = {
         root = hmox_vcpkg_root,
@@ -142,9 +156,11 @@ workspace(cmox_product_name)
     architecture(_OPTIONS["mox_premake_arch"])
     location "../"
 
-    -- Set platform toolset if specified
-    if _OPTIONS["mox_vs_toolset"] and _OPTIONS["mox_vs_toolset"] ~= "" then
-        toolset("msc-" .. _OPTIONS["mox_vs_toolset"])
+    -- Set platform toolset if specified (Visual Studio only)
+    if _ACTION and string.startswith(_ACTION, "vs") then
+        if _OPTIONS["mox_vs_toolset"] and _OPTIONS["mox_vs_toolset"] ~= "" then
+            toolset("msc-" .. _OPTIONS["mox_vs_toolset"])
+        end
     end
 
     -- Custom workspace configuration

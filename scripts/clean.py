@@ -68,8 +68,8 @@ def CleanProject():
     shutil.rmtree('./vs', ignore_errors=True)
     RecursiveRemove(
         './',
-        ('.sln', '.vcxproj', '.vcxproj.user', '.vcxproj.filters', 'Makefile'),
-        ('.git', '.vs', 'app', 'build', 'dependencies', 'scripts')
+        ('.sln', '.vcxproj', '.vcxproj.user', '.vcxproj.filters', 'Makefile', '.make'),
+        ('.git', '.vs', 'app', 'build', 'dependencies', 'scripts', 'venv')
     )
 
 if __name__ == '__main__':
@@ -92,5 +92,5 @@ if __name__ == '__main__':
     elif args.mode == 'all':
         CleanOutput()
         CleanProject()
-        CleanDependencies()
         CleanVcpkg()
+        CleanDependencies()

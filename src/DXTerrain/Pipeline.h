@@ -29,7 +29,7 @@ public:
     ~IPipeline();
 
 protected:
-    ID3D12Device* im_device = nullptr;
+    ID3D12Device14* im_device = nullptr;
     ComPtr<ID3D12PipelineState> im_pipeline;
     ComPtr<ID3D12RootSignature> im_rootSignature;
     std::wstring im_name;

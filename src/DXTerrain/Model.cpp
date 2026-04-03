@@ -23,7 +23,8 @@ aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node)
     return transform;
 }
 
-Model::Model(ID3D12Device14* device, IWICImagingFactory2* wicFactory, const wchar_t* name) : m_device(device), m_wicFactory(wicFactory), m_name(name)
+Model::Model() : m_device(nullptr), m_wicFactory(nullptr) {};
+Model::Model(ID3D12Device14* device, IWICImagingFactory2* wicFactory, std::wstring_view name) : m_device(device), m_wicFactory(wicFactory), m_name(name)
 {
     assert(device and wicFactory);
 }
@@ -132,7 +133,7 @@ void Model::UnloadGPU(NSRenderer::Ctx rendererCtx)
     }
 
     rendererCtx.unloadModel(m_registerKey);
-    m_registerKey = NSMesh::RegisterModelKey();
+    m_registerKey = NSModel::RegisterModelKey();
 
     isOnGPU = false;
 }
@@ -150,37 +151,6 @@ void Model::ResetUploadHeaps()
     isOnCPU = false;
 }
 
-void Model::Draw(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
-{
-    DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
-    DirectX::XMMATRIX globalPosition = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&m_position));
-
-    for (Mesh& mesh : m_meshes)
-    {
-        NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(meshConstants));
-        meshConstants& meshCb = allocCtx.As<meshConstants>();
-
-        const DirectX::XMMATRIX scaleMatrix = DirectX::XMMatrixScalingFromVector(DirectX::XMLoadFloat3(&mesh.m_scale));
-        const DirectX::XMMATRIX rotQMatrix = DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(&mesh.m_rotationQ));
-        const DirectX::XMMATRIX posMatrix = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
-        const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation * globalPosition;
-
-        DirectX::XMStoreFloat4x4(&meshCb.worldMatrix, worldMatrix);
-        DirectX::XMVECTOR det;
-        DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
-        DirectX::XMStoreFloat3x4(&meshCb.normalMatrix, worldInverse);
-
-        meshCb.baseColor = mesh.material.m_baseColor;
-        meshCb.metallic = mesh.material.m_metallic;
-        meshCb.roughness = mesh.material.m_roughness;
-        meshCb.opacity = mesh.material.m_opacity;
-        meshCb.textureFlags = mesh.material.GetFlags();
-
-        cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-        cmdList.IASetIndexBuffer(&mesh.indexBufferView);
-        cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
-    }
-}
 void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach)
 {
     DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
@@ -233,7 +203,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
 {
     assert(m_device and pAiMesh and scene);
 
-    std::vector<NSMesh::Vertex> vertices;
+    std::vector<NSModel::Vertex> vertices;
     std::vector<UINT> indices;
 
     outMesh.vertexCount = static_cast<UINT>(pAiMesh->mNumVertices);
@@ -254,7 +224,9 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
         aiGlobalTransform.a4, aiGlobalTransform.b4, aiGlobalTransform.c4, aiGlobalTransform.d4
     );
 
-    DirectX::XMVECTOR outPos, outRotQ, outScale;
+    DirectX::XMVECTOR outPos = DirectX::XMVectorZero();
+    DirectX::XMVECTOR outRotQ = DirectX::XMVectorZero();
+    DirectX::XMVECTOR outScale = DirectX::XMVectorZero();
 
     assert(DirectX::XMMatrixDecompose(&outScale, &outRotQ, &outPos, globalMatrix) and "Cannot decompose mesh matrix");
 
@@ -264,7 +236,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
 
     for (UINT itr_000{}; itr_000 < pAiMesh->mNumVertices; itr_000++)
     {
-        NSMesh::Vertex v{};
+        NSModel::Vertex v{};
 
         v.position = DirectX::XMFLOAT3
         {
@@ -333,7 +305,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
         const CD3DX12_HEAP_PROPERTIES uploadProps(D3D12_HEAP_TYPE_UPLOAD);
         const CD3DX12_HEAP_PROPERTIES defaultProps(D3D12_HEAP_TYPE_DEFAULT);
 
-        const size_t dataSize = outMesh.vertexCount * sizeof(NSMesh::Vertex);
+        const size_t dataSize = outMesh.vertexCount * sizeof(NSModel::Vertex);
         const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
 
         ThrowIfFailed(m_device->CreateCommittedResource(
@@ -364,7 +336,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
 
         outMesh.vertexBufferView.BufferLocation = outMesh.defaultVertexBuffer->GetGPUVirtualAddress();
         outMesh.vertexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
-        outMesh.vertexBufferView.StrideInBytes = sizeof(NSMesh::Vertex);
+        outMesh.vertexBufferView.StrideInBytes = sizeof(NSModel::Vertex);
     }
 
     {
@@ -477,7 +449,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
     }
 }
 
-Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMesh::Vertex>& inVertices, const std::vector<UINT>& inIndices)
+Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSModel::Vertex>& inVertices, const std::vector<UINT>& inIndices)
 {
     IApp* iApp = IApp::GetInstance();
 
@@ -493,7 +465,7 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMe
         const CD3DX12_HEAP_PROPERTIES uploadProps(D3D12_HEAP_TYPE_UPLOAD);
         const CD3DX12_HEAP_PROPERTIES defaultProps(D3D12_HEAP_TYPE_DEFAULT);
 
-        const size_t dataSize = outMesh.vertexCount * sizeof(NSMesh::Vertex);
+        const size_t dataSize = outMesh.vertexCount * sizeof(NSModel::Vertex);
         const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
 
         ThrowIfFailed(m_device->CreateCommittedResource(
@@ -524,7 +496,7 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMe
 
         outMesh.vertexBufferView.BufferLocation = outMesh.defaultVertexBuffer->GetGPUVirtualAddress();
         outMesh.vertexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
-        outMesh.vertexBufferView.StrideInBytes = sizeof(NSMesh::Vertex);
+        outMesh.vertexBufferView.StrideInBytes = sizeof(NSModel::Vertex);
     }
 
     {
@@ -568,65 +540,65 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMe
     return outMesh;
 }
 
-Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSMesh::EPrimitive type, void* pDesc)
+Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel::EPrimitive type, void* pDesc)
 {
-    assert(pDesc and not name.empty() and type > NSMesh::EPrimitive::PRIMITIVE_TYPE_NONE and type < NSMesh::EPrimitive::PRIMITIVE_TYPE_MAX);
+    assert(pDesc and not name.empty() and type > NSModel::EPrimitive::PRIMITIVE_TYPE_NONE and type < NSModel::EPrimitive::PRIMITIVE_TYPE_MAX);
 
     UnloadGPU(rendererCtx);
     ResetUploadHeaps();
-    std::vector<NSMesh::Vertex> vertices;
+    std::vector<NSModel::Vertex> vertices;
     std::vector<UINT> indices;
 
     switch (type)
     {
-        case NSMesh::EPrimitive::PRIMITIVE_TYPE_DOME:
-        {
-            const NSMesh::SDome* desc = reinterpret_cast<const NSMesh::SDome*>(pDesc);
+    case NSModel::EPrimitive::PRIMITIVE_TYPE_DOME:
+    {
+        const NSModel::SDome* desc = reinterpret_cast<const NSModel::SDome*>(pDesc);
 
-            Primitives::CreateDome(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+        Primitives::CreateDome(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
+        Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
 
-            return std::move(*this);
-        }
-        case NSMesh::EPrimitive::PRIMITIVE_TYPE_SPHERE:
-        {
-            const NSMesh::SSphere* desc = reinterpret_cast<const NSMesh::SSphere*>(pDesc);
+        return std::move(*this);
+    }
+    case NSModel::EPrimitive::PRIMITIVE_TYPE_SPHERE:
+    {
+        const NSModel::SSphere* desc = reinterpret_cast<const NSModel::SSphere*>(pDesc);
 
-            Primitives::CreateSphere(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+        Primitives::CreateSphere(desc->radius, desc->sliceCount, desc->stackCount, vertices, indices);
+        Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
 
-            return std::move(*this);
-        }
-        case NSMesh::EPrimitive::PRIMITIVE_TYPE_CUBE:
-        {
-            const NSMesh::SCube* desc = reinterpret_cast<const NSMesh::SCube*>(pDesc);
+        return std::move(*this);
+    }
+    case NSModel::EPrimitive::PRIMITIVE_TYPE_CUBE:
+    {
+        const NSModel::SCube* desc = reinterpret_cast<const NSModel::SCube*>(pDesc);
 
-            Primitives::CreateCube(desc->width, desc->height, desc->depth, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+        Primitives::CreateCube(desc->width, desc->height, desc->depth, vertices, indices);
+        Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
 
-            return std::move(*this);
-        }
-        case NSMesh::EPrimitive::PRIMITIVE_TYPE_PLANE:
-        {
-            const NSMesh::SPlane* desc = reinterpret_cast<const NSMesh::SPlane*>(pDesc);
+        return std::move(*this);
+    }
+    case NSModel::EPrimitive::PRIMITIVE_TYPE_PLANE:
+    {
+        const NSModel::SPlane* desc = reinterpret_cast<const NSModel::SPlane*>(pDesc);
 
-            Primitives::CreatePlane(desc->width, desc->depth, desc->widthSubdivisions, desc->depthSubdivisions, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+        Primitives::CreatePlane(desc->width, desc->depth, desc->widthSubdivisions, desc->depthSubdivisions, vertices, indices);
+        Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
 
-            return std::move(*this);
-        }
-        case NSMesh::EPrimitive::PRIMITIVE_TYPE_CYLINDER:
-        {
-            const NSMesh::SCylinder* desc = reinterpret_cast<const NSMesh::SCylinder*>(pDesc);
+        return std::move(*this);
+    }
+    case NSModel::EPrimitive::PRIMITIVE_TYPE_CYLINDER:
+    {
+        const NSModel::SCylinder* desc = reinterpret_cast<const NSModel::SCylinder*>(pDesc);
 
-            Primitives::CreateCylinder(desc->topRadius, desc->bottomRadius, desc->height, desc->sliceCount, desc->stackCount, vertices, indices);
-            Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
+        Primitives::CreateCylinder(desc->topRadius, desc->bottomRadius, desc->height, desc->sliceCount, desc->stackCount, vertices, indices);
+        Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
 
-            return std::move(*this);
-        }
-        case NSMesh::EPrimitive::PRIMITIVE_TYPE_CONE:
-        {
-            const NSMesh::SCone* desc = reinterpret_cast<const NSMesh::SCone*>(pDesc);
+        return std::move(*this);
+    }
+    case NSModel::EPrimitive::PRIMITIVE_TYPE_CONE:
+    {
+        const NSModel::SCone* desc = reinterpret_cast<const NSModel::SCone*>(pDesc);
 
             Primitives::CreateCone(desc->bottomRadius, desc->height, desc->sliceCount, desc->stackCount, vertices, indices);
             Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);

@@ -22,45 +22,105 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-import moxwin
 
-import sys
-import glob
 import argparse
+import glob
+import os
+import platform
+import shutil
 import subprocess
+import sys
 
-def WindowsBuild(conf):
+import mox
+
+
+def FindMake():
+    """Find GNU make on the system."""
+    # Try 'make' first (works on Linux and Windows if GNU make is on PATH)
+    make = shutil.which("make")
+    if make:
+        return make
+    # Try 'mingw32-make' as fallback on Windows
+    if not sys.platform.startswith("linux"):
+        mingw_make = shutil.which("mingw32-make")
+        if mingw_make:
+            return mingw_make
+    return None
+
+
+def MSBuildBuild(conf):
+    import moxwin
+
     # Find MSBuild
     vswhere = moxwin.FindLatestVisualStudio()
     vspath = moxwin.GetVisualStudioPath(vswhere)
-    msbuild = f'{vspath}\\MSBuild\\Current\\Bin\\MSBuild.exe'
+    msbuild = f"{vspath}\\MSBuild\\Current\\Bin\\MSBuild.exe"
 
     # Find solution file
-    slnFiles = glob.glob('*.sln')
+    slnFiles = glob.glob("*.sln")
     if len(slnFiles) == 0:
-        print('No solution file found! Building not possible!')
+        print("No solution file found! Building not possible!")
         return
 
     # Run build
-    subprocess.run((
-        msbuild, slnFiles[0],
-        f'-p:Configuration={conf}'
-    ))
+    subprocess.run((msbuild, slnFiles[0], f"-p:Configuration={conf}"))
 
-def LinuxBuild(conf):
-    # Run the makefile
-    subprocess.run((
-        'make', f'config={conf.lower()}', 'all'
-    ))
 
-if __name__ == '__main__':
+def MakefileBuild(conf, arch=None):
+    make = FindMake()
+    if make is None:
+        print("GNU make not found on PATH! Building not possible!")
+        print("Please install GNU make and ensure it is available on your PATH.")
+        return
+
+    # On Windows, set up MSVC environment (INCLUDE, LIB, PATH) so the
+    # compiler can find Windows SDK headers and libraries
+    env = None
+    if not sys.platform.startswith("linux"):
+        import moxwin
+
+        if arch is None:
+            arch = platform.machine().lower()
+        try:
+            print(f"Setting up MSVC environment via vcvarsall.bat ({arch})...")
+            env = moxwin.GetMSVCEnv(arch)
+            print("MSVC environment loaded successfully.")
+        except (FileNotFoundError, RuntimeError) as e:
+            print(f"Warning: Could not load MSVC environment: {e}")
+            print(
+                "Building without MSVC environment. Windows SDK headers may not be found."
+            )
+
+    subprocess.run((make, f"config={conf.lower()}", "all"), env=env)
+
+
+if __name__ == "__main__":
     # Configuration from cli
     p = argparse.ArgumentParser(prog="build.py", allow_abbrev=False)
-    p.add_argument("--conf", default="Release", help="Build configuration (default: Release)")
+    p.add_argument(
+        "--conf", default="Release", help="Build configuration (default: Release)"
+    )
+    p.add_argument(
+        "--build-system",
+        default=None,
+        help="Build system: 'visualstudio' or 'makefile'. Overrides mox.lua config.",
+    )
+    p.add_argument(
+        "--arch",
+        default=None,
+        help="Architecture for MSVC environment setup (e.g. x64, x86, arm64)",
+    )
     args = p.parse_args()
 
+    # Resolve build system
+    buildSystem = args.build_system
+    if buildSystem is None:
+        buildSystem = mox.ExtractLuaDef("./mox.lua", "cmox_build_system")
+        if buildSystem is None:
+            buildSystem = "visualstudio"
+
     # Run build step
-    if sys.platform.startswith('linux'):
-        LinuxBuild(args.conf)
+    if buildSystem == "makefile":
+        MakefileBuild(args.conf, args.arch)
     else:
-        WindowsBuild(args.conf)
+        MSBuildBuild(args.conf)

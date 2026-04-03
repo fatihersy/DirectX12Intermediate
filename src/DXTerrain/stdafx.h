@@ -41,7 +41,7 @@ constexpr std::wstring_view PROJECT_NAME = L"DXTerrain";
 
 #include "StepTimer.h"
 #include "Tools.h"
-//#include "SceneTypes.h"
+#include "SceneTypes.h"
 #include "AllocatorTypes.h"
-#include "MeshTypes.h"
+#include "ModelTypes.h"
 #include "RendererTypes.h"

@@ -188,8 +188,8 @@ function mox_project(name, output_name, target_subdir)
             end
         end
 
-        -- Windows options
-        if mox_is_windows() then
+        -- MSVC-specific options
+        if _OPTIONS["mox_compiler"] == "msvc" or (_ACTION and string.startswith(_ACTION, "vs")) then
             filter { "system:Windows" }
                 -- Ignore linker warning on windows
                 linkoptions { 
@@ -214,6 +214,17 @@ function mox_project(name, output_name, target_subdir)
                     "-Wl,--disable-new-dtags",
                 }
             filter {}
+        end
+
+        -- Compiler selection
+        if _OPTIONS["mox_compiler"] == "gcc" then
+            toolset "gcc"
+        elseif _OPTIONS["mox_compiler"] == "clang" then
+            toolset "clang"
+        elseif _OPTIONS["mox_compiler"] == "ClangCL" then
+            toolset "msc-ClangCL"
+        elseif _OPTIONS["mox_compiler"] == "msvc" then
+            toolset "msc"
         end
 
         multiprocessorcompile("On")

@@ -17,9 +17,9 @@ public:
 
     Material(IWICImagingFactory2* wicFactory);
 
-    HRESULT LoadTexture(ID3D12Device* device, IWICBitmapDecoder* decoder, INT textureType);
+    HRESULT LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder, INT textureType);
 
-    void UploadGPU(ID3D12Device* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+    void UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
     void UnloadGPU(NSRenderer::Ctx rendererCtx)
     {
         if (not m_isOnGPU) return;

@@ -19,6 +19,9 @@
 
 # Makefile
 **/Makefile
+**.make
+
+compile_commands.json
 
 # Visual Studio
 /.vs
@@ -28,7 +31,10 @@
 **.vcxproj.filters
 .qgrep
 
-# Dependencie graph output
+# IDE
+/compile_commands.json
+
+# Dependency graph output
 /dependencies_*.html
 
 # External
@@ -36,5 +42,3 @@
 
 # App
 /app
-
-

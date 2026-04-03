@@ -44,3 +44,46 @@ def GetVisualStudioYearNumber(vswhere):
 
 def GetVisualStudioPath(vswhere):
     return vswhere[0]['installationPath']
+
+# Map Premake/platform arch names to vcvarsall arch arguments
+VCVARS_ARCH_MAP = {
+    'x86':      'x86',
+    'x86_64':   'x64',
+    'amd64':    'x64',
+    'arm':      'arm',
+    'arm64':    'arm64',
+    'aarch64':  'arm64',
+}
+
+def FindVcvarsall():
+    """Find vcvarsall.bat from the latest Visual Studio installation."""
+    vswhere = FindLatestVisualStudio()
+    vspath = GetVisualStudioPath(vswhere)
+    vcvarsall = os.path.join(vspath, 'VC', 'Auxiliary', 'Build', 'vcvarsall.bat')
+    if os.path.isfile(vcvarsall):
+        return vcvarsall
+    raise FileNotFoundError(f'vcvarsall.bat not found at: {vcvarsall}')
+
+def GetMSVCEnv(arch='x64'):
+    """
+    Run vcvarsall.bat and capture the environment variables it sets.
+    Returns a dict of environment variables ready to pass to subprocess calls.
+    """
+    vcvars_arch = VCVARS_ARCH_MAP.get(arch.lower(), arch)
+    vcvarsall = FindVcvarsall()
+
+    # Run vcvarsall.bat and then print the resulting environment
+    cmd = f'"{vcvarsall}" {vcvars_arch} >nul 2>&1 && set'
+    result = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f'vcvarsall.bat failed:\n{result.stderr}')
+
+    # Parse the environment variables from output
+    env = {}
+    for line in result.stdout.splitlines():
+        if '=' in line:
+            key, _, value = line.partition('=')
+            env[key] = value
+    return env

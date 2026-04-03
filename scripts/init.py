@@ -50,17 +50,25 @@ VS_TOOLSET_MAP = {
     '2017': 'v141',
 }
 
-def GetPremakeGenerator(vs_version=None):
-    if sys.platform.startswith('linux'):
-        return 'gmake', ''
+def GetPremakeGenerator(build_system, vs_version=None, compiler=None):
+    if build_system == 'makefile':
+        if compiler is None:
+            if sys.platform.startswith('linux'):
+                compiler = 'gcc'
+            else:
+                compiler = 'msvc'
+        return 'gmake', compiler
     else:
         if vs_version:
             toolset = VS_TOOLSET_MAP.get(str(vs_version), '')
-            return f'vs{vs_version}', toolset
-        vswhere = moxwin.FindLatestVisualStudio()
-        vsversion = moxwin.GetVisualStudioYearNumber(vswhere)
-        toolset = VS_TOOLSET_MAP.get(vsversion, '')
-        return f'vs{vsversion}', toolset
+        else:
+            vswhere = moxwin.FindLatestVisualStudio()
+            vs_version = moxwin.GetVisualStudioYearNumber(vswhere)
+            toolset = VS_TOOLSET_MAP.get(vs_version, '')
+        # Override toolset for clang-cl (LLVM/Clang with MSVC compatibility)
+        if compiler == 'clang-cl':
+            toolset = 'ClangCL'
+        return f'vs{vs_version}', toolset
 
 def GetPremakeDownloadUrl(version):
     baseUrl = f'https://github.com/premake/premake-core/releases/download/v{version}/premake-{version}'
@@ -136,19 +144,39 @@ def DownloadVcpkg():
     else:
         print('vcpkg already available.')
 
-def InitializeVcpkg():
+VCPKG_ARCH_MAP = {
+    'x86':      'x86',
+    'i386':     'x86',
+    'i686':     'x86',
+    'x86_64':   'x64',
+    'amd64':    'x64',
+    'arm':      'arm',
+    'armhf':    'arm',
+    'armv7l':   'arm',
+    'armv8l':   'arm',
+    'arm64':    'arm64',
+    'aarch64':  'arm64',
+}
+
+def GetVcpkgTriplet(arch, target_os):
+    """Derive vcpkg triplet from target architecture and OS."""
+    vcpkg_arch = VCPKG_ARCH_MAP.get(arch.lower(), 'x64')
+    return f'{vcpkg_arch}-{target_os}'
+
+def InitializeVcpkg(arch, target_os):
     """Download vcpkg and install dependencies"""
     vcpkgPath = os.path.abspath('./dependencies/vcpkg')
     vcpkgInstalledPath = os.path.abspath('./dependencies/vcpkg_installed')
     vcpkgExe = os.path.join(vcpkgPath, GetExecutable('vcpkg'))
-    
+
     # Download and bootstrap vcpkg if needed
     DownloadVcpkg()
-    
+
     # Install vcpkg dependencies from vcpkg.json
     if os.path.exists('vcpkg.json'):
         print('Installing vcpkg dependencies...')
-        triplet = 'x64-windows' if sys.platform.startswith('win') else 'x64-linux'
+        triplet = GetVcpkgTriplet(arch, target_os)
+        print(f'Using vcpkg triplet: {triplet}')
         subprocess.run([
             vcpkgExe,
             'install',
@@ -159,7 +187,7 @@ def InitializeVcpkg():
         print('vcpkg dependencies installed successfully.')
     else:
         print('No vcpkg.json found. Skipping vcpkg package installation.')
-    
+
     return True
 
 def ConanBuild(conf, host_profile, build_profile):
@@ -181,12 +209,22 @@ if __name__ == '__main__':
     p.add_argument("--arch", default=platform.machine().lower(), help="Alternative (cross compile) architecture")
     p.add_argument("--conan-release-only", action=argparse.BooleanOptionalAction, default=DEFAULT_TO_CONAN_ALWAY_RELEASE, help="Forces conan into only generating release dependencies.")
     p.add_argument("--vs-version", default=None, help="Visual Studio version year (e.g. 2022, 2019). Defaults to latest installed.")
+    p.add_argument("--build-system", default=None, help="Build system: 'visualstudio' or 'makefile'. Overrides mox.lua config.")
+    p.add_argument("--compiler", default=None, help="Compiler: 'msvc', 'gcc', 'clang', 'clang-cl'. Overrides mox.lua config.")
+    p.add_argument("--target-os", default=None, help="Target OS: 'windows' or 'linux'. Defaults to host OS.")
     args = p.parse_args()
 
     skipConan = args.skip_conan
     skipVcpkg = args.skip_vcpkg
     arch = args.arch
     conanReleaseOnly = args.conan_release_only
+    buildSystem = args.build_system
+    compiler = args.compiler
+
+    # Resolve target OS (CLI > host platform)
+    targetOs = args.target_os
+    if targetOs is None:
+        targetOs = "linux" if sys.platform.startswith("linux") else "windows"
 
     # Create temp folder
     tempFolder = str(os.path.abspath("./dependencies/conan-temp"))
@@ -194,6 +232,16 @@ if __name__ == '__main__':
 
     # Resolve Visual Studio version
     vs_version = args.vs_version or mox.ExtractLuaDef("./mox.lua", "cmox_vs_version")
+
+    # Resolve build system (CLI > config)
+    if buildSystem is None:
+        buildSystem = mox.ExtractLuaDef("./mox.lua", "cmox_build_system")
+        if buildSystem is None:
+            buildSystem = "visualstudio"
+
+    # Resolve compiler (CLI > config)
+    if compiler is None:
+        compiler = mox.ExtractLuaDef("./mox.lua", "cmox_compiler")
 
     # Generate conan profiles
     os.makedirs("./profiles/", exist_ok=True)
@@ -207,7 +255,7 @@ if __name__ == '__main__':
     # Initialize vcpkg
     if not skipVcpkg:
         print('\n=== Initializing vcpkg ===')
-        InitializeVcpkg()
+        InitializeVcpkg(arch, targetOs)
 
     # Get system architecture
     buildArch = mox.GetThisPlatformInfo()
@@ -231,15 +279,15 @@ if __name__ == '__main__':
             arch
         ))
 
-    # GCC Prefix
-    gccPrefix = hostArch[f'gcc_{ "linux" if sys.platform.startswith("linux") else "windows"  }_prefix'] + '-'
+    # GCC Prefix (based on target OS, not host)
+    gccPrefix = hostArch[f'gcc_{targetOs}_prefix'] + '-'
 
     # Get vcpkg installed path for premake
     vcpkgInstalledRoot = os.path.abspath('./dependencies/vcpkg_installed')
 
     # Run premake5
-    premakeGenerator, vsToolset = GetPremakeGenerator(vs_version)
-    subprocess.run((
+    premakeGenerator, generatorExtra = GetPremakeGenerator(buildSystem, vs_version, compiler)
+    premakeArgs = [
         './dependencies/premake5/premake5',
         f'--mox_conan_arch={ hostArch["conan_arch"] }',
         f'--mox_premake_arch={ hostArch["premake_arch"] }',
@@ -247,7 +295,14 @@ if __name__ == '__main__':
         f'--mox_version={ version }',
         f'--mox_conan_release_only={ conanReleaseOnly }',
         f'--mox_vcpkg_root={ vcpkgInstalledRoot }',
-        f'--mox_vs_toolset={ vsToolset }',
+        f'--mox_target_os={ targetOs }',
         '--file=./scripts/premake5.lua',
-        premakeGenerator
-    ))
+    ]
+    # Only pass --mox_vs_toolset for Visual Studio builds
+    if buildSystem == 'visualstudio' and generatorExtra:
+        premakeArgs.append(f'--mox_vs_toolset={ generatorExtra }')
+    # Only pass --mox_compiler when it has a value
+    if generatorExtra:
+        premakeArgs.append(f'--mox_compiler={ generatorExtra }')
+    premakeArgs.append(premakeGenerator)
+    subprocess.run(premakeArgs)

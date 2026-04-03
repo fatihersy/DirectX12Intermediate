@@ -1,6 +1,6 @@
 #pragma once
 
-namespace NSMesh
+namespace NSModel
 {
     struct Vertex
     {
@@ -69,6 +69,15 @@ namespace NSMesh
         PRIMITIVE_TYPE_CYLINDER,
         PRIMITIVE_TYPE_CONE,
         PRIMITIVE_TYPE_MAX,
+    };
+
+    struct AddCtx
+    {
+        std::wstring_view name;
+        DirectX::XMFLOAT3 position = {};
+        float metallic = 0.f;
+        float roughness = 0.f;
+        float opacity = 1.f;
     };
 
     template<typename T>
