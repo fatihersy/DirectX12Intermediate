@@ -25,14 +25,16 @@ SOFTWARE.
 import mox
 import sys
 import argparse
+import glob
+import os
 import platform
 import subprocess
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(prog="run.py", allow_abbrev=False)
-    p.add_argument("--conf", default="Release", help="Build configuration (default: Release)")
+    p.add_argument("--conf", default="Debug", help="Build configuration (default: Debug)")
     p.add_argument("--arch", default=platform.machine().lower(), help="Alternative (cross compile) architecture")
-    p.add_argument("exe", nargs="?", help="Executable name in build/{arch}-{conf}/bin")
+    p.add_argument("exe", nargs="?", help="Executable/project name in build/{arch}-{conf}/bin")
     args, passthrough = p.parse_known_args()
 
     conf = args.conf
@@ -40,7 +42,29 @@ if __name__ == '__main__':
 
     if args.exe:
         exe = args.exe
-        exepath = f'build/{arch}-{conf}/bin/{exe}'
+        bindir = f'build/{arch}-{conf}/bin/{exe}'
+
+        # The argument can be a direct executable path or a project name.
+        # For project names, the exe lives inside a subdirectory:
+        #   build/{arch}-{conf}/bin/{ProjectName}/{output_name}.exe
+        # Try the path directly first; if it's a directory, find the exe inside.
+        if os.path.isdir(bindir):
+            exes = glob.glob(os.path.join(bindir, '*.exe')) if sys.platform == 'win32' \
+                else [f for f in glob.glob(os.path.join(bindir, '*'))
+                      if os.access(f, os.X_OK) and os.path.isfile(f)]
+            if len(exes) == 1:
+                exepath = exes[0]
+            elif len(exes) > 1:
+                print(f'Multiple executables found in {bindir}:')
+                for e in exes:
+                    print(f'  {os.path.basename(e)}')
+                sys.exit(1)
+            else:
+                print(f'No executable found in {bindir}')
+                sys.exit(1)
+        else:
+            exepath = bindir
+
         if sys.platform.startswith('linux'):
             exepath = '../' + exepath
         else:

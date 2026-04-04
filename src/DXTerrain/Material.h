@@ -50,6 +50,8 @@ public:
         {
             if (tex.textureType == tType) return true;
         }
+
+        return false;
     }
     const NSTexture::Texture* GetTextureByType(NSTexture::EType tType)
     {
@@ -57,6 +59,8 @@ public:
         {
             if (tex.textureType == tType) return &tex;
         }
+
+        return nullptr;
     }
 
     bool HaveTextureFlag(NSTexture::EType flag) const {
@@ -79,4 +83,3 @@ private:
     IWICImagingFactory2* m_wicFactory = nullptr;
     std::bitset<32> m_flags{};
 };
-

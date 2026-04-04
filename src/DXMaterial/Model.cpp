@@ -528,6 +528,8 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, const char* name, EPrimitive typ
             Mesh& mesh = CreateMeshFromMemory(name, vertices, indices);
             return std::move(*this);
         }
+
+        default: break;
     }
 
     throw std::runtime_error("Unsupported primitive type");

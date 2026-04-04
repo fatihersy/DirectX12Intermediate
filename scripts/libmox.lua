@@ -40,10 +40,13 @@ function mox_discover_subfolders_linux(folder)
     return io.popen("find \"./" .. folder .. "\" -maxdepth 1 -type d -printf '%f\n'" ):lines()
 end
 function mox_cli_mox_command(command)
+    -- Use !wks.location for absolute path so postbuild commands work from
+    -- any working directory (gmake runs them from the Makefile's directory,
+    -- and cmd.exe cannot resolve ../../ relative paths reliably).
     if mox_is_windows() then
-        return "%{wks.location}/mox.bat " .. command
+        return "\"%{!wks.location}/mox.bat\" " .. command
     else
-        return "%{wks.location}/mox.sh " .. command
+        return "%{!wks.location}/mox.sh " .. command
     end
 end
 
@@ -101,6 +104,8 @@ function mox_project(name, output_name, target_subdir)
         }
 
         -- Debug / Release
+        -- Use dynamic CRT (/MD) to match pre-built libraries (assimp, imgui, etc.)
+        staticruntime "Off"
         for idx,conf in pairs(cmox_configurations_n) do
             local is_debug = cmox_configurations_d[idx]
             filter { "configurations:" .. conf }
@@ -135,6 +140,8 @@ function mox_project(name, output_name, target_subdir)
                 cmox_macro_prefix .. "OS_WINDOWS",
                 "WINVER=0x0A00",
                 "_WIN32_WINNT=0x0A00",
+                "UNICODE",
+                "_UNICODE",
             }
         filter {}
         filter { "system:unix or linux" }
@@ -227,6 +234,70 @@ function mox_project(name, output_name, target_subdir)
             toolset "msc"
         end
 
+        -- Clang-specific: suppress warnings from DirectX/system headers
+        if _OPTIONS["mox_compiler"] == "clang" or _OPTIONS["mox_compiler"] == "ClangCL" then
+            buildoptions {
+                "-Wno-defaulted-function-deleted",
+                "-Wno-class-conversion",
+            }
+        end
+
+        -- Clang on Windows: target MSVC ABI for COM interface compatibility.
+        -- GNU-mode clang uses a different struct-return ABI that breaks DX12
+        -- COM methods (GetDesc, GetCPUDescriptorHandleForHeapStart, etc.).
+        -- Targeting MSVC also enables __int64/__pragma so MSVC SDK headers
+        -- parse correctly, and ensures UNICODE macros resolve to wide-char.
+        if _OPTIONS["mox_compiler"] == "clang" and _OPTIONS["mox_target_os"] == "windows" then
+            local arch_triple = { x86 = "i686", x86_64 = "x86_64", ARM = "armv7", ARM64 = "aarch64" }
+            local triple_arch = arch_triple[_OPTIONS["mox_premake_arch"]] or "x86_64"
+            local msvc_target = "--target=" .. triple_arch .. "-pc-windows-msvc"
+            buildoptions { msvc_target }
+            linkoptions { msvc_target }
+
+            -- Premake's gmake generator does not emit /MD or /MT for clang.
+            -- clang in gmake mode uses GCC-style flags, so /MD is misread as
+            -- -M -D (dependency generation + define), breaking compilation.
+            --
+            -- Instead we use --dependent-lib to embed the correct /DEFAULTLIB
+            -- directives in each .obj, telling the linker to pull in the dynamic
+            -- CRT (msvcrt/ucrt) instead of the static one (libcmt/libucrt).
+            -- We also define _DLL and _MT so CRT headers use __declspec(dllimport).
+            -- Finally we suppress the static CRT at link time with /NODEFAULTLIB.
+            -- The pre-built libs (assimp, imgui, draco, etc.) expect /MD.
+            for idx,conf in pairs(cmox_configurations_n) do
+                local is_debug = cmox_configurations_d[idx]
+                filter { "configurations:" .. conf }
+                    if is_debug and not hmox_conan_release_only then
+                        defines { "_DLL", "_MT", "_DEBUG" }
+                        buildoptions {
+                            "-Xclang --dependent-lib=msvcrtd",
+                            "-Xclang --dependent-lib=ucrtd",
+                            "-Xclang --dependent-lib=msvcprtd",
+                            "-Xclang --dependent-lib=oldnames",
+                        }
+                        linkoptions {
+                            "-Xlinker /NODEFAULTLIB:libcmtd",
+                            "-Xlinker /NODEFAULTLIB:libcpmtd",
+                            "-Xlinker /NODEFAULTLIB:libucrtd",
+                        }
+                    else
+                        defines { "_DLL", "_MT" }
+                        buildoptions {
+                            "-Xclang --dependent-lib=msvcrt",
+                            "-Xclang --dependent-lib=ucrt",
+                            "-Xclang --dependent-lib=msvcprt",
+                            "-Xclang --dependent-lib=oldnames",
+                        }
+                        linkoptions {
+                            "-Xlinker /NODEFAULTLIB:libcmt",
+                            "-Xlinker /NODEFAULTLIB:libcpmt",
+                            "-Xlinker /NODEFAULTLIB:libucrt",
+                        }
+                    end
+                filter {}
+            end
+        end
+
         multiprocessorcompile("On")
 
         -- Custom project configuration
@@ -254,13 +325,23 @@ function mox_cpp(cppstd)
 
     mox_add_conan_building()
 end
+-- Link groups use -Wl,--start-group / --end-group which only GCC/ld understand.
+-- MSVC's linker (used by clang targeting MSVC) searches all libs by default
+-- and emits LNK4044 warnings for unrecognized --start-group / --end-group.
+function mox_set_linkgroups()
+    if _OPTIONS["mox_compiler"] == "clang" and _OPTIONS["mox_target_os"] == "windows" then
+        linkgroups "Off"
+    else
+        linkgroups "On"
+    end
+end
 function mox_console()
     kind "ConsoleApp"
     defines {
         cmox_macro_prefix .. "APP",
         cmox_macro_prefix .. "CONSOLE",
     }
-    linkgroups "On"
+    mox_set_linkgroups()
     mox_add_conan_linking()
 end
 function mox_windowed()
@@ -269,7 +350,7 @@ function mox_windowed()
         cmox_macro_prefix .. "APP",
         cmox_macro_prefix .. "WINDOWED",
     }
-    linkgroups "On"
+    mox_set_linkgroups()
     mox_add_conan_linking()
 end
 function mox_sharedlib()
@@ -278,7 +359,7 @@ function mox_sharedlib()
         cmox_macro_prefix .. "LIB",
         cmox_macro_prefix .. "LIB_SHARED",
     }
-    linkgroups "On"
+    mox_set_linkgroups()
     mox_add_conan_linking()
 end
 function mox_staticlib()

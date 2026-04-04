@@ -1,4 +1,3 @@
-
 -- Arguments: Project name, Output name, Output directory (binary only)
 mox_project("DXMaterial", "dx_material", "bin/DXMaterial/")
 mox_cpp("C++20")
@@ -15,9 +14,9 @@ fatalwarnings { "All" }
 multiprocessorcompile "On"
 
 filter "action:vs*"
-    --buildoptions { "/ZW" } Not supported with C++23 Preview and premake5 beta8 forces to that
-    buildoptions { "/sdl" }
-filter {} 
+--buildoptions { "/ZW" } Not supported with C++23 Preview and premake5 beta8 forces to that
+buildoptions { "/sdl" }
+filter {}
 
 files {
     "**.h",
@@ -41,28 +40,36 @@ links {
 
 pchheader "stdafx.h"
 pchsource "stdafx.cpp"
-    
-filter "configurations:*"
-    linkoptions { 
-        "/DELAYLOAD:d3d12.dll", 
-        "/DELAYLOAD:dxcompiler.dll", 
-        "/SUBSYSTEM:WINDOWS",
-    }
-filter {} 
-    
-filter "configurations:Debug"
-    linkoptions { "/INCREMENTAL" }
-filter {}    
 
-filter "configurations:Release"
-    linkoptions { "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF" }
+-- Linker options: VS uses MSVC-style flags directly; gmake must wrap them
+-- with -Xlinker so clang++ forwards them to lld-link / link.exe.
+filter { "action:vs*", "configurations:*" }
+linkoptions {
+    "/DELAYLOAD:d3d12.dll",
+    "/DELAYLOAD:dxcompiler.dll",
+    "/SUBSYSTEM:WINDOWS",
+}
+filter {}
+filter { "action:gmake or gmake2", "configurations:*" }
+linkoptions {
+    "-Xlinker /SUBSYSTEM:WINDOWS",
+    "-Xlinker /DELAYLOAD:d3d12.dll",
+    "-Xlinker /DELAYLOAD:dxcompiler.dll",
+}
+filter {}
+
+filter { "action:vs*", "configurations:Debug" }
+linkoptions { "/INCREMENTAL" }
+filter {}
+filter { "action:vs*", "configurations:Release" }
+linkoptions { "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF" }
 filter {}
 
 filter "files:**.hlsl"
-    buildaction "CustomBuild"
-    buildoutputs { "%{wks.location}/app/%{file.name}" }
-    buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
-    linkbuildoutputs "false"
+buildaction "CustomBuild"
+buildoutputs { "%{wks.location}/app/%{file.name}" }
+buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
+linkbuildoutputs "false"
 filter {}
 
 -- Use the following to build after other projects

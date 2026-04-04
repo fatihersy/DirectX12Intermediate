@@ -33,7 +33,7 @@ namespace NSTool
         return std::wstring(buf.data(), size);
     }
 
-    bool Float3Equals(const DirectX::XMFLOAT3& lhs, const DirectX::XMFLOAT3& rhs, const float epsilon = DirectX::g_XMEpsilon.f[0]) noexcept
+    static bool Float3Equals(const DirectX::XMFLOAT3& lhs, const DirectX::XMFLOAT3& rhs, const float epsilon = DirectX::g_XMEpsilon.f[0]) noexcept
     {
         using namespace DirectX;
 

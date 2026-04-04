@@ -215,7 +215,7 @@ void app::LoadAssets()
 {
     m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
     {
-        m_scene = Scene(m_device.Get(), m_wicFactory.Get(), { 0.f, 0.f, 100.f, 0.f }, 10.f, .1f, 12.f);
+        m_scene = Scene(m_device.Get(), m_wicFactory.Get(), DirectX::XMVectorSet(0.f, 0.f, 100.f, 0.f), 10.f, .1f, 12.f);
 
         Model& skyDome = m_scene.AddObject<SDome>(ctx, "Sky Dome", {}, SDome{
             .radius = 10000.f,

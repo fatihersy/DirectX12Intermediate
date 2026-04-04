@@ -38,7 +38,7 @@ public:
     template<typename T> requires NSModel::IsPrimitiveMesh<T>
     Model& AddObject(NSRenderer::Ctx rendererCtx, NSModel::PrimitiveTraits<T> desc, NSModel::AddCtx ctx)
     {
-        Model& model = m_models.emplace_back<Model>(m_device, m_wicFactory, ctx.name);
+        Model& model = m_models.emplace_back(Model(m_device, m_wicFactory, ctx.name));
 
         model
             .As<T>(rendererCtx, desc)
@@ -82,4 +82,3 @@ public:
     static constexpr float FAR_CLIP = 20000.f;
     static constexpr float NEAR_CLIP = 0.1f;
 };
-

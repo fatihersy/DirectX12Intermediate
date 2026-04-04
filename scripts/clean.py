@@ -27,14 +27,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-import os
-import sys
-import shutil
-import argparse
 
-def RecursiveRemove(root_dir, extensions_to_remove = (), exclude_subdirs = ()):
+import argparse
+import os
+import shutil
+
+
+def RecursiveRemove(root_dir, extensions_to_remove=(), exclude_subdirs=()):
     for content in os.listdir(root_dir):
-        path = f'{root_dir}{content}'
+        path = f"{root_dir}{content}"
 
         if os.path.isfile(path):
             for ext in extensions_to_remove:
@@ -43,53 +44,62 @@ def RecursiveRemove(root_dir, extensions_to_remove = (), exclude_subdirs = ()):
 
         if os.path.isdir(path):
             if path not in exclude_subdirs:
-                RecursiveRemove(f'{path}/', extensions_to_remove)
+                RecursiveRemove(f"{path}/", extensions_to_remove)
+
 
 def CleanOutput():
-    shutil.rmtree('./build', ignore_errors=True)
-    shutil.rmtree('./temp', ignore_errors=True)
-    shutil.rmtree('./deploy', ignore_errors=True)
+    shutil.rmtree("./build", ignore_errors=True)
+    shutil.rmtree("./temp", ignore_errors=True)
+    shutil.rmtree("./deploy", ignore_errors=True)
+
 
 def CleanDependencies():
-    shutil.rmtree('./dependencies', ignore_errors=True)
-    shutil.rmtree('./profiles', ignore_errors=True)
-    shutil.rmtree('./dlls', ignore_errors=True)
+    shutil.rmtree("./dependencies", ignore_errors=True)
+    shutil.rmtree("./profiles", ignore_errors=True)
+    shutil.rmtree("./dlls", ignore_errors=True)
+
 
 def CleanVcpkg():
     """Clean vcpkg installed packages and build artifacts"""
-    print('Cleaning vcpkg packages...')
-    shutil.rmtree('./dependencies/vcpkg/buildtrees', ignore_errors=True)
-    shutil.rmtree('./dependencies/vcpkg/packages', ignore_errors=True)
-    shutil.rmtree('./dependencies/vcpkg/installed', ignore_errors=True)
-    shutil.rmtree('./dependencies/vcpkg_installed', ignore_errors=True)
-    print('vcpkg packages cleaned.')
+    print("Cleaning vcpkg packages...")
+    shutil.rmtree("./dependencies/vcpkg/buildtrees", ignore_errors=True)
+    shutil.rmtree("./dependencies/vcpkg/packages", ignore_errors=True)
+    shutil.rmtree("./dependencies/vcpkg/installed", ignore_errors=True)
+    shutil.rmtree("./dependencies/vcpkg_installed", ignore_errors=True)
+    print("vcpkg packages cleaned.")
+
 
 def CleanProject():
-    shutil.rmtree('./vs', ignore_errors=True)
+    shutil.rmtree("./vs", ignore_errors=True)
     RecursiveRemove(
-        './',
-        ('.sln', '.vcxproj', '.vcxproj.user', '.vcxproj.filters', 'Makefile', '.make'),
-        ('.git', '.vs', 'app', 'build', 'dependencies', 'scripts', 'venv')
+        "./",
+        (".sln", ".vcxproj", ".vcxproj.user", ".vcxproj.filters", "Makefile", ".make"),
+        (".git", ".vs", "app", "build", "dependencies", "scripts", "venv"),
     )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Get mode from cli
     p = argparse.ArgumentParser(prog="clean.py", allow_abbrev=False)
-    p.add_argument("mode", nargs="?", default="output",
-                   choices=["output", "project", "dependencies", "vcpkg", "all"],
-                   help="Clean mode (default: output)")
+    p.add_argument(
+        "mode",
+        nargs="?",
+        default="output",
+        choices=["output", "project", "dependencies", "vcpkg", "all"],
+        help="Clean mode (default: output)",
+    )
     args = p.parse_args()
 
     # Select mode
-    if args.mode == 'output':
+    if args.mode == "output":
         CleanOutput()
-    elif args.mode == 'project':
+    elif args.mode == "project":
         CleanProject()
-    elif args.mode == 'dependencies':
+    elif args.mode == "dependencies":
         CleanDependencies()
-    elif args.mode == 'vcpkg':
+    elif args.mode == "vcpkg":
         CleanVcpkg()
-    elif args.mode == 'all':
+    elif args.mode == "all":
         CleanOutput()
         CleanProject()
         CleanVcpkg()

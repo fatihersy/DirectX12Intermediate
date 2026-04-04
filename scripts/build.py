@@ -85,6 +85,14 @@ def MakefileBuild(conf, arch=None):
             print(f"Setting up MSVC environment via vcvarsall.bat ({arch})...")
             env = moxwin.GetMSVCEnv(arch)
             print("MSVC environment loaded successfully.")
+
+            # When clang targets MSVC ABI (--target=x86_64-pc-windows-msvc,
+            # set in libmox.lua), it reads the INCLUDE environment variable
+            # directly to find Windows SDK and MSVC STL headers. The INCLUDE
+            # var is already set by vcvarsall.bat and passed through in env.
+            # DirectX headers are provided via vcpkg -isystem paths in the
+            # Makefile, which take priority over system headers.
+
         except (FileNotFoundError, RuntimeError) as e:
             print(f"Warning: Could not load MSVC environment: {e}")
             print(
@@ -93,12 +101,28 @@ def MakefileBuild(conf, arch=None):
 
     subprocess.run((make, f"config={conf.lower()}", "all"), env=env)
 
+    # Generate compile_commands.json for IDE integration (Zed, clangd, etc.)
+    try:
+        print("Generating compile_commands.json...")
+        result = subprocess.run(
+            (sys.executable, "-m", "compiledb", "-n", "-o", "compile_commands.json",
+             make, f"config={conf.lower()}", "all"),
+            env=env,
+            capture_output=True,
+        )
+        if result.returncode == 0 and os.path.isfile("compile_commands.json"):
+            print("compile_commands.json generated in project root.")
+        else:
+            print("Warning: Could not generate compile_commands.json.")
+    except Exception as e:
+        print(f"Warning: compile_commands.json generation skipped: {e}")
+
 
 if __name__ == "__main__":
     # Configuration from cli
     p = argparse.ArgumentParser(prog="build.py", allow_abbrev=False)
     p.add_argument(
-        "--conf", default="Release", help="Build configuration (default: Release)"
+        "--conf", default="Debug", help="Build configuration (default: Debug)"
     )
     p.add_argument(
         "--build-system",

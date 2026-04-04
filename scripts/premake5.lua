@@ -118,13 +118,25 @@ function mox_use_vcpkg()
         print("Warning: vcpkg not configured. Skipping vcpkg includes/libs.")
         return
     end
-    
-    includedirs { _G.vcpkg.includePath }
-    
+
+    -- For clang/gcc with makefiles, use -isystem so vcpkg headers
+    -- take priority over the compiler's bundled system headers.
+    -- Also add the "directx" subdirectory since vcpkg's directx-headers
+    -- package installs headers under include/directx/ (e.g. directx/d3d12.h)
+    -- but code uses #include <d3d12.h> directly.
+    if _ACTION == "gmake" or _ACTION == "gmake2" then
+        externalincludedirs {
+            _G.vcpkg.includePath .. "/directx",
+            _G.vcpkg.includePath,
+        }
+    else
+        includedirs { _G.vcpkg.includePath }
+    end
+
     filter "configurations:Debug"
         libdirs { _G.vcpkg.debugLibPath }
     filter {}
-    
+
     filter "configurations:Release"
         libdirs { _G.vcpkg.libPath }
     filter {}

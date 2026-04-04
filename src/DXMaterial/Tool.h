@@ -4,6 +4,12 @@
 
 class FString {
 public:
+    // No-args overload: return the string directly without snprintf
+    static std::string format(const std::string& str)
+    {
+        return str;
+    }
+
     template<typename... Args>
     static std::string format(const std::string& format, Args&&... args)
     {
@@ -12,6 +18,12 @@ public:
         std::vector<char> buf(size + 1);
         std::snprintf(buf.data(), buf.size(), format.c_str(), to_str(args)...);
         return std::string(buf.data(), size);
+    }
+
+    // No-args overload: return the string directly without swprintf
+    static std::wstring wformat(const std::wstring& str)
+    {
+        return str;
     }
 
     template<typename... Args>
