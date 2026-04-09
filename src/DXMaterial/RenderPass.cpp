@@ -12,18 +12,17 @@ using namespace RenderPass;
 GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx)
     : m_pipeline(GraphicsPipeline(device, L"GeometryPass::Graphics", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error)
     {
-        CD3DX12_DESCRIPTOR_RANGE1 srvRange[1]{};
-        srvRange[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, static_cast<INT>(FTextureType::FTextureType_MAX), 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
-
-        CD3DX12_DESCRIPTOR_RANGE1 envCubemapRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 28, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
-        CD3DX12_DESCRIPTOR_RANGE1 brdfLUTRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 29, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+        constexpr UINT kModelTexCount = static_cast<UINT>(FTextureType::FTextureType_MAX);
+        CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kModelTexCount, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
+        CD3DX12_DESCRIPTOR_RANGE1 envCubemapRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, kModelTexCount, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
+        CD3DX12_DESCRIPTOR_RANGE1 brdfLUTRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, kModelTexCount + 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
 
         CD3DX12_ROOT_PARAMETER1 rp[5]{};
-        rp[0].InitAsConstantBufferView(0, 0);
-        rp[1].InitAsConstantBufferView(1, 0);
-        rp[2].InitAsDescriptorTable(1, &srvRange[0], D3D12_SHADER_VISIBILITY_PIXEL);
-        rp[3].InitAsDescriptorTable(1, &envCubemapRange, D3D12_SHADER_VISIBILITY_PIXEL);
-        rp[4].InitAsDescriptorTable(1, &brdfLUTRange, D3D12_SHADER_VISIBILITY_PIXEL);
+        rp[IDX_ROOT_CBV_FRAME].InitAsConstantBufferView(IDX_CBV_FRAME, 0);
+        rp[IDX_ROOT_CBV_MESH].InitAsConstantBufferView(IDX_CBV_MESH, 0);
+        rp[IDX_ROOT_DESC_MODEL_TEX_SRV].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
+        rp[IDX_ROOT_DESC_ENV_CUBEMAP_SRV].InitAsDescriptorTable(1, &envCubemapRange, D3D12_SHADER_VISIBILITY_PIXEL);
+        rp[IDX_ROOT_DESC_ENV_BRDF_LUT_SRV].InitAsDescriptorTable(1, &brdfLUTRange, D3D12_SHADER_VISIBILITY_PIXEL);
 
         D3D12_STATIC_SAMPLER_DESC samplers[2]{};
         samplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -133,7 +132,7 @@ void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx
         XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
         XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
-    cmdList.SetGraphicsRootConstantBufferView(0, frameCBAC.gpuAddr);
+    cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
@@ -146,8 +145,8 @@ void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx
     auto brdfLUTSRV = blackboard.GetOpt<Descriptor::Handle>(NSRenderer::kEnvCubemap_brdfLUTSRV);
     assert(brdfLUTSRV.has_value());
 
-    cmdList.SetGraphicsRootDescriptorTable(4, brdfLUTSRV->get().gpuAddr);
-    
+    cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_BRDF_LUT_SRV, brdfLUTSRV->get().gpuAddr);
+
     auto bbModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     assert(bbModels.has_value());
 
@@ -156,8 +155,8 @@ void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx
         assert(scene.ValidateKeys(scene.m_models[i].m_sceneKey, scene.m_models[i].m_registerKey));
 
         NSRenderer::Model& bbModel = bbModels->get()[scene.m_models[i].m_registerKey.index];
-        cmdList.SetGraphicsRootDescriptorTable(3, bbModel.m_envCubemap.srvHandle.gpuAddr);
-        
+        cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_CUBEMAP_SRV, bbModel.m_envCubemap.srvHandle.gpuAddr);
+
         scene.m_models[i].Draw(rendererCtx, cmdList);
     }
 }
@@ -304,7 +303,7 @@ SkyDomePass::SkyDomePass(ID3D12Device14* device, Blackboard& blackboard, NSRende
     Descriptor::hOffset transmittanceSRVoffset = rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE);
     Descriptor::hOffset scatteringSRVoffset = rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_SCATTERING);
 
-    // Transmittance + scattering 
+    // Transmittance + scattering
     blackboard.Set<Descriptor::hOffset>(NSRenderer::kSkyDome_transmitScatterSRVs, transmittanceSRVoffset);
 
     device->CreateUnorderedAccessView(
@@ -332,7 +331,7 @@ SkyDomePass::SkyDomePass(ID3D12Device14* device, Blackboard& blackboard, NSRende
         desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
         desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        desc.Texture2D.MipLevels = 1;
+        desc.Texture3D.MipLevels = 1; // Was desc.Texture2D.MipLevels = 1; Due to struct itself uses a union for different Texture types. It was setting intended variable correctly
         device->CreateShaderResourceView(m_scatteringLUT.Get(), &desc, scatteringSRVoffset.cpuAddr);
     }
 

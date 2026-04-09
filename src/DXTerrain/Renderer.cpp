@@ -2,6 +2,7 @@
 #include "Renderer.h"
 
 #include "DXSampleHelper.h"
+#include "RenderPass.h"
 
 void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height)
 {
@@ -44,6 +45,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
         {
             ThrowIfFailed(m_swapChain->GetBuffer(frame, IID_PPV_ARGS(&m_renderTargets[frame])));
             m_device->CreateRenderTargetView(m_renderTargets[frame].Get(), nullptr, m_rtvHeap.OffsetOf(m_rtHandle, frame).cpuAddr);
+            m_renderTargets[frame]->SetName(NSTool::wformat(L"Renderer::m_renderTargets[%u]", frame).c_str());
 
             ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[frame])));
             m_commandAllocators[frame]->SetName(NSTool::wformat(L"%s[%u]", L"Renderer::m_commandAllocators", frame).c_str());
@@ -53,7 +55,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
     CreateDepthStencil(L"Renderer::m_depthStencil", NSRenderer::DepthStencilCreateDescription {
         .format = DXGI_FORMAT_D32_FLOAT,
         .flags = D3D12_DSV_FLAG_NONE,
-        .dimention = D3D12_DSV_DIMENSION_TEXTURE2D,
+        .dimention = D3D12_DSV_DIMENSION::D3D12_DSV_DIMENSION_TEXTURE2D,
         .width = m_width,
         .height = m_height,
         .outDSV = m_depthStencil
@@ -87,6 +89,20 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
         std::vector<NSRenderer::Model> models;
         m_blackboard.Set<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models, std::move(models));
     }
+
+    // Passes
+    {
+        AddPass<NSRenderPass::AtmospherePass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
+
+        AddPass<NSRenderPass::EnvironmentCubemapPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
+
+        AddPass<NSRenderPass::GeometryPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
+    }
+
+    Execute([this](NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+    {
+        for(auto& pass : m_passes) pass->OnInit(m_blackboard, GetCtx(), cmdList);
+    });
 }
 
 Renderer::~Renderer(){}
@@ -315,6 +331,9 @@ void Renderer::BeginFrame()
     D3D12_CPU_DESCRIPTOR_HANDLE rtCpuHandle = OffsetRTV(m_rtHandle, frameIndex).cpuAddr;
     m_commandList->OMSetRenderTargets(1, &rtCpuHandle, FALSE, &m_dsHandle.cpuAddr);
 
+    m_blackboard.Set<D3D12_CPU_DESCRIPTOR_HANDLE&>(NSRenderer::kRenderer_mainRTV, rtCpuHandle);
+    m_blackboard.Set<D3D12_CPU_DESCRIPTOR_HANDLE&>(NSRenderer::kRenderer_mainDSV, m_dsHandle.cpuAddr);
+
     m_commandList->ClearRenderTargetView(OffsetRTV(m_rtHandle, frameIndex).cpuAddr, CLEAR_COLOR, 0, nullptr);
     m_commandList->ClearDepthStencilView(m_dsHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 
@@ -324,6 +343,18 @@ void Renderer::BeginFrame()
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
 
     m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+}
+void Renderer::DrawScene(Scene& scene)
+{
+    m_blackboard.Set(NSRenderer::kRenderer_frameIndex, m_swapChain->GetCurrentBackBufferIndex());
+
+    NSRenderer::Ctx rendererCtx = GetCtx();
+    NSRenderer::GraphicsCommandList cmdList = NSRenderer::GraphicsCommandList(m_commandList.Get());
+
+    for (auto& pass : m_passes)
+    {
+        pass->Execute(scene, m_blackboard, rendererCtx, cmdList);
+    }
 }
 void Renderer::EndFrame()
 {
@@ -349,7 +380,7 @@ void Renderer::EndFrame()
     MoveToNextFrame();
 }
 
-NSModel::RegisterModelKey Renderer::RegisterModel(NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList)
+NSModel::RegisterModelKey Renderer::RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList)
 {
     std::vector<NSRenderer::Model>* models = m_blackboard.GetMut<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     assert(models);
@@ -420,7 +451,7 @@ NSModel::RegisterModelKey Renderer::RegisterModel(NSModel::SceneModelKey sceneKe
         // RTVs
         {
             rendererModel.m_envCubemap.rtvHandle = AllocRTVStatic(rendererModel.m_envCubemap.NUM_FACES);
-            for (UINT face = 0; face < rendererModel.m_envCubemap.NUM_FACES; face++)
+            for (UINT face = 0u; face < rendererModel.m_envCubemap.NUM_FACES; face++)
             {
                 D3D12_RENDER_TARGET_VIEW_DESC desc{};
                 desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -434,6 +465,7 @@ NSModel::RegisterModelKey Renderer::RegisterModel(NSModel::SceneModelKey sceneKe
                     &desc,
                     OffsetRTV(rendererModel.m_envCubemap.rtvHandle, face).cpuAddr
                 );
+                rendererModel.m_envCubemap.cubemapTexture->SetName(NSTool::wformat(L"%s::m_envCubemap.cubemapTexture", modelName.data()).c_str());
             }
         }
 
@@ -447,6 +479,24 @@ NSModel::RegisterModelKey Renderer::RegisterModel(NSModel::SceneModelKey sceneKe
             desc.Texture2D.MipSlice = 0;
 
             m_device->CreateDepthStencilView(
+                rendererModel.m_envCubemap.cubemapDepth.Get(),
+                &desc,
+                rendererModel.m_envCubemap.dsvHandle.cpuAddr
+            );
+        }
+
+        // SRV
+        {
+            rendererModel.m_envCubemap.srvHandle = AllocSRVStatic(1u);
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+            desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+            desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            desc.TextureCube.MipLevels = rendererModel.m_envCubemap.MIP_COUNT;
+            desc.TextureCube.MostDetailedMip = 0;
+
+            m_device->CreateShaderResourceView(
                 rendererModel.m_envCubemap.cubemapTexture.Get(),
                 &desc,
                 rendererModel.m_envCubemap.srvHandle.cpuAddr
@@ -458,7 +508,7 @@ NSModel::RegisterModelKey Renderer::RegisterModel(NSModel::SceneModelKey sceneKe
             constexpr UINT uavCount = rendererModel.m_envCubemap.MIP_COUNT - 1u;
             rendererModel.m_envCubemap.uavHandle = AllocSRVStatic(uavCount);
 
-            for (UINT mip = 0; mip < rendererModel.m_envCubemap.MIP_COUNT; mip++)
+            for (UINT mip = 1u; mip < rendererModel.m_envCubemap.MIP_COUNT; mip++)
             {
                 D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
                 uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -561,7 +611,8 @@ void Renderer::Resize(UINT width, UINT height)
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, m_width);
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, m_height);
 
+    for (auto& pass : m_passes)
     {
-        // Resize passes as well
+        pass->OnResize(m_width, m_height, GetCtx());
     }
 }

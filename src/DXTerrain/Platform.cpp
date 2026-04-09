@@ -3,6 +3,12 @@
 
 #include "IApp.h"
 
+#include "directxtk12/Keyboard.h"
+#include "directxtk12/Mouse.h"
+
+#include "imgui_impl_win32.h"
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 Platform::Platform(SWindow wnd)
@@ -37,17 +43,13 @@ Platform::Platform(SWindow wnd)
         m_wnd.pApp
     );
 }
-
 Platform::~Platform()
-{
-
-}
-
+{}
 void Platform::ShowWindow()
 {
+    ImGui_ImplWin32_Init(m_wnd.hWnd);
     ::ShowWindow(m_wnd.hWnd, m_wnd.nCmdShow);
 }
-
 void Platform::Dispatch(MSG& msg)
 {
     if (PeekMessage(&msg, m_wnd.hWnd, 0, 0, PM_REMOVE))
@@ -56,10 +58,11 @@ void Platform::Dispatch(MSG& msg)
         DispatchMessage(&msg);
     }
 }
-
 LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     IApp* iApp = reinterpret_cast<IApp*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam)) return true;
 
     switch (message)
     {
@@ -69,7 +72,8 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             break;
         }
-
+        DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
+        DirectX::Mouse::ProcessMessage(message, wParam, lParam);
         break;
     }
 
@@ -85,21 +89,21 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_INPUT:
     case WM_MOUSEWHEEL:
     case WM_MOUSEHOVER:
-    case WM_MOUSEMOVE:
+    case WM_MOUSEMOVE: DirectX::Mouse::ProcessMessage(message, wParam, lParam);
         break;
 
     case WM_KEYDOWN:
     case WM_KEYUP:
-    case WM_SYSKEYUP:
+    case WM_SYSKEYUP: DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
         break;
     case WM_SYSKEYDOWN:
     {
-        if (wParam == VK_RETURN and (lParam & 0x60000000) == 0x20000000)
+        if (wParam == VK_RETURN and (lParam & 0x60000000) == 0x20000000) // Alt + Enter
         {
             if(iApp) iApp->ToggleFullScreen();
             return S_OK;
         }
-
+        DirectX::Keyboard::ProcessMessage(message, wParam, lParam);
         break;
     }
 
@@ -109,6 +113,7 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         if (iApp)
         {
+            ImGui_ImplWin32_NewFrame();
             iApp->OnUpdate();
             iApp->OnRender();
         }
@@ -128,18 +133,16 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         if (iApp)
         {
+            ImGui_ImplWin32_Shutdown();
             iApp->OnDestroy();
         }
-
         DestroyWindow(hWnd);
-
         return S_OK;
     }
 
     case WM_DESTROY:
     {
         PostQuitMessage(S_OK);
-
         return S_OK;
     }
 
@@ -151,7 +154,6 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             const UINT height = HIWORD(lParam);
             iApp->OnResize(width, height);
         }
-
         return S_OK;
     }
 

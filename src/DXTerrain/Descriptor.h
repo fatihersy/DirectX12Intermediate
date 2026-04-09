@@ -32,8 +32,8 @@ namespace NSDescriptor
             assert(offset < from.amount and Validate({ .cpuAddr = from.cpuAddr, .index = from.index }));
 
             return Offset {
-                .cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, offset, im_descriptorSize),
-                .gpuAddr = CD3DX12_GPU_DESCRIPTOR_HANDLE(im_gpuStart, offset, im_descriptorSize),
+                .cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, from.index + offset, im_descriptorSize),
+                .gpuAddr = CD3DX12_GPU_DESCRIPTOR_HANDLE(im_gpuStart, from.index + offset, im_descriptorSize),
                 .index = from.index + offset
             };
         }

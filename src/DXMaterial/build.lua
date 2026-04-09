@@ -32,6 +32,7 @@ links {
     "dxcompiler.lib",
     "dxguid.lib",
     "winmm.lib",
+    "user32.lib",
     "comctl32.lib",
     "delayimp.lib",
     "assimp-vc142-mt.lib",

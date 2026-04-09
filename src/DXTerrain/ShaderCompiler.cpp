@@ -31,7 +31,8 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
 
     DxcBuffer sourceBuffer{};
     sourceBuffer.Encoding = DXC_CP_ACP;
-    sourceBuffer.Ptr = shaderSource.Get();
+    sourceBuffer.Ptr = shaderSource->GetBufferPointer();
+    sourceBuffer.Size = shaderSource->GetBufferSize();
 
     ComPtr<IDxcResult> compileResult;
     ThrowIfFailed(m_dxcCompiler->Compile(

@@ -8,7 +8,7 @@
 Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSScene::Camera cam, float timeOfDay) : m_device(device), m_wicFactory(wicFactory)
 {
     m_camera = cam;
-    m_camera.projMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, IApp::GetInstance()->im_aspectRatio, .01f, 20000.f);
+    m_camera.projMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, IApp::GetInstance()->im_aspectRatio, NEAR_CLIP, FAR_CLIP);
 
     m_timeOfDay = timeOfDay;
 

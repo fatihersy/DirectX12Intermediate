@@ -113,7 +113,7 @@ struct atmosphereConstants
     float HM{};
     float Rg{};
     float Rt{};
-    float SunIntencity{};
+    float SunIntensity{};
     DirectX::XMFLOAT3 SunDir{};
     float PADDING_1{};
 };
@@ -127,7 +127,7 @@ static_assert(offsetof(atmosphereConstants, HR) % 4 == 0);
 static_assert(offsetof(atmosphereConstants, HM) % 4 == 0);
 static_assert(offsetof(atmosphereConstants, Rg) % 4 == 0);
 static_assert(offsetof(atmosphereConstants, Rt) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, SunIntencity) % 4 == 0);
+static_assert(offsetof(atmosphereConstants, SunIntensity) % 4 == 0);
 static_assert(offsetof(atmosphereConstants, SunDir) % 4 == 0);
 static_assert(offsetof(atmosphereConstants, PADDING_1) % 4 == 0);
 
@@ -141,7 +141,7 @@ inline bool operator!=(const atmosphereConstants& lhs, const atmosphereConstants
     if (lhs.HM           != rhs.HM) return true;
     if (lhs.Rg           != rhs.Rg) return true;
     if (lhs.Rt           != rhs.Rt) return true;
-    if (lhs.SunIntencity != rhs.SunIntencity) return true;
+    if (lhs.SunIntensity != rhs.SunIntensity) return true;
     if (not NSTool::Float3Equals(lhs.SunDir, rhs.SunDir)) return true;
 
     return false;
@@ -231,8 +231,8 @@ namespace NSRenderer
     inline constexpr BlackboardKey kRenderer_mainRTV{ "Renderer.mainRTV" };
     inline constexpr BlackboardKey kRenderer_mainDSV{ "Renderer.mainDSV" };
 
-    inline constexpr BlackboardKey kSkydome_transmitScatterSRV{ "Skydome.transmitScatterSRV" };
-    inline constexpr BlackboardKey kSkydome_constants{ "Skydome.constants" };
+    inline constexpr BlackboardKey kAtmosphere_transmitScatterSRV{ "Atmosphere.transmitScatterSRV" };
+    inline constexpr BlackboardKey kAtmosphere_constants{ "Atmosphere.constants" };
 
     inline constexpr BlackboardKey kEnvCubemap_brdfLUTsrv{ "EnvCubemap.brdfLUTsrv" };
 
@@ -429,7 +429,7 @@ namespace NSRenderer
     using FnDescFree_t = std::function<void(NSDescriptor::Handle& handle)>;
     using FnDescOffset_t = std::function<NSDescriptor::Offset(const NSDescriptor::Handle& handle, uint32_t offset)>;
     using FnConstAlloc_t = std::function<NSAllocator::Ctx(size_t size)>;
-    using FnRendererModelRegister_t = std::function<NSModel::RegisterModelKey(NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
+    using FnRendererModelRegister_t = std::function<NSModel::RegisterModelKey(std::wstring_view modelName, NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)>;
     using FnRendererModelUnload_t = std::function<void(NSModel::RegisterModelKey key)>;
 
     struct DepthStencilCreateDescription {

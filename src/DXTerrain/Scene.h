@@ -16,15 +16,16 @@ public:
 
     bool ValidateKey(NSModel::SceneModelKey sceneKey)
     {
-        assert(m_models.size() > sceneKey.index);
-
-        return m_models[sceneKey.index].m_sceneKey.id == sceneKey.id;
+        return
+            m_models.size() > sceneKey.index
+            and
+            m_models[sceneKey.index].m_sceneKey.id == sceneKey.id;
     }
     bool ValidateKeys(NSModel::SceneModelKey sceneKey, NSModel::RegisterModelKey regKey)
     {
-        assert(m_models.size() > sceneKey.index);
-
         return
+            m_models.size() > sceneKey.index
+            and
             m_models[sceneKey.index].m_sceneKey.id == sceneKey.id
             and
             m_models[sceneKey.index].m_registerKey.id == regKey.id
@@ -36,7 +37,7 @@ public:
     IWICImagingFactory2* m_wicFactory = nullptr;
 
     template<typename T> requires NSModel::IsPrimitiveMesh<T>
-    Model& AddObject(NSRenderer::Ctx rendererCtx, NSModel::PrimitiveTraits<T> desc, NSModel::AddCtx ctx)
+    Model& AddObject(NSModel::AddCtx ctx, NSModel::PrimitiveTraits<T> desc, NSRenderer::Ctx rendererCtx)
     {
         Model& model = m_models.emplace_back(Model(m_device, m_wicFactory, ctx.name));
 

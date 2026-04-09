@@ -15,7 +15,7 @@ aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node)
 {
     aiMatrix4x4 transform = node->mTransformation;
     aiNode* parent = node->mParent;
-    while (parent) 
+    while (parent)
     {
         transform = parent->mTransformation * transform;
         parent = parent->mParent;
@@ -117,7 +117,7 @@ void Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandLi
         mesh.material.UploadGPU(m_device, rendererCtx, cmdList);
     }
 
-    m_registerKey = rendererCtx.registerModel(m_sceneKey, cmdList);
+    m_registerKey = rendererCtx.registerModel(m_name, m_sceneKey, cmdList);
 
     isOnGPU = true;
 }
@@ -414,7 +414,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
         for (UINT type{}; type < AI_TEXTURE_TYPE_MAX; type++)
         {
             if (not (material->GetTextureCount(static_cast<aiTextureType>(type)) > 0)) continue;
-            
+
             aiString path;
             if (material->GetTexture(static_cast<aiTextureType>(type), 0u, &path) == aiReturn_SUCCESS)
             {
@@ -462,11 +462,11 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMo
     outMesh.indexCount = static_cast<UINT>(inIndices.size());
 
     {
-        const CD3DX12_HEAP_PROPERTIES uploadProps(D3D12_HEAP_TYPE_UPLOAD);
-        const CD3DX12_HEAP_PROPERTIES defaultProps(D3D12_HEAP_TYPE_DEFAULT);
+        const D3D12_HEAP_PROPERTIES uploadProps(D3D12_HEAP_TYPE_UPLOAD);
+        const D3D12_HEAP_PROPERTIES defaultProps(D3D12_HEAP_TYPE_DEFAULT);
 
         const size_t dataSize = outMesh.vertexCount * sizeof(NSModel::Vertex);
-        const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+        const D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
 
         ThrowIfFailed(m_device->CreateCommittedResource(
             &uploadProps,
@@ -500,11 +500,11 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMo
     }
 
     {
-        const CD3DX12_HEAP_PROPERTIES uploadProps(D3D12_HEAP_TYPE_UPLOAD);
-        const CD3DX12_HEAP_PROPERTIES defaultProps(D3D12_HEAP_TYPE_DEFAULT);
+        const D3D12_HEAP_PROPERTIES uploadProps(D3D12_HEAP_TYPE_UPLOAD);
+        const D3D12_HEAP_PROPERTIES defaultProps(D3D12_HEAP_TYPE_DEFAULT);
 
         const size_t dataSize = outMesh.indexCount * sizeof(UINT);
-        const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+        const D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
 
         ThrowIfFailed(m_device->CreateCommittedResource(
             &uploadProps,
@@ -537,6 +537,7 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMo
         outMesh.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
     }
 
+    isOnCPU = true;
     return outMesh;
 }
 

@@ -18,18 +18,20 @@ public:
     virtual void OnResize(UINT width, UINT height) = 0;
     virtual void ToggleFullScreen() = 0;
 
-    float im_aspectRatio{};
+    std::wstring im_title;
     UINT im_width{};
     UINT im_height{};
-    std::wstring im_title;
-
-    std::wstring im_executablePath;
-    std::wstring im_assetsPath;
+    RECT im_windowedRECT{};
+    bool im_isFullScreen{};
 
     constexpr static UINT ic_framesInFlight = 2u;
     constexpr static UINT ic_maxObjects = 128u;
 
+    float im_aspectRatio{};
+    std::wstring im_executablePath;
+    std::wstring im_assetsPath;
+    StepTimer m_timer;
+
 protected:
     static IApp* s_instance;
 };
-

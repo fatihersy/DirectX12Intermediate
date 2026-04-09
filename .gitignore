@@ -17,10 +17,6 @@
 # Project archives
 /archive
 
-# Makefile
-**/Makefile
-**.make
-
 compile_commands.json
 
 # Visual Studio
@@ -30,6 +26,16 @@ compile_commands.json
 **.vcxproj.user
 **.vcxproj.filters
 .qgrep
+
+# Zed
+/.zed
+
+# Makefile
+Makefile
+
+# Clangd
+/.cache
+.clangd
 
 # IDE
 /compile_commands.json

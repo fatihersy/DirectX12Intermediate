@@ -7,6 +7,8 @@
 #include "Blackboard.h"
 #include "ShaderCompiler.h"
 
+class Scene;
+
 using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)>;
 
 class Renderer
@@ -18,9 +20,9 @@ public:
     void Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height);
 
     void BeginFrame();
+    void DrawScene(Scene& scene);
     void EndFrame();
-    //void DrawScene();
-    NSModel::RegisterModelKey RegisterModel(NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList);
+    NSModel::RegisterModelKey RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList);
     void UnloadModel(NSModel::RegisterModelKey key);
 
     void Resize(UINT width, UINT height);
@@ -28,6 +30,11 @@ public:
     void OnDestroy();
 
     void Execute(FnRendererExecutionBody Record);
+
+    template<typename T, typename... Args> requires std::derived_from<T, NSRenderPass::IRenderPass>
+    NSRenderPass::IRenderPass& AddPass(Args&&... args) {
+        return *m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
+    }
 
     NSDescriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
         return m_srvHeap.AllocateRing(amount);
@@ -73,10 +80,46 @@ public:
             [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset { return this->OffsetRTV(handle, offset);          },
             [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset { return this->OffsetDSV(handle, offset);          },
             [this](size_t size)                                                        -> NSAllocator::Ctx { return this->m_constantAllocator.Allocate(size); },
-            [this](NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)-> NSModel::RegisterModelKey { return this->RegisterModel(key, cmdList);    },
-            [this](NSModel::RegisterModelKey key)                                                                   {        this->UnloadModel(key);               },
+            [this](std::wstring_view modelName, NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)-> NSModel::RegisterModelKey
+            {
+                return this->RegisterModel(modelName, key, cmdList);
+            },
+            [this](NSModel::RegisterModelKey key) { this->UnloadModel(key); },
             m_fallbackTextureSRVhandle
         );
+    }
+
+    bool TestFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    {
+        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+
+        return optRegModels->get()[key.index].TestFlag(flag);
+    }
+    void SetFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    {
+        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+
+        optRegModels->get()[key.index].SetFlag(flag);
+    }
+    void ResetFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    {
+        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+
+        optRegModels->get()[key.index].ResetFlag(flag);
+    }
+    void FlipFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    {
+        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+
+        optRegModels->get()[key.index].FlipFlag(flag);
+    }
+
+    ID3D12CommandQueue* ImGui_getCmdQueue() {
+        return m_commandQueue.Get();
     }
 private:
     IDXGIFactory7* m_factory = nullptr;
@@ -109,6 +152,8 @@ private:
 
     Blackboard m_blackboard;
 
+    std::vector<std::unique_ptr<NSRenderPass::IRenderPass>> m_passes;
+
     std::unique_ptr<ShaderCompiler> m_shaderCompiler;
 
     uint32_t m_width{};
@@ -121,5 +166,5 @@ private:
     void MoveToNextFrame();
     void WaitForGPU();
 
-    constexpr static float CLEAR_COLOR[4] = { .8f, .4f, .45f, 1.f };
+    constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
 };

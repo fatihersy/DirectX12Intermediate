@@ -98,29 +98,29 @@ public:
     void ResetUploadHeaps();
 
     template<typename T> requires NSModel::IsPrimitiveMesh<T>
-        Model&& As(NSRenderer::Ctx rendererCtx, NSModel::PrimitiveTraits<T>& desc) {
-            return _As(rendererCtx, L"self", desc.type, reinterpret_cast<void*>(desc));
-        }
+    Model&& As(NSRenderer::Ctx rendererCtx, NSModel::PrimitiveTraits<T>& desc) {
+        return _As(rendererCtx, L"self", desc.type, static_cast<void*>(std::addressof(desc)));
+    }
 
-        void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
+    void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
 
-        std::filesystem::path m_assetsPath;
-        bool isOnGPU{};
-        bool isOnCPU{};
-        NSModel::SphereCollision collision;
+    std::filesystem::path m_assetsPath;
+    bool isOnGPU{};
+    bool isOnCPU{};
+    NSModel::SphereCollision collision;
 
-        bool TestFlag(NSModel::EModelFlag flag) const {
-            return m_flags.test(static_cast<uint32_t>(flag));
-        }
-        void SetFlag(NSModel::EModelFlag flag) {
-            m_flags.set(static_cast<uint32_t>(flag));
-        }
-        void ResetFlag(NSModel::EModelFlag flag) {
-            m_flags.reset(static_cast<uint32_t>(flag));
-        }
-        void FlipFlag(NSModel::EModelFlag flag) {
-            m_flags.flip(static_cast<uint32_t>(flag));
-        }
+    bool TestFlag(NSModel::EModelFlag flag) const {
+        return m_flags.test(static_cast<uint32_t>(flag));
+    }
+    void SetFlag(NSModel::EModelFlag flag) {
+        m_flags.set(static_cast<uint32_t>(flag));
+    }
+    void ResetFlag(NSModel::EModelFlag flag) {
+        m_flags.reset(static_cast<uint32_t>(flag));
+    }
+    void FlipFlag(NSModel::EModelFlag flag) {
+        m_flags.flip(static_cast<uint32_t>(flag));
+    }
 
 private:
     IWICImagingFactory2* m_wicFactory = nullptr;
@@ -139,4 +139,3 @@ private:
 
     std::bitset<32> m_flags{};
 };
-

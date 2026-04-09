@@ -18,8 +18,16 @@ namespace RenderPass
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
-
         GraphicsPipeline m_pipeline;
+
+        static constexpr UINT IDX_ROOT_CBV_FRAME = 0u;
+        static constexpr UINT IDX_ROOT_CBV_MESH = 1u;
+        static constexpr UINT IDX_ROOT_DESC_MODEL_TEX_SRV = 2u;
+        static constexpr UINT IDX_ROOT_DESC_ENV_CUBEMAP_SRV = 3u;
+        static constexpr UINT IDX_ROOT_DESC_ENV_BRDF_LUT_SRV = 4u;
+
+        static constexpr UINT IDX_CBV_FRAME = 0u;
+        static constexpr UINT IDX_CBV_MESH = 1u;
     };
 
     class SkyDomePass : public IRenderPass

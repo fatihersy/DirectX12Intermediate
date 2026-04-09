@@ -10,6 +10,10 @@ namespace NSScene
             SetCamera(fEye, fFwd, fUp);
             projMatrix = proj;
         }
+        Camera(DirectX::XMFLOAT3 fEye, DirectX::XMFLOAT4 fFwd, DirectX::XMFLOAT4 fUp)
+        {
+            SetCamera(fEye, fFwd, fUp);
+        }
 
         DirectX::XMMATRIX viewMatrix{};
         DirectX::XMMATRIX projMatrix{};
@@ -58,5 +62,3 @@ namespace NSScene
         DirectX::XMVECTOR Planes[6]{};
     };
 }
-
-

@@ -102,18 +102,94 @@ def MakefileBuild(conf, arch=None):
     subprocess.run((make, f"config={conf.lower()}", "all"), env=env)
 
     # Generate compile_commands.json for IDE integration (Zed, clangd, etc.)
+    # Parse make's dry-run output to extract clang++ compile commands directly.
+    # This avoids depending on compiledb which doesn't recognize clang++.
+    # We also inject MSVC/SDK -isystem paths so clangd can find headers
+    # without needing the vcvarsall.bat environment.
     try:
         print("Generating compile_commands.json...")
-        result = subprocess.run(
-            (sys.executable, "-m", "compiledb", "-n", "-o", "compile_commands.json",
-             make, f"config={conf.lower()}", "all"),
-            env=env,
-            capture_output=True,
-        )
-        if result.returncode == 0 and os.path.isfile("compile_commands.json"):
-            print("compile_commands.json generated in project root.")
+        import json, re
+
+        # Build -isystem flags from the INCLUDE environment variable set by
+        # vcvarsall.bat so clangd can find Windows SDK and MSVC STL headers.
+        system_include_flags = ""
+        if env and "INCLUDE" in env:
+            for inc_dir in env["INCLUDE"].split(";"):
+                inc_dir = inc_dir.strip()
+                if inc_dir and os.path.isdir(inc_dir):
+                    system_include_flags += f' -isystem "{inc_dir}"'
+
+        # Run dry-run per sub-project so we know each command's working directory.
+        # The top-level Makefile calls sub-makes with -C src/{Project}.
+        project_root = os.getcwd()
+        entries = []
+
+        # Find project subdirectories from the top-level Makefile
+        top_makefile = os.path.join(project_root, "Makefile")
+        project_dirs = []
+        if os.path.isfile(top_makefile):
+            with open(top_makefile, "r") as f:
+                for mline in f:
+                    # Match: @${MAKE} ... -C src/DXMaterial -f Makefile ...
+                    m = re.search(r'-C\s+(\S+)\s+-f\s+Makefile', mline)
+                    if m:
+                        project_dirs.append(m.group(1))
+
+        if not project_dirs:
+            # Fallback: run from project root
+            project_dirs = ["."]
+
+        for proj_dir in project_dirs:
+            abs_proj_dir = os.path.normpath(os.path.join(project_root, proj_dir))
+            dry_run = subprocess.run(
+                (make, "-Bn", f"config={conf.lower()}"),
+                env=env,
+                capture_output=True,
+                text=True,
+                cwd=abs_proj_dir,
+            )
+            if dry_run.returncode != 0:
+                continue
+
+            for line in dry_run.stdout.splitlines():
+                # Match clang/clang++/gcc/g++ compile commands with -c flag
+                if re.search(r'\b(clang\+\+|clang|g\+\+|gcc|cc|c\+\+)\b', line) \
+                        and ' -c ' in line:
+                    # Extract the source file (after -c)
+                    src_match = re.search(r'-c\s+"([^"]+)"', line) or \
+                                re.search(r'-c\s+(\S+)', line)
+                    if src_match:
+                        src = src_match.group(1)
+                        cmd = line.strip()
+
+                        # Fix PCH placeholder path for clangd.
+                        # Premake gmake uses -include <objdir>/stdafx.h
+                        # where the file is an empty placeholder. Replace
+                        # with just the header name so clangd processes the
+                        # real header from the source directory.
+                        def fix_pch_path(m):
+                            path = m.group(2).replace('\\', '/')
+                            if '/obj/' in path:
+                                return m.group(1) + path.rsplit('/', 1)[-1]
+                            return m.group(0)
+                        cmd = re.sub(r'(-include\s+)(\S+)', fix_pch_path, cmd)
+
+                        # Inject MSVC/SDK include paths so clangd works
+                        # without vcvarsall.bat environment
+                        if system_include_flags:
+                            cmd += system_include_flags
+                        entries.append({
+                            "directory": abs_proj_dir.replace("\\", "/"),
+                            "command": cmd,
+                            "file": src,
+                        })
+
+        with open("compile_commands.json", "w") as f:
+            json.dump(entries, f, indent=2)
+        if entries:
+            print(f"compile_commands.json generated with {len(entries)} entries.")
         else:
-            print("Warning: Could not generate compile_commands.json.")
+            print("Warning: compile_commands.json generated but no compile commands found.")
     except Exception as e:
         print(f"Warning: compile_commands.json generation skipped: {e}")
 

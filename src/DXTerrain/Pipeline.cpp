@@ -37,12 +37,13 @@ void MakeRootSignature(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSi
 }
 
 IPipeline::IPipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature)
+    : im_device(device), im_name(name)
 {
     im_rootSignature = rootSignature;
-    im_name = name;
 }
 
 IPipeline::IPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature)
+    : im_device(device), im_name(name)
 {
     MakeRootSignature(
         device,

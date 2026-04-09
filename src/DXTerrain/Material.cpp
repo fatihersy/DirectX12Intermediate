@@ -127,9 +127,9 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
 
 void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
-    assert(device and m_isOnCPU);
+    assert(device);
 
-    if (m_textures.empty()) return;
+    if (m_textures.empty() or not m_isOnCPU) return;
 
     std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
     {

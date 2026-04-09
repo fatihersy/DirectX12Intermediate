@@ -6,6 +6,12 @@
 #include "DXSampleHelper.h"
 #include "Platform.h"
 
+#include "imgui.h"
+#include "imgui_impl_dx12.h"
+
+#include "RenderPass.h"
+#include "Model.h"
+
 IApp* IApp::s_instance = nullptr;
 
 Platform plat;
@@ -13,6 +19,9 @@ Platform plat;
 app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow) : IApp(width, height, title)
 {
     s_instance = this;
+
+    im_windowedRECT = { 0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height)};
+    im_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
     plat = Platform(SWindow{
         .hInstance = hInstance,
@@ -24,23 +33,48 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
         .title = title
     });
 
-    im_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
     im_assetsPath = std::filesystem::current_path().generic_wstring().append(L"\\");
-
-    ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
-    ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory)));
 
     WCHAR executablePath[512];
     GetExecutablePath(executablePath, _countof(executablePath));
     im_executablePath = executablePath;
+
+    ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+    ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory)));
+
+    m_keyboard = std::make_unique<DirectX::Keyboard>();
+    m_mouse = std::make_unique<DirectX::Mouse>();
+    m_mouse->SetWindow(plat.GetWindow());
 }
 app::~app()
 {
-
+    s_instance = nullptr;
 }
 void app::OnDestroy()
 {
+    //ImGui_ImplDX12_Shutdown();
+    //ImGui::DestroyContext();
+    m_imGuiSrvHeap.Reset();
+
     m_renderer.OnDestroy();
+
+    if(m_mouse.release()) {}
+    m_mouse.reset();
+    if(m_keyboard.release()) {}
+    m_keyboard.reset();
+
+    m_renderer.OnDestroy();
+
+    m_wicFactory.Reset();
+    m_factory.Reset();
+    m_device.Reset();
+
+    ComPtr<IDXGIDebug1> dxgiDebug;
+    if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+    {
+        dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_DETAIL);
+    }
+    dxgiDebug.Reset();
 };
 
 void app::Run()
@@ -52,27 +86,6 @@ void app::Run()
         plat.Dispatch(msg);
     }
 }
-
-void app::OnInit()
-{
-    LoadPipeline();
-    LoadAssets();
-
-    plat.ShowWindow();
-};
-void app::OnUpdate()
-{
-
-};
-void app::OnRender()
-{
-    m_renderer.BeginFrame();
-
-    m_renderer.EndFrame();
-};
-void app::OnResize(UINT width, UINT height) {};
-void app::ToggleFullScreen() {};
-
 void app::LoadPipeline()
 {
     UINT dxgiFactoryFlags{};
@@ -134,5 +147,300 @@ void app::LoadPipeline()
 }
 void app::LoadAssets()
 {
+    m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
+    {
+        m_scene = Scene(m_device.Get(), m_wicFactory.Get(),
+            NSScene::Camera(
+                {0.f, 0.f, 0.f},
+                {0.f, 0.f,-1.f, 0.f},
+                {0.f, 1.f, 0.f, 0.f}
+            ),
+            12.f
+        );
 
+        Model& skyDome = m_scene.AddObject<NSModel::SDome>
+        (
+            NSModel::AddCtx { .name = L"SkyDome" },
+            NSModel::SDome {
+                .radius = 10000.f,
+                .sliceCount = 64,
+                .stackCount = 32
+            },
+            ctx
+        );
+
+        skyDome.m_sceneKey.id = this->m_nextModelId++;
+        skyDome.m_sceneKey.index = 0u;
+        skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP);
+
+        skyDome.UploadGPU(ctx, cmdList);
+        assert(m_scene.ValidateKeys(skyDome.m_sceneKey, skyDome.m_registerKey));
+        m_renderer.SetFlagForRegModel(m_scene, skyDome.m_registerKey, NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE);
+
+        {
+            const float stride = 11.f;
+            const float gridStartPosX = 5.f * stride / -2.f;
+            const float gridStartPosY = 5.f * stride / -2.f;
+
+            int32_t idx{1};
+            for (int32_t itr{}; itr < 36; itr++)
+            {
+                const int32_t col = itr % 6;
+                const int32_t row = itr / 6;
+                const float metallic = col * .2f;
+                const float roughness = row * .2f;
+                const float posX = -col * stride - gridStartPosX;
+                const float posY = row * stride + gridStartPosY;
+
+                NSModel::PrimitiveTraits<NSModel::SSphere> desc({
+                    .radius = 5.f,
+                    .sliceCount = 20,
+                    .stackCount = 20
+                });
+
+                Model& model = m_scene.AddObject<NSModel::SSphere>
+                (
+                    NSModel::AddCtx {
+                        .name = NSTool::wformat(L"Sphere%d", idx).c_str(),
+                        .position = { posX, posY, 0.f },
+                        .metallic = metallic,
+                        .roughness = roughness
+                    },
+                    desc,
+                    ctx
+                );
+                model.m_sceneKey.id = this->m_nextModelId++;
+                model.m_sceneKey.index = idx;
+
+                model.collision.radius = desc.desc.radius;
+                model.collision.sliceCount = desc.desc.sliceCount;
+                model.collision.stackCount = desc.desc.stackCount;
+                idx++;
+            }
+        }
+
+        for (size_t itr = 1u; itr < m_scene.m_models.size(); itr++)
+        {
+            Model& model = m_scene.m_models[itr];
+
+            assert(model.m_sceneKey.index == itr);
+
+            model.UploadGPU(ctx, cmdList);
+        }
+    });
+}
+void app::OnInit()
+{
+    LoadPipeline();
+    LoadAssets();
+
+    // ImGui Init
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+        ImGui_ImplDX12_InitInfo initInfo{};
+        initInfo.UserData = s_instance;
+        initInfo.Device = m_device.Get();
+        initInfo.CommandQueue = m_renderer.ImGui_getCmdQueue();
+        initInfo.NumFramesInFlight = IApp::ic_framesInFlight;
+        initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+        D3D12_DESCRIPTOR_HEAP_DESC desc{};
+        desc.NumDescriptors = 100u;
+        desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_imGuiSrvHeap)));
+        m_imGuiSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        m_imGuiSrvHeap->SetName(L"app::im_imGuiSrvHeap");
+
+        for (UINT i{}; i < desc.NumDescriptors; i++) m_freeImGuiSRVIndices.push_back(i);
+
+        initInfo.SrvDescriptorHeap = m_imGuiSrvHeap.Get();
+        initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc_handle)
+        {
+            app* userData = static_cast<app*>(info->UserData);
+            if (userData->m_freeImGuiSRVIndices.empty())
+            {
+                OutputDebugStringA("No free SRV descriptors available\n");
+                *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                return;
+            }
+
+            INT idx = userData->m_freeImGuiSRVIndices.back();
+            userData->m_freeImGuiSRVIndices.pop_back();
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+            *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
+
+            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+            *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
+        };
+        initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
+        {
+            app* userData = static_cast<app*>(info->UserData);
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+            ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
+            if (offset % userData->m_imGuiSrvDescriptorSize != 0 || offset < 0)
+            {
+                OutputDebugStringA("Invalid SRV descriptor handle to free!\n");
+                return;
+            }
+
+            INT idx = static_cast<INT>(offset / userData->m_imGuiSrvDescriptorSize);
+            if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
+            {
+                OutputDebugStringA("SRV descriptor index out of bounds!\n");
+                return;
+            }
+
+            userData->m_freeImGuiSRVIndices.push_back(idx);
+        };
+        ImGui_ImplDX12_Init(&initInfo);
+    }
+
+    plat.ShowWindow();
+
+    m_keyboardTracker.Reset();
+};
+void app::OnUpdate()
+{
+    m_timer.Tick(NULL);
+
+    ImGui_ImplDX12_NewFrame();
+    ImGui::NewFrame();
+
+    app::UpdateKeyBindings();
+    app::UpdateMouseBindings();
+
+    m_scene.OnUpdate();
+};
+void app::OnRender()
+{
+    m_renderer.BeginFrame();
+
+    m_renderer.DrawScene(m_scene);
+
+    m_renderer.EndFrame();
+};
+void app::OnResize(UINT width, UINT height)
+{
+    if (width == 0 or height == 0 or (width == im_width and height == im_height)) return;
+
+    im_width = width;
+    im_height = height;
+    im_aspectRatio = static_cast<FLOAT>(im_width) / static_cast<FLOAT>(im_height);
+
+    m_renderer.Resize(im_width, im_height);
+
+    m_scene.m_camera.projMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, im_aspectRatio, m_scene.NEAR_CLIP, m_scene.FAR_CLIP);
+};
+void app::ToggleFullScreen()
+{
+    im_isFullScreen = not im_isFullScreen;
+
+    MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
+    GetMonitorInfo(MonitorFromWindow(plat.GetWindow(), MONITOR_DEFAULTTOPRIMARY), &monitorInfo);
+    const UINT monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+    const UINT monitorHeight = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
+    const UINT monitorLeft = monitorInfo.rcMonitor.left;
+    const UINT monitorTop = monitorInfo.rcMonitor.top;
+
+    if (im_isFullScreen)
+    {
+        SetWindowLong(plat.GetWindow(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(plat.GetWindow(), HWND_TOP, monitorLeft, monitorTop, monitorWidth, monitorHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+        OnResize(monitorWidth, monitorHeight);
+        return;
+    }
+
+    const UINT windowWidth = im_windowedRECT.right - im_windowedRECT.left;
+    const UINT windowHeight = im_windowedRECT.bottom - im_windowedRECT.top;
+
+    const UINT windowLeft = monitorLeft + static_cast<UINT>(monitorWidth / 2.f) - static_cast<UINT>(windowWidth / 2.f);
+    const UINT windowTop = monitorTop + static_cast<UINT>(monitorHeight / 2.f) - static_cast<UINT>(windowHeight / 2.f);
+
+    SetWindowLong(plat.GetWindow(), GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+    SetWindowPos(plat.GetWindow(), HWND_TOP, monitorLeft, monitorTop, monitorWidth, monitorHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+    OnResize(monitorWidth, monitorHeight);
+};
+
+void app::UpdateKeyBindings()
+{
+    auto kbState = m_keyboard->GetState();
+    m_keyboardTracker.Update(kbState);
+
+    if (kbState.Escape) {
+        m_mouse->SetMode(DirectX::Mouse::MODE_ABSOLUTE);
+    }
+
+    if (kbState.End) {
+        PostMessage(plat.GetWindow(), WM_CLOSE, 0, 0);
+    }
+
+    if (kbState.Insert)
+    {
+        if (m_mouse->GetState().positionMode == DirectX::Mouse::MODE_RELATIVE)
+        {
+            m_mouse->SetMode(DirectX::Mouse::MODE_ABSOLUTE);
+        }
+        else  m_mouse->SetMode(DirectX::Mouse::MODE_RELATIVE);
+    }
+
+    // Camera Movement
+    {
+        DirectX::XMVECTOR move = DirectX::XMVectorZero();
+
+        if (kbState.W) {
+            move = DirectX::XMVectorAdd(move, m_scene.m_camera.camFwd);
+        }
+        if (kbState.S) {
+            move = DirectX::XMVectorSubtract(move, m_scene.m_camera.camFwd);
+        }
+        if (kbState.A) {
+            auto left = DirectX::XMVector3Cross(m_scene.m_camera.camFwd, m_scene.m_camera.camUp);
+            left = DirectX::XMVector3Normalize(left);
+            move = DirectX::XMVectorAdd(move, left);
+        }
+        if (kbState.D) {
+            auto right = DirectX::XMVector3Cross(m_scene.m_camera.camUp, m_scene.m_camera.camFwd);
+            right = DirectX::XMVector3Normalize(right);
+            move = DirectX::XMVectorAdd(move, right);
+        }
+        if (kbState.Q) {
+            move = DirectX::XMVectorAdd(move, m_scene.m_camera.camUp);
+        }
+        if (kbState.E) {
+            move = DirectX::XMVectorSubtract(move, m_scene.m_camera.camUp);
+        }
+
+        if (DirectX::XMVector3Greater(DirectX::XMVector3LengthSq(move), DirectX::g_XMEpsilon)) {
+            move = DirectX::XMVector3Normalize(move);
+            move = DirectX::XMVectorScale(move, m_scene.m_camera.camSpeed * static_cast<FLOAT>(m_timer.GetElapsedSeconds()));
+            m_scene.m_camera.camEye = DirectX::XMVectorAdd(m_scene.m_camera.camEye, move);
+        }
+    }
+}
+void app::UpdateMouseBindings()
+{
+    auto mouseState = m_mouse->GetState();
+
+    if (mouseState.positionMode == DirectX::Mouse::MODE_RELATIVE) {
+        FLOAT dx = static_cast<FLOAT>(mouseState.x) * m_scene.m_camera.lookSensitivity;
+        FLOAT dy = static_cast<FLOAT>(mouseState.y) * m_scene.m_camera.lookSensitivity;
+
+        m_scene.m_camera.camYaw += dx;
+        m_scene.m_camera.camPitch -= dy;
+
+        m_scene.m_camera.camPitch = std::clamp(m_scene.m_camera.camPitch, -89.f, 89.f);
+
+        m_mouse->ResetScrollWheelValue();
+    }
 }
