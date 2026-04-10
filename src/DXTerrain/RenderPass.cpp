@@ -121,7 +121,9 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
 void GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {}
 void GeometryPass::OnDestroy()
-{};
+{
+    m_pipeline.Reset();
+};
 GeometryPass::~GeometryPass()
 {}
 
@@ -178,7 +180,7 @@ void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx
         sceneModel.Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
         {
             NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(meshConstants));
-            meshConstants meshCB = allocCtx.As<meshConstants>();
+            meshConstants& meshCB = allocCtx.As<meshConstants>();
 
             DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
             DirectX::XMVECTOR det;
@@ -415,7 +417,14 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
 void AtmospherePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {}
 void AtmospherePass::OnDestroy()
-{};
+{
+    m_transmittanceLUT.Reset();
+    m_scatteringLUT.Reset();
+    m_rootSignature.Reset();
+    m_graphics.Reset();
+    m_transmittance.Reset();
+    m_scattering.Reset();
+};
 AtmospherePass::~AtmospherePass()
 {};
 void AtmospherePass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
@@ -800,10 +809,14 @@ void EnvironmentCubemapPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rend
 }
 void EnvironmentCubemapPass::OnDestroy()
 {
+    m_brdfLUT.Reset();
     m_graphicsRoot.Reset();
     m_prefilterRoot.Reset();
     m_brdfRoot.Reset();
-    m_brdfLUT.Reset();
+    m_atmosPipeline.Reset();
+    m_geomPipeline.Reset();
+    m_prefilterPipeline.Reset();
+    m_brdfPipeline.Reset();
 }
 void EnvironmentCubemapPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
@@ -946,7 +959,7 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
                 sceneModel.Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
                 {
                     NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(meshConstants));
-                    meshConstants meshCB = allocCtx.As<meshConstants>();
+                    meshConstants& meshCB = allocCtx.As<meshConstants>();
                     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
 
                     DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);

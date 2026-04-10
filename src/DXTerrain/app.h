@@ -40,9 +40,4 @@ private:
     std::unique_ptr<DirectX::Keyboard> m_keyboard;
     std::unique_ptr<DirectX::Mouse> m_mouse;
     DirectX::Keyboard::KeyboardStateTracker m_keyboardTracker;
-
-    //ImGui
-    ComPtr<ID3D12DescriptorHeap> m_imGuiSrvHeap;
-    std::vector<INT> m_freeImGuiSRVIndices;
-    UINT m_imGuiSrvDescriptorSize{};
 };

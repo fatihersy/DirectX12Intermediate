@@ -1,6 +1,9 @@
 #include "stdafx.h"
 #include "Renderer.h"
 
+#include "imgui.h"
+#include "imgui_impl_dx12.h"
+
 #include "DXSampleHelper.h"
 #include "RenderPass.h"
 
@@ -80,6 +83,76 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
         }
     }
 
+    // ImGui Init
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+        ImGui_ImplDX12_InitInfo initInfo{};
+        initInfo.UserData = this;
+        initInfo.Device = m_device;
+        initInfo.CommandQueue = m_commandQueue.Get();
+        initInfo.NumFramesInFlight = IApp::ic_framesInFlight;
+        initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+        D3D12_DESCRIPTOR_HEAP_DESC desc{};
+        desc.NumDescriptors = 100u;
+        desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_imGuiSrvHeap)));
+        m_imGuiSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        m_imGuiSrvHeap->SetName(L"app::im_imGuiSrvHeap");
+
+        for (UINT i{}; i < desc.NumDescriptors; i++) m_freeImGuiSRVIndices.push_back(i);
+
+        initInfo.SrvDescriptorHeap = m_imGuiSrvHeap.Get();
+        initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc_handle)
+        {
+            Renderer* userData = static_cast<Renderer*>(info->UserData);
+            if (userData->m_freeImGuiSRVIndices.empty())
+            {
+                OutputDebugStringA("No free SRV descriptors available\n");
+                *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                return;
+            }
+
+            INT idx = userData->m_freeImGuiSRVIndices.back();
+            userData->m_freeImGuiSRVIndices.pop_back();
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+            *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
+
+            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+            *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
+        };
+        initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
+        {
+            Renderer* userData = static_cast<Renderer*>(info->UserData);
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+            ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
+            if (offset % userData->m_imGuiSrvDescriptorSize != 0 || offset < 0)
+            {
+                OutputDebugStringA("Invalid SRV descriptor handle to free!\n");
+                return;
+            }
+
+            INT idx = static_cast<INT>(offset / userData->m_imGuiSrvDescriptorSize);
+            if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
+            {
+                OutputDebugStringA("SRV descriptor index out of bounds!\n");
+                return;
+            }
+
+            userData->m_freeImGuiSRVIndices.push_back(idx);
+        };
+        ImGui_ImplDX12_Init(&initInfo);
+    }
+
     CreateFallbackTexture();
 
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, width);
@@ -105,8 +178,71 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
     });
 }
 
-Renderer::~Renderer(){}
-void Renderer::OnDestroy(){}
+Renderer::~Renderer()
+{
+    ImGui_ImplDX12_Shutdown();
+    ImGui::DestroyContext();
+    m_imGuiSrvHeap.Reset();
+}
+void Renderer::OnDestroy()
+{
+    WaitForGPU();
+
+    // Destroy render passes first (they reference heaps/device)
+    for (auto& pass : m_passes) pass->OnDestroy();
+    m_passes.clear();
+
+    // Unload registered models (cubemap textures, depth, descriptors)
+    auto modelsOpt = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+    if (modelsOpt.has_value())
+    {
+        auto& models = modelsOpt->get();
+        for (size_t i = 0; i < models.size(); i++)
+        {
+            NSRenderer::Model& model = models[i];
+            model.m_envCubemap.cubemapDepth.Reset();
+            model.m_envCubemap.cubemapTexture.Reset();
+            FreeSRVStatic(model.m_envCubemap.srvHandle);
+            FreeSRVStatic(model.m_envCubemap.uavHandle);
+            FreeRTVStatic(model.m_envCubemap.rtvHandle);
+            FreeDSVStatic(model.m_envCubemap.dsvHandle);
+        }
+        models.clear();
+    }
+
+    // Release fallback texture
+    FreeSRVStatic(m_fallbackTextureSRVhandle);
+    m_fallbackTexture.defaultBuffer.Reset();
+    m_fallbackTexture.uploadBuffer.Reset();
+
+    // Release render targets and depth stencil
+    for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
+    {
+        m_renderTargets[i].Reset();
+    }
+    m_depthStencil.Reset();
+
+    // Release swap chain
+    m_swapChain.Reset();
+
+    // Release command objects
+    m_commandList.Reset();
+    for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
+    {
+        m_commandAllocators[i].Reset();
+    }
+    m_commandQueue.Reset();
+
+    // Release fence
+    m_fence.Reset();
+    if (m_fenceEvent)
+    {
+        CloseHandle(m_fenceEvent);
+        m_fenceEvent = nullptr;
+    }
+
+    m_shaderCompiler.reset();
+}
 
 void Renderer::CreateSwapChain(HWND hwnd, UINT width, UINT height)
 {
@@ -307,6 +443,8 @@ void Renderer::WaitForGPU()
 
 void Renderer::BeginFrame()
 {
+    ImGui_ImplDX12_NewFrame();
+    ImGui::NewFrame();
 
     UINT frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
@@ -355,9 +493,14 @@ void Renderer::DrawScene(Scene& scene)
     {
         pass->Execute(scene, m_blackboard, rendererCtx, cmdList);
     }
+
+    ImGui::ShowDemoWindow();
 }
 void Renderer::EndFrame()
 {
+    ImGui::Render();
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+
     {
         CD3DX12_RESOURCE_BARRIER barriers[] =
         {
@@ -564,7 +707,7 @@ void Renderer::UnloadModel(NSModel::RegisterModelKey key)
     FreeSRVStatic(model.m_envCubemap.srvHandle);
     FreeSRVStatic(model.m_envCubemap.uavHandle);
     FreeRTVStatic(model.m_envCubemap.rtvHandle);
-    FreeSRVStatic(model.m_envCubemap.dsvHandle);
+    FreeDSVStatic(model.m_envCubemap.dsvHandle);
 }
 
 void Renderer::Resize(UINT width, UINT height)

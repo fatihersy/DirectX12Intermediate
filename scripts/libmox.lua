@@ -279,6 +279,7 @@ function mox_project(name, output_name, target_subdir)
                             "-Xlinker /NODEFAULTLIB:libcmtd",
                             "-Xlinker /NODEFAULTLIB:libcpmtd",
                             "-Xlinker /NODEFAULTLIB:libucrtd",
+                            "-Xlinker /DEBUG:FULL",
                         }
                     else
                         defines { "_DLL", "_MT" }
@@ -292,6 +293,12 @@ function mox_project(name, output_name, target_subdir)
                             "-Xlinker /NODEFAULTLIB:libcmt",
                             "-Xlinker /NODEFAULTLIB:libcpmt",
                             "-Xlinker /NODEFAULTLIB:libucrt",
+                        }
+                    end
+                    -- Emit PDB for debug configs (needed by CodeLLDB/LLDB)
+                    if is_debug then
+                        linkoptions {
+                            "-Xlinker /DEBUG:FULL",
                         }
                     end
                 filter {}

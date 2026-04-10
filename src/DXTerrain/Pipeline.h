@@ -28,6 +28,12 @@ public:
     IPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature);
     ~IPipeline();
 
+    void Reset()
+    {
+        im_pipeline.Reset();
+        im_rootSignature.Reset();
+    }
+
 protected:
     ID3D12Device14* im_device = nullptr;
     ComPtr<ID3D12PipelineState> im_pipeline;

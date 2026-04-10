@@ -6,9 +6,6 @@
 #include "DXSampleHelper.h"
 #include "Platform.h"
 
-#include "imgui.h"
-#include "imgui_impl_dx12.h"
-
 #include "RenderPass.h"
 #include "Model.h"
 
@@ -52,18 +49,13 @@ app::~app()
 }
 void app::OnDestroy()
 {
-    //ImGui_ImplDX12_Shutdown();
-    //ImGui::DestroyContext();
-    m_imGuiSrvHeap.Reset();
-
+    m_scene.OnDestroy(m_renderer.GetCtx());
     m_renderer.OnDestroy();
 
     if(m_mouse.release()) {}
     m_mouse.reset();
     if(m_keyboard.release()) {}
     m_keyboard.reset();
-
-    m_renderer.OnDestroy();
 
     m_wicFactory.Reset();
     m_factory.Reset();
@@ -151,7 +143,7 @@ void app::LoadAssets()
     {
         m_scene = Scene(m_device.Get(), m_wicFactory.Get(),
             NSScene::Camera(
-                {0.f, 0.f, 0.f},
+                {0.f, 0.f, 100.f},
                 {0.f, 0.f,-1.f, 0.f},
                 {0.f, 1.f, 0.f, 0.f}
             ),
@@ -234,76 +226,6 @@ void app::OnInit()
     LoadPipeline();
     LoadAssets();
 
-    // ImGui Init
-    {
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGuiIO& io = ImGui::GetIO();
-        //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-        ImGui_ImplDX12_InitInfo initInfo{};
-        initInfo.UserData = s_instance;
-        initInfo.Device = m_device.Get();
-        initInfo.CommandQueue = m_renderer.ImGui_getCmdQueue();
-        initInfo.NumFramesInFlight = IApp::ic_framesInFlight;
-        initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-        initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-
-        D3D12_DESCRIPTOR_HEAP_DESC desc{};
-        desc.NumDescriptors = 100u;
-        desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_imGuiSrvHeap)));
-        m_imGuiSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        m_imGuiSrvHeap->SetName(L"app::im_imGuiSrvHeap");
-
-        for (UINT i{}; i < desc.NumDescriptors; i++) m_freeImGuiSRVIndices.push_back(i);
-
-        initInfo.SrvDescriptorHeap = m_imGuiSrvHeap.Get();
-        initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc_handle)
-        {
-            app* userData = static_cast<app*>(info->UserData);
-            if (userData->m_freeImGuiSRVIndices.empty())
-            {
-                OutputDebugStringA("No free SRV descriptors available\n");
-                *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
-                *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
-                return;
-            }
-
-            INT idx = userData->m_freeImGuiSRVIndices.back();
-            userData->m_freeImGuiSRVIndices.pop_back();
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-            *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
-
-            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-            *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
-        };
-        initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
-        {
-            app* userData = static_cast<app*>(info->UserData);
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-            ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
-            if (offset % userData->m_imGuiSrvDescriptorSize != 0 || offset < 0)
-            {
-                OutputDebugStringA("Invalid SRV descriptor handle to free!\n");
-                return;
-            }
-
-            INT idx = static_cast<INT>(offset / userData->m_imGuiSrvDescriptorSize);
-            if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
-            {
-                OutputDebugStringA("SRV descriptor index out of bounds!\n");
-                return;
-            }
-
-            userData->m_freeImGuiSRVIndices.push_back(idx);
-        };
-        ImGui_ImplDX12_Init(&initInfo);
-    }
-
     plat.ShowWindow();
 
     m_keyboardTracker.Reset();
@@ -311,9 +233,6 @@ void app::OnInit()
 void app::OnUpdate()
 {
     m_timer.Tick(NULL);
-
-    ImGui_ImplDX12_NewFrame();
-    ImGui::NewFrame();
 
     app::UpdateKeyBindings();
     app::UpdateMouseBindings();

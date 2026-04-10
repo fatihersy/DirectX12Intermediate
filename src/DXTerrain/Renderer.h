@@ -117,10 +117,6 @@ public:
 
         optRegModels->get()[key.index].FlipFlag(flag);
     }
-
-    ID3D12CommandQueue* ImGui_getCmdQueue() {
-        return m_commandQueue.Get();
-    }
 private:
     IDXGIFactory7* m_factory = nullptr;
     ID3D12Device14* m_device = nullptr;
@@ -167,4 +163,9 @@ private:
     void WaitForGPU();
 
     constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
+
+    //ImGui
+    ComPtr<ID3D12DescriptorHeap> m_imGuiSrvHeap;
+    std::vector<INT> m_freeImGuiSRVIndices;
+    UINT m_imGuiSrvDescriptorSize{};
 };
