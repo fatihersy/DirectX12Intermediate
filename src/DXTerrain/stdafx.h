@@ -36,6 +36,9 @@
 template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
 
+template<typename T>
+using OptRef = std::optional<std::reference_wrapper<T>>;
+
 constexpr std::wstring_view PROJECT_NAME = L"DXTerrain";
 
 #include "StepTimer.h"

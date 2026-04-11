@@ -71,6 +71,8 @@ public:
 
     void CullScene(const NSScene::Camera* camOverride = nullptr, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey());
 
+    void ForEachModel(std::function<void(Model& model)> ForEach);
+
     std::vector<Model> m_models;
     std::vector<NSModel::SceneModelKey> m_modelsCulled;
     NSScene::Camera m_camera;

@@ -125,7 +125,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
     return S_OK;
 }
 
-void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition)
 {
     assert(device);
 
@@ -135,6 +135,23 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
     {
         assert(tex.defaultBuffer and tex.uploadBuffer);
     });
+
+    if (barrierTransition)
+    {
+        std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
+        barriers.reserve(m_textures.size());
+
+        for (NSTexture::Texture& tex : m_textures)
+        {
+            barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                tex.defaultBuffer.Get(),
+                D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_COPY_DEST
+            ));
+        }
+
+        cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    }
 
     m_srvHandle = rendererCtx.allocSRVStatic(static_cast<INT>(NSTexture::EType::EType_MAX));
 
@@ -154,20 +171,6 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         nullptr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
     );
-
-    std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
-
-    for (NSTexture::Texture& tex : m_textures)
-    {
-        barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-            tex.defaultBuffer.Get(),
-            D3D12_RESOURCE_STATE_COMMON,
-            D3D12_RESOURCE_STATE_COPY_DEST
-        ));
-    }
-
-    cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
-    barriers.clear();
 
     uint32_t texIndex{};
     for (NSTexture::Texture& tex : m_textures)
@@ -189,12 +192,6 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
 
         cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 
-        barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-            tex.defaultBuffer.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-        ));
-
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -205,7 +202,20 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         texIndex++;
     }
 
-    if (not barriers.empty()) {
+    if (barrierTransition)
+    {
+        std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
+        barriers.reserve(m_textures.size());
+
+        for (NSTexture::Texture& tex : m_textures)
+        {
+            barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                tex.defaultBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+            ));
+        }
+
         cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     }
 

@@ -166,8 +166,7 @@ void app::LoadAssets()
         skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP);
 
         skyDome.UploadGPU(ctx, cmdList);
-        assert(m_scene.ValidateKeys(skyDome.m_sceneKey, skyDome.m_registerKey));
-        m_renderer.SetFlagForRegModel(m_scene, skyDome.m_registerKey, NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE);
+        skyDome.m_registerKey = ctx.registerModel(skyDome.m_name, skyDome.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE).registerKey;
 
         {
             const float stride = 11.f;
@@ -211,14 +210,78 @@ void app::LoadAssets()
             }
         }
 
+        m_scene.ForEachModel([&ctx, &skyDome](Model& model)
+        {
+            if (model.m_sceneKey.id == skyDome.m_sceneKey.id) return;
+
+            model.ForEach([model, &ctx](Mesh& mesh, UINT meshIndex)
+            {
+                // Pre upload
+                {
+                    ctx.barrierBatch.get().Add(NSBarrier::kApp_beginModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
+                        mesh.defaultVertexBuffer.Get(),
+                        D3D12_RESOURCE_STATE_COMMON,
+                        D3D12_RESOURCE_STATE_COPY_DEST
+                    ));
+                    ctx.barrierBatch.get().Add(NSBarrier::kApp_beginModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
+                        mesh.defaultIndexBuffer.Get(),
+                        D3D12_RESOURCE_STATE_COMMON,
+                        D3D12_RESOURCE_STATE_COPY_DEST
+                    ));
+                    for (NSTexture::Texture& tex : mesh.material.m_textures)
+                    {
+                        ctx.barrierBatch.get().Add(NSBarrier::kApp_beginModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
+                            tex.defaultBuffer.Get(),
+                            D3D12_RESOURCE_STATE_COMMON,
+                            D3D12_RESOURCE_STATE_COPY_DEST
+                        ));
+                    }
+                }
+        
+                // Post upload
+                {
+                    ctx.barrierBatch.get().Add(NSBarrier::kApp_endModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
+                        mesh.defaultVertexBuffer.Get(),
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
+                    ));
+                    ctx.barrierBatch.get().Add(NSBarrier::kApp_endModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
+                        mesh.defaultIndexBuffer.Get(),
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_INDEX_BUFFER
+                    ));
+                    for (NSTexture::Texture& tex : mesh.material.m_textures)
+                    {
+                        ctx.barrierBatch.get().Add(NSBarrier::kApp_endModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
+                            tex.defaultBuffer.Get(),
+                            D3D12_RESOURCE_STATE_COPY_DEST,
+                            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+                        ));
+                    }
+                }
+            });
+        });
+
+        assert(ctx.barrierBatch.get().Execute(NSBarrier::kApp_beginModelLoad, cmdList));
+
         for (size_t itr = 1u; itr < m_scene.m_models.size(); itr++)
         {
             Model& model = m_scene.m_models[itr];
 
             assert(model.m_sceneKey.index == itr);
 
-            model.UploadGPU(ctx, cmdList);
+            model.UploadGPU(ctx, cmdList, false);
+            NSRenderer::Model& regModel = ctx.registerModel(model.m_name, model.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_NONE);
+            model.m_registerKey = regModel.registerKey;
+
+            ctx.barrierBatch.get().Add(NSBarrier::kApp_endModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
+                regModel.m_envCubemap.cubemapTexture.Get(),
+                D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+            ));
         }
+
+        assert(ctx.barrierBatch.get().Execute(NSBarrier::kApp_endModelLoad, cmdList));
     });
 }
 void app::OnInit()

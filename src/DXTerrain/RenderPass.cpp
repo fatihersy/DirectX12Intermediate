@@ -877,29 +877,29 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
         NSScene::Camera(proj, pos, { 0, 0,-1, 0 }, { 0, 1, 0, 0 })
     };
 
+    {
+        D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            regInModel.m_envCubemap.cubemapTexture.Get(),
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_RESOURCE_STATE_RENDER_TARGET
+        );
+        cmdList.ResourceBarrier(1, &barrier);
+    }
+
+    CD3DX12_VIEWPORT viewport(0.f, 0.f, regInModel.m_envCubemap.PER_FACE_RESOLUTION, regInModel.m_envCubemap.PER_FACE_RESOLUTION);
+    CD3DX12_RECT scissor(0L, 0L, regInModel.m_envCubemap.PER_FACE_RESOLUTION, regInModel.m_envCubemap.PER_FACE_RESOLUTION);
+
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
+
     for (size_t face{}; face < regInModel.m_envCubemap.NUM_FACES; face++)
     {
-        {
-            D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                regInModel.m_envCubemap.cubemapTexture.Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_RENDER_TARGET
-            );
-            cmdList.ResourceBarrier(1, &barrier);
-        }
-
         D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rendererCtx.offsetRTV(regInModel.m_envCubemap.rtvHandle, static_cast<UINT>(face)).cpuAddr;
         cmdList.OMSetRenderTargets(1, &rtvHandle, FALSE, &regInModel.m_envCubemap.dsvHandle.cpuAddr);
 
         const float clearColor[] = {0.f, 0.f, 0.f, 1.f};
         cmdList.ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
         cmdList.ClearDepthStencilView(regInModel.m_envCubemap.dsvHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
-
-        CD3DX12_VIEWPORT viewport(0.f, 0.f, regInModel.m_envCubemap.PER_FACE_RESOLUTION, regInModel.m_envCubemap.PER_FACE_RESOLUTION);
-        CD3DX12_RECT scissor(0L, 0L, regInModel.m_envCubemap.PER_FACE_RESOLUTION, regInModel.m_envCubemap.PER_FACE_RESOLUTION);
-
-        cmdList.RSSetViewports(1, &viewport);
-        cmdList.RSSetScissorRects(1, &scissor);
 
         NSScene::Camera& cam = cams[face];
 
@@ -979,15 +979,15 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
                 });
             }
         }
+    }
 
-        {
-            D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                regInModel.m_envCubemap.cubemapTexture.Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-            );
-            cmdList.ResourceBarrier(1, &barrier);
-        }
+    {
+        D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            regInModel.m_envCubemap.cubemapTexture.Get(),
+            D3D12_RESOURCE_STATE_RENDER_TARGET,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+        );
+        cmdList.ResourceBarrier(1, &barrier);
     }
 
     PrefilterCubemap(regInModel.m_envCubemap, rendererCtx, cmdList);

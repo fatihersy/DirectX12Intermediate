@@ -7,6 +7,80 @@
 #include "DXSampleHelper.h"
 #include "RenderPass.h"
 
+class BarrierBatch : public NSBarrier::IBarrierBatch
+{
+public:
+    void Add(NSBarrier::BarrierKey key, CD3DX12_RESOURCE_BARRIER barrier) override
+    {
+        std::vector<D3D12_RESOURCE_BARRIER>& queue = m_entries[key.name.data()];
+
+        queue.push_back(barrier);
+    };
+    void Add(NSBarrier::BarrierKey key, std::vector<CD3DX12_RESOURCE_BARRIER>& inBarriers) override
+    {
+        std::vector<D3D12_RESOURCE_BARRIER>& queue = m_entries[key.name.data()];
+
+        queue.insert(queue.cend(), inBarriers.begin(), inBarriers.end());
+    };
+    bool Remove(NSBarrier::BarrierKey key, CD3DX12_RESOURCE_BARRIER barrier) override
+    {
+        if (m_entries.empty() or not m_entries.contains(key.name.data())) return false;
+
+        std::vector<D3D12_RESOURCE_BARRIER>& batch = m_entries[key.name.data()];
+
+        const auto itr = std::find_if(batch.begin(), batch.end(), [&barrier](D3D12_RESOURCE_BARRIER& itrBarrier)
+        {
+            return NSBarrier::operator==(barrier, itrBarrier);
+        });
+
+        if (itr != batch.end())
+        {
+            batch.erase(itr);
+            return true;
+        }
+
+        return false;
+    };
+    void Flush() override
+    {
+        for (auto& entry : m_entries)
+        {
+            const auto itr = std::erase_if(entry.second, [](D3D12_RESOURCE_BARRIER& itrBarrier)
+            {
+                if (itrBarrier.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION) {
+                    return not itrBarrier.Transition.pResource;
+                }
+                if (itrBarrier.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING) {
+                    return not itrBarrier.Aliasing.pResourceBefore;
+                }
+                if (itrBarrier.Type == D3D12_RESOURCE_BARRIER_TYPE_UAV) {
+                    return not itrBarrier.UAV.pResource;
+                }
+                return true;
+            });
+        }
+    };
+    void Clear(NSBarrier::BarrierKey key) override
+    {
+        if (m_entries.empty() or not m_entries.contains(key.name.data())) return;
+
+        m_entries[key.name.data()].clear();
+    };
+    bool Execute(NSBarrier::BarrierKey key, NSRenderer::GraphicsCommandList cmdList) override
+    {
+        if (m_entries.empty() or not m_entries.contains(key.name.data())) return false;
+
+        std::vector<D3D12_RESOURCE_BARRIER>& queue = m_entries[key.name.data()];
+
+        cmdList.ResourceBarrier(static_cast<UINT>(queue.size()), queue.data());
+
+        return true;
+    }
+
+private:
+    std::map<std::string, std::vector<D3D12_RESOURCE_BARRIER>> m_entries;
+};
+
 void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height)
 {
     m_factory = factory;
@@ -15,6 +89,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
     m_height = height;
 
     m_shaderCompiler = std::make_unique<ShaderCompiler>();
+
+    m_barrierBatch = std::make_unique<BarrierBatch>();
 
     constexpr size_t oneMb = 1u * 1024u * 1024u;
     m_constantAllocator = ConstantAllocator(device, oneMb, IApp::ic_framesInFlight);
@@ -244,158 +320,6 @@ void Renderer::OnDestroy()
     m_shaderCompiler.reset();
 }
 
-void Renderer::CreateSwapChain(HWND hwnd, UINT width, UINT height)
-{
-    assert(not m_swapChain and "CreateSwapChain() Supposed to use once");
-
-    DXGI_SWAP_CHAIN_DESC1 desc{};
-    desc.BufferCount = IApp::ic_framesInFlight;
-    desc.Width = width;
-    desc.Height = height;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    desc.SampleDesc.Count = 1;
-
-    ComPtr<IDXGISwapChain1> swapChain;
-    ThrowIfFailed(m_factory->CreateSwapChainForHwnd(m_commandQueue.Get(), hwnd, &desc, nullptr, nullptr, &swapChain));
-    ThrowIfFailed(swapChain.As(&m_swapChain));
-}
-void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription inDesc)
-{
-    D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
-    desc.Format = inDesc.format;
-    desc.Flags = inDesc.flags;
-    desc.ViewDimension = inDesc.dimention;
-
-    m_dsHandle = AllocDSVStatic(1u);
-
-    D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.f, 0);
-    D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_D32_FLOAT,
-        inDesc.width, inDesc.height,
-        1, 0, 1, 0,
-        D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE
-    );
-
-    ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
-    m_device->CreateDepthStencilView(inDesc.outDSV.Get(), &desc, m_dsHandle.cpuAddr);
-    inDesc.outDSV->SetName(name);
-}
-void Renderer::CreateFallbackTexture()
-{
-    NSTexture::Texture& fbTex = m_fallbackTexture;
-    NSDescriptor::Handle& fbHandle = m_fallbackTextureSRVhandle;
-    ID3D12Device14* device = m_device;
-
-    Execute([&fbTex, &fbHandle, &device](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
-    {
-        fbTex.textureType = NSTexture::EType::EType_DIFFUSE;
-        fbTex.width = 64;
-        fbTex.height = 64;
-        fbTex.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-        const UINT squareSize = fbTex.width / 8u;
-
-        D3D12_RESOURCE_DESC dstDesc{};
-        dstDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        dstDesc.Width = fbTex.width;
-        dstDesc.Height = fbTex.height;
-        dstDesc.DepthOrArraySize = 1;
-        dstDesc.MipLevels = 1;
-        dstDesc.Format = fbTex.format;
-        dstDesc.SampleDesc.Count = 1;
-        dstDesc.SampleDesc.Quality = 0;
-        dstDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        dstDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        CD3DX12_HEAP_PROPERTIES defaultHeapProp(D3D12_HEAP_TYPE_DEFAULT);
-        ThrowIfFailed(device->CreateCommittedResource(
-            &defaultHeapProp,
-            D3D12_HEAP_FLAG_NONE,
-            &dstDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&fbTex.defaultBuffer)
-        ));
-        fbTex.defaultBuffer->SetName(L"Renderer::m_fallbackTexture.defaultBuffer");
-
-        {
-            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                fbTex.defaultBuffer.Get(),
-                D3D12_RESOURCE_STATE_COMMON,
-                D3D12_RESOURCE_STATE_COPY_DEST
-            );
-            cmdList.ResourceBarrier(1, &barrier);
-        }
-
-        fbTex.RowPitch = fbTex.width * 4;
-        const UINT dataSize = fbTex.RowPitch * fbTex.height;
-
-        CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
-        CD3DX12_RESOURCE_DESC srcDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
-        ThrowIfFailed(device->CreateCommittedResource(
-            &uploadHeapProp,
-            D3D12_HEAP_FLAG_NONE,
-            &srcDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&fbTex.uploadBuffer)
-        ));
-        fbTex.uploadBuffer->SetName(L"Renderer::m_fallbackTexture.uploadBuffer");
-
-        uint8_t* mappedData = nullptr;
-        ThrowIfFailed(fbTex.uploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
-
-        for (UINT y = 0; y < fbTex.height; y++)
-        {
-            uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * fbTex.RowPitch);
-
-            for (UINT x = 0; x < fbTex.width; x++)
-            {
-                bool isBlack = ((x / squareSize) + (y / squareSize)) % 2 == 0;
-                row[x] = isBlack ? 0xFF000000 : 0xFFFF00FF;
-            }
-        }
-        fbTex.uploadBuffer->Unmap(0, nullptr);
-
-        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
-        srcLoc.pResource = fbTex.uploadBuffer.Get();
-        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        srcLoc.PlacedFootprint.Footprint.Width = fbTex.width;
-        srcLoc.PlacedFootprint.Footprint.Height = fbTex.height;
-        srcLoc.PlacedFootprint.Footprint.Depth = 1;
-        srcLoc.PlacedFootprint.Footprint.Format = fbTex.format;
-        srcLoc.PlacedFootprint.Footprint.RowPitch = fbTex.RowPitch;
-
-        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
-        dstLoc.pResource = fbTex.defaultBuffer.Get();
-        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        dstLoc.SubresourceIndex = 0;
-
-        cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-
-        {
-            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                fbTex.defaultBuffer.Get(),
-                D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-            );
-            cmdList.ResourceBarrier(1, &barrier);
-        }
-
-        fbHandle = ctx.allocSRVStatic(1u);
-        fbTex.srvOffset = ctx.offsetSRV(fbHandle, 0u);
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
-        srvDesc.Format = fbTex.format;
-        device->CreateShaderResourceView(fbTex.defaultBuffer.Get(), &srvDesc, fbHandle.cpuAddr);
-    });
-}
-
 void Renderer::Execute(FnRendererExecutionBody Record)
 {
     MoveToNextFrame();
@@ -499,6 +423,8 @@ void Renderer::DrawScene(Scene& scene)
 void Renderer::EndFrame()
 {
     ImGui::Render();
+    ID3D12DescriptorHeap* imGuiDescHeap[] = { m_imGuiSrvHeap.Get() };
+    m_commandList->SetDescriptorHeaps(_countof(imGuiDescHeap), imGuiDescHeap);
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
 
     {
@@ -523,19 +449,24 @@ void Renderer::EndFrame()
     MoveToNextFrame();
 }
 
-NSModel::RegisterModelKey Renderer::RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList)
+NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag)
 {
     std::vector<NSRenderer::Model>* models = m_blackboard.GetMut<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     assert(models);
 
-    NSModel::RegisterModelKey outKey{ sceneKey.id, models->size() };
     NSRenderer::Model& rendererModel = models->emplace_back();
+    rendererModel.registerKey = { sceneKey.id, models->size() - 1u };
     rendererModel.sceneKey = sceneKey;
+    rendererModel.SetFlag(flag);
 
     // Environment Cubemap
     {
         // Cubemap Texture
         {
+            D3D12_RESOURCE_FLAGS flags = rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
+                ? D3D12_RESOURCE_FLAG_NONE
+                : D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
             D3D12_RESOURCE_DESC desc{};
             desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
             desc.Width = rendererModel.m_envCubemap.PER_FACE_RESOLUTION;
@@ -545,19 +476,22 @@ NSModel::RegisterModelKey Renderer::RegisterModel(std::wstring_view modelName, N
             desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
             desc.SampleDesc.Count = 1;
             desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+            desc.Flags = flags;
 
             CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
 
-            const float clearColor[] = { 0.f, 0.f, 0.f, 1.f };
+            constexpr float clearColor[] = { 0.f, 0.f, 0.f, 1.f };
             D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R16G16B16A16_FLOAT, clearColor);
+            const D3D12_CLEAR_VALUE* pOptimizedClearValue = rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
+                ? nullptr
+                : &clearVal;
 
             ThrowIfFailed(m_device->CreateCommittedResource(
                 &props,
                 D3D12_HEAP_FLAG_NONE,
                 &desc,
                 D3D12_RESOURCE_STATE_COMMON,
-                &clearVal,
+                pOptimizedClearValue,
                 IID_PPV_ARGS(&rendererModel.m_envCubemap.cubemapTexture)
             ));
         }
@@ -573,7 +507,7 @@ NSModel::RegisterModelKey Renderer::RegisterModel(std::wstring_view modelName, N
             desc.Format = DXGI_FORMAT_D32_FLOAT;
             desc.SampleDesc.Count = 1;
             desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+            desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
 
             CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
 
@@ -592,7 +526,7 @@ NSModel::RegisterModelKey Renderer::RegisterModel(std::wstring_view modelName, N
         }
 
         // RTVs
-        {
+        if (not rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
             rendererModel.m_envCubemap.rtvHandle = AllocRTVStatic(rendererModel.m_envCubemap.NUM_FACES);
             for (UINT face = 0u; face < rendererModel.m_envCubemap.NUM_FACES; face++)
             {
@@ -647,7 +581,7 @@ NSModel::RegisterModelKey Renderer::RegisterModel(std::wstring_view modelName, N
         }
 
         // UAVs
-        {
+        if (not rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
             constexpr UINT uavCount = rendererModel.m_envCubemap.MIP_COUNT - 1u;
             rendererModel.m_envCubemap.uavHandle = AllocSRVStatic(uavCount);
 
@@ -669,23 +603,13 @@ NSModel::RegisterModelKey Renderer::RegisterModel(std::wstring_view modelName, N
             }
         }
 
-        {
-            D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                rendererModel.m_envCubemap.cubemapTexture.Get(),
-                D3D12_RESOURCE_STATE_COMMON,
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-            );
-            cmdList.ResourceBarrier(1, &barrier);
-        }
-
         rendererModel.m_envCubemap.isOnGPU = false;
         rendererModel.m_envCubemap.isDirty = true;
         rendererModel.m_envCubemap.generation = 0u;
 
         rendererModel.isDirty = true;
     }
-
-    return outKey;
+    return rendererModel;
 }
 void Renderer::UnloadModel(NSModel::RegisterModelKey key)
 {
@@ -738,7 +662,7 @@ void Renderer::Resize(UINT width, UINT height)
 
     {
         D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-        D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, width, height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+        D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, width, height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
         D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.f, 0);
         ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
     }
@@ -758,4 +682,155 @@ void Renderer::Resize(UINT width, UINT height)
     {
         pass->OnResize(m_width, m_height, GetCtx());
     }
+}
+void Renderer::CreateSwapChain(HWND hwnd, UINT width, UINT height)
+{
+    assert(not m_swapChain and "CreateSwapChain() Supposed to use once");
+
+    DXGI_SWAP_CHAIN_DESC1 desc{};
+    desc.BufferCount = IApp::ic_framesInFlight;
+    desc.Width = width;
+    desc.Height = height;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    desc.SampleDesc.Count = 1;
+
+    ComPtr<IDXGISwapChain1> swapChain;
+    ThrowIfFailed(m_factory->CreateSwapChainForHwnd(m_commandQueue.Get(), hwnd, &desc, nullptr, nullptr, &swapChain));
+    ThrowIfFailed(swapChain.As(&m_swapChain));
+}
+void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription inDesc)
+{
+    D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
+    desc.Format = inDesc.format;
+    desc.Flags = inDesc.flags;
+    desc.ViewDimension = inDesc.dimention;
+
+    m_dsHandle = AllocDSVStatic(1u);
+
+    D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.f, 0);
+    D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+        DXGI_FORMAT_D32_FLOAT,
+        inDesc.width, inDesc.height,
+        1, 0, 1, 0,
+        D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE
+    );
+
+    ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
+    m_device->CreateDepthStencilView(inDesc.outDSV.Get(), &desc, m_dsHandle.cpuAddr);
+    inDesc.outDSV->SetName(name);
+}
+void Renderer::CreateFallbackTexture()
+{
+    NSTexture::Texture& fbTex = m_fallbackTexture;
+    NSDescriptor::Handle& fbHandle = m_fallbackTextureSRVhandle;
+    ID3D12Device14* device = m_device;
+
+    Execute([&fbTex, &fbHandle, &device](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
+        {
+            fbTex.textureType = NSTexture::EType::EType_DIFFUSE;
+            fbTex.width = 64;
+            fbTex.height = 64;
+            fbTex.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+            const UINT squareSize = fbTex.width / 8u;
+
+            D3D12_RESOURCE_DESC dstDesc{};
+            dstDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            dstDesc.Width = fbTex.width;
+            dstDesc.Height = fbTex.height;
+            dstDesc.DepthOrArraySize = 1;
+            dstDesc.MipLevels = 1;
+            dstDesc.Format = fbTex.format;
+            dstDesc.SampleDesc.Count = 1;
+            dstDesc.SampleDesc.Quality = 0;
+            dstDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            dstDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            CD3DX12_HEAP_PROPERTIES defaultHeapProp(D3D12_HEAP_TYPE_DEFAULT);
+            ThrowIfFailed(device->CreateCommittedResource(
+                &defaultHeapProp,
+                D3D12_HEAP_FLAG_NONE,
+                &dstDesc,
+                D3D12_RESOURCE_STATE_COMMON,
+                nullptr,
+                IID_PPV_ARGS(&fbTex.defaultBuffer)
+            ));
+            fbTex.defaultBuffer->SetName(L"Renderer::m_fallbackTexture.defaultBuffer");
+
+            {
+                CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                    fbTex.defaultBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COMMON,
+                    D3D12_RESOURCE_STATE_COPY_DEST
+                );
+                cmdList.ResourceBarrier(1, &barrier);
+            }
+
+            fbTex.RowPitch = fbTex.width * 4;
+            const UINT dataSize = fbTex.RowPitch * fbTex.height;
+
+            CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
+            CD3DX12_RESOURCE_DESC srcDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+            ThrowIfFailed(device->CreateCommittedResource(
+                &uploadHeapProp,
+                D3D12_HEAP_FLAG_NONE,
+                &srcDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(&fbTex.uploadBuffer)
+            ));
+            fbTex.uploadBuffer->SetName(L"Renderer::m_fallbackTexture.uploadBuffer");
+
+            uint8_t* mappedData = nullptr;
+            ThrowIfFailed(fbTex.uploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
+
+            for (UINT y = 0; y < fbTex.height; y++)
+            {
+                uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * fbTex.RowPitch);
+
+                for (UINT x = 0; x < fbTex.width; x++)
+                {
+                    bool isBlack = ((x / squareSize) + (y / squareSize)) % 2 == 0;
+                    row[x] = isBlack ? 0xFF000000 : 0xFFFF00FF;
+                }
+            }
+            fbTex.uploadBuffer->Unmap(0, nullptr);
+
+            D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+            srcLoc.pResource = fbTex.uploadBuffer.Get();
+            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            srcLoc.PlacedFootprint.Footprint.Width = fbTex.width;
+            srcLoc.PlacedFootprint.Footprint.Height = fbTex.height;
+            srcLoc.PlacedFootprint.Footprint.Depth = 1;
+            srcLoc.PlacedFootprint.Footprint.Format = fbTex.format;
+            srcLoc.PlacedFootprint.Footprint.RowPitch = fbTex.RowPitch;
+
+            D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+            dstLoc.pResource = fbTex.defaultBuffer.Get();
+            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex = 0;
+
+            cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+            {
+                CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                    fbTex.defaultBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+                );
+                cmdList.ResourceBarrier(1, &barrier);
+            }
+
+            fbHandle = ctx.allocSRVStatic(1u);
+            fbTex.srvOffset = ctx.offsetSRV(fbHandle, 0u);
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MipLevels = 1;
+            srvDesc.Format = fbTex.format;
+            device->CreateShaderResourceView(fbTex.defaultBuffer.Get(), &srvDesc, fbHandle.cpuAddr);
+        });
 }

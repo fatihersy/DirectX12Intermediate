@@ -66,60 +66,68 @@ bool Model::Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path)
 
     return true;
 }
-void Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+bool Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition)
 {
     assert(isOnCPU);
 
-    if (isOnGPU) return;
+    if (isOnGPU) return false;
 
-    std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
-    barriers.reserve(m_meshes.size() * 2u);
+    if(barrierTransition) {
+        std::vector<D3D12_RESOURCE_BARRIER> preCopy;
+        preCopy.reserve(m_meshes.size() * 2u);
 
-    for (Mesh& mesh : m_meshes)
-    {
-        barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-            mesh.defaultVertexBuffer.Get(),
-            D3D12_RESOURCE_STATE_COMMON,
-            D3D12_RESOURCE_STATE_COPY_DEST
-        ));
-        barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-            mesh.defaultIndexBuffer.Get(),
-            D3D12_RESOURCE_STATE_COMMON,
-            D3D12_RESOURCE_STATE_COPY_DEST
-        ));
+        for (Mesh& mesh : m_meshes)
+        {
+            preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                mesh.defaultVertexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_COPY_DEST
+            ));
+            preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                mesh.defaultIndexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_COPY_DEST
+            ));
+        }
+
+        cmdList.ResourceBarrier(static_cast<UINT>(preCopy.size()), preCopy.data());
     }
 
-    cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
-
-    barriers.clear();
-
+    // Copy vertex/index buffers
     for (Mesh& mesh : m_meshes)
     {
         cmdList.CopyResource(mesh.defaultVertexBuffer.Get(), mesh.uploadVertexBuffer.Get());
         cmdList.CopyResource(mesh.defaultIndexBuffer.Get(), mesh.uploadIndexBuffer.Get());
-
-        barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-            mesh.defaultVertexBuffer.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
-        ));
-        barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-            mesh.defaultIndexBuffer.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_INDEX_BUFFER
-        ));
     }
 
-    cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+    if(barrierTransition) {
+        std::vector<D3D12_RESOURCE_BARRIER> postCopy;
+        postCopy.reserve(m_meshes.size() * 2u);
+
+        for (Mesh& mesh : m_meshes)
+        {
+            postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                mesh.defaultVertexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
+            ));
+            postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                mesh.defaultIndexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_INDEX_BUFFER
+            ));
+        }
+
+        cmdList.ResourceBarrier(static_cast<UINT>(postCopy.size()), postCopy.data());
+    }
 
     for (Mesh& mesh : m_meshes)
     {
-        mesh.material.UploadGPU(m_device, rendererCtx, cmdList);
+        mesh.material.UploadGPU(m_device, rendererCtx, cmdList, barrierTransition);
     }
 
-    m_registerKey = rendererCtx.registerModel(m_name, m_sceneKey, cmdList);
-
     isOnGPU = true;
+    return true;
 }
 void Model::UnloadGPU(NSRenderer::Ctx rendererCtx)
 {
@@ -166,6 +174,15 @@ void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRI
 
         forEach(mesh, meshIndex, worldMatrix);
 
+        meshIndex++;
+    }
+}
+void Model::ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach)
+{
+    uint32_t meshIndex{};
+    for (Mesh& mesh : m_meshes)
+    {
+        forEach(mesh, meshIndex);
         meshIndex++;
     }
 }

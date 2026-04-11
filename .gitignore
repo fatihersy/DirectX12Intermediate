@@ -46,5 +46,8 @@ Makefile
 # External
 /external
 
+# Claude
+.claude/
+
 # App
 /app

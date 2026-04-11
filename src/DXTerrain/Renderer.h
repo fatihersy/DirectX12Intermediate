@@ -22,7 +22,7 @@ public:
     void BeginFrame();
     void DrawScene(Scene& scene);
     void EndFrame();
-    NSModel::RegisterModelKey RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList);
+    NSRenderer::Model& RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag);
     void UnloadModel(NSModel::RegisterModelKey key);
 
     void Resize(UINT width, UINT height);
@@ -67,6 +67,11 @@ public:
         return m_dsvHeap.OffsetOf(handle, offset);
     }
 
+    std::reference_wrapper<NSBarrier::IBarrierBatch> GetBarrierBatch() {
+        assert(m_barrierBatch);
+        return std::ref(*m_barrierBatch);
+    }
+
     NSRenderer::Ctx GetCtx() {
         return NSRenderer::Ctx(
             [this](uint32_t amount)                                                    -> NSDescriptor::Handle { return this->AllocSRVRing(amount);               },
@@ -80,12 +85,13 @@ public:
             [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset { return this->OffsetRTV(handle, offset);          },
             [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset { return this->OffsetDSV(handle, offset);          },
             [this](size_t size)                                                        -> NSAllocator::Ctx { return this->m_constantAllocator.Allocate(size); },
-            [this](std::wstring_view modelName, NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList)-> NSModel::RegisterModelKey
+            [this](std::wstring_view modelName, NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag)-> NSRenderer::Model&
             {
-                return this->RegisterModel(modelName, key, cmdList);
+                return this->RegisterModel(modelName, key, cmdList, flag);
             },
             [this](NSModel::RegisterModelKey key) { this->UnloadModel(key); },
-            m_fallbackTextureSRVhandle
+            m_fallbackTextureSRVhandle,
+            GetBarrierBatch()
         );
     }
 
@@ -147,6 +153,8 @@ private:
     NSDescriptor::Handle m_fallbackTextureSRVhandle;
 
     Blackboard m_blackboard;
+
+    std::unique_ptr<NSBarrier::IBarrierBatch> m_barrierBatch;
 
     std::vector<std::unique_ptr<NSRenderPass::IRenderPass>> m_passes;
 

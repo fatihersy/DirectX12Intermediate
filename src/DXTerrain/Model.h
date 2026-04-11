@@ -93,7 +93,7 @@ public:
     }
 
     bool Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path);
-    void UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+    bool UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition = true);
     void UnloadGPU(NSRenderer::Ctx rendererCtx);
     void ResetUploadHeaps();
 
@@ -121,6 +121,8 @@ public:
     void FlipFlag(NSModel::EModelFlag flag) {
         m_flags.flip(static_cast<uint32_t>(flag));
     }
+
+    void ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach);
 
 private:
     IWICImagingFactory2* m_wicFactory = nullptr;

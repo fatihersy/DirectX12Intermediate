@@ -117,3 +117,11 @@ NSScene::Frustum::Frustum(DirectX::XMMATRIX viewProj)
         XMVectorSet(m._14 - m._13, m._24 - m._23, m._34 - m._33, m._44 - m._43)
     );
 }
+
+void Scene::ForEachModel(std::function<void(Model& model)> ForEach)
+{
+    for (Model& model : m_models)
+    {
+        ForEach(model);
+    }
+}
