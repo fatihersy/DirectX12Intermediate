@@ -23,9 +23,10 @@
 
 -- Internal functions
 function mox_is_windows()
-    ds = package.config:sub(1,1)
+    ds = package.config:sub(1, 1)
     return ds == "\\"
 end
+
 function mox_discover_subfolders(folder)
     if mox_is_windows() then
         return mox_discover_subfolders_win(folder)
@@ -33,12 +34,15 @@ function mox_discover_subfolders(folder)
         return mox_discover_subfolders_linux(folder)
     end
 end
+
 function mox_discover_subfolders_win(folder)
     return io.popen("dir \"" .. folder .. "\" /b /ad"):lines()
 end
+
 function mox_discover_subfolders_linux(folder)
-    return io.popen("find \"./" .. folder .. "\" -maxdepth 1 -type d -printf '%f\n'" ):lines()
+    return io.popen("find \"./" .. folder .. "\" -maxdepth 1 -type d -printf '%f\n'"):lines()
 end
+
 function mox_cli_mox_command(command)
     -- Use !wks.location for absolute path so postbuild commands work from
     -- any working directory (gmake runs them from the Makefile's directory,
@@ -56,6 +60,7 @@ function mox_runpy_postbuild(command)
         mox_cli_mox_command(command)
     }
 end
+
 function mox_runpy_prebuild(command)
     prebuildcommands {
         mox_cli_mox_command(command)
@@ -66,272 +71,275 @@ end
 function mox_project(name, output_name, target_subdir)
     hmox_project_name = name
 
-    if output_name==nil then
+    if output_name == nil then
         output_name = name
     end
 
-    if target_subdir==nil then
+    if target_subdir == nil then
         target_subdir = "bin/"
     end
 
     project(name)
-        location "./"
-        targetname(output_name)
-        targetsuffix ""
-        characterset "Unicode"
+    location "./"
+    targetname(output_name)
+    targetsuffix ""
+    characterset "Unicode"
 
-        targetdir ("%{wks.location}/build/%{cfg.architecture}-%{cfg.buildcfg}/" .. target_subdir)
-        objdir    "%{wks.location}/build/%{cfg.architecture}-%{cfg.buildcfg}/obj/%{prj.name}/"
+    targetdir("%{wks.location}/build/%{cfg.architecture}-%{cfg.buildcfg}/" .. target_subdir)
+    objdir "%{wks.location}/build/%{cfg.architecture}-%{cfg.buildcfg}/obj/%{prj.name}/"
 
-        debugdir  "%{wks.location}/app"
+    debugdir "%{wks.location}/app"
 
-        files {
-            "%{prj.location}/**.lua",
-            "%{prj.location}/**.txt", "%{prj.location}/**.md",
-            "%{prj.location}/**.json", "%{prj.location}/**.jsonc", "%{prj.location}/**.xml",
-            "%{prj.location}/**.c", "%{prj.location}/**.cc", "%{prj.location}/**.cpp", "%{prj.location}/**.cxx",
-            "%{prj.location}/**.h", "%{prj.location}/**.hh", "%{prj.location}/**.hpp", "%{prj.location}/**.hxx"
-        }
+    files {
+        "%{prj.location}/**.lua",
+        "%{prj.location}/**.txt", "%{prj.location}/**.md",
+        "%{prj.location}/**.json", "%{prj.location}/**.jsonc", "%{prj.location}/**.xml",
+        "%{prj.location}/**.c", "%{prj.location}/**.cc", "%{prj.location}/**.cpp", "%{prj.location}/**.cxx",
+        "%{prj.location}/**.h", "%{prj.location}/**.hh", "%{prj.location}/**.hpp", "%{prj.location}/**.hxx"
+    }
 
-        includedirs {
-            "%{prj.location}",
-            "%{wks.location}",
-            "%{wks.location}/" .. cmox_src_folder,
-        }
+    includedirs {
+        "%{prj.location}",
+        "%{wks.location}",
+        "%{wks.location}/" .. cmox_src_folder,
+    }
 
+    defines {
+        cmox_macro_prefix .. "VERSION=\"" .. _OPTIONS["mox_version"] .. "\"",
+    }
+
+    -- Debug / Release
+    -- Use dynamic CRT (/MD) to match pre-built libraries (assimp, imgui, etc.)
+    staticruntime "Off"
+    for idx, conf in pairs(cmox_configurations_n) do
+        local is_debug = cmox_configurations_d[idx]
+        filter { "configurations:" .. conf }
         defines {
-            cmox_macro_prefix .. "VERSION=\"" .. _OPTIONS["mox_version"] .. "\"",
+            cmox_macro_prefix .. conf:upper()
         }
+        if is_debug then
+            defines {
+                "DEBUG",
+                cmox_macro_prefix .. "DEBUG",
+            }
+            symbols "On"
+            if hmox_conan_release_only then
+                runtime "Release"
+            else
+                runtime "Debug"
+            end
+        else
+            defines {
+                "NDEBUG",
+                cmox_macro_prefix .. "NDEBUG",
+            }
+            optimize "On"
+            runtime "Release"
+        end
+        filter {}
+    end
 
-        -- Debug / Release
-        -- Use dynamic CRT (/MD) to match pre-built libraries (assimp, imgui, etc.)
-        staticruntime "Off"
-        for idx,conf in pairs(cmox_configurations_n) do
+    -- Define: OS
+    filter { "system:windows" }
+    defines {
+        cmox_macro_prefix .. "OS_WINDOWS",
+        "WINVER=0x0A00",
+        "_WIN32_WINNT=0x0A00",
+        "UNICODE",
+        "_UNICODE",
+    }
+    filter {}
+    filter { "system:unix or linux" }
+    defines {
+        cmox_macro_prefix .. "OS_LINUX",
+    }
+    filter {}
+
+    -- Define: Architecture
+    filter { "architecture:x86" }
+    defines {
+        cmox_macro_prefix .. "ARCH_X86",
+        cmox_macro_prefix .. "ARCH_TYPE_X86",
+        cmox_macro_prefix .. "BIT_32",
+    }
+    filter {}
+    filter { "architecture:x86_64" }
+    defines {
+        cmox_macro_prefix .. "ARCH_X86_64",
+        cmox_macro_prefix .. "ARCH_TYPE_X86",
+        cmox_macro_prefix .. "BIT_64",
+    }
+    filter {}
+    filter { "architecture:ARM" }
+    defines {
+        cmox_macro_prefix .. "ARCH_ARM",
+        cmox_macro_prefix .. "ARCH_TYPE_ARM",
+        cmox_macro_prefix .. "BIT_32",
+    }
+    filter {}
+    filter { "architecture:ARM64" }
+    defines {
+        cmox_macro_prefix .. "ARCH_ARM64",
+        cmox_macro_prefix .. "ARCH_TYPE_ARM",
+        cmox_macro_prefix .. "BIT_64",
+    }
+    filter {}
+
+    -- DLL Distribution
+    if cmox_copy_dlls then
+        for idx, conf in pairs(cmox_configurations_n) do
+            local is_debug = cmox_configurations_d[idx]
+
+            filter { "configurations:" .. conf, "kind:ConsoleApp or WindowedApp" }
+            if is_debug and not hmox_conan_release_only then
+                mox_runpy_postbuild('"distdlls" "%{wks.location}/dlls/Debug-%{cfg.architecture}" "%{cfg.targetdir}"')
+            else
+                mox_runpy_postbuild('"distdlls" "%{wks.location}/dlls/Release-%{cfg.architecture}" "%{cfg.targetdir}"')
+            end
+            filter {}
+        end
+    end
+
+    -- MSVC-specific options
+    if _OPTIONS["mox_compiler"] == "msvc" or (_ACTION and string.startswith(_ACTION, "vs")) then
+        filter { "system:Windows" }
+        -- Ignore linker warning on windows
+        linkoptions {
+            "/IGNORE:4099",
+        }
+        -- UTF8 build
+        buildoptions {
+            "/utf-8",
+        }
+        filter {}
+    end
+
+    -- Linux options
+    if not mox_is_windows() then
+        filter { "system:not Windows" }
+        -- GCC Prefix
+        gccprefix(_OPTIONS["mox_gcc_prefix"])
+
+        -- so search path
+        linkoptions {
+            "-Wl,-rpath,'$$ORIGIN'",
+            "-Wl,--disable-new-dtags",
+        }
+        filter {}
+    end
+
+    -- Compiler selection
+    if _OPTIONS["mox_compiler"] == "gcc" then
+        toolset "gcc"
+    elseif _OPTIONS["mox_compiler"] == "clang" then
+        toolset "clang"
+    elseif _OPTIONS["mox_compiler"] == "ClangCL" then
+        toolset "msc-ClangCL"
+    elseif _OPTIONS["mox_compiler"] == "msvc" then
+        toolset "msc"
+    end
+
+    -- Clang-specific: suppress warnings from DirectX/system headers
+    if _OPTIONS["mox_compiler"] == "clang" or _OPTIONS["mox_compiler"] == "ClangCL" then
+        buildoptions {
+            "-Wno-defaulted-function-deleted",
+            "-Wno-class-conversion",
+        }
+    end
+
+    -- Clang on Windows: target MSVC ABI for COM interface compatibility.
+    -- GNU-mode clang uses a different struct-return ABI that breaks DX12
+    -- COM methods (GetDesc, GetCPUDescriptorHandleForHeapStart, etc.).
+    -- Targeting MSVC also enables __int64/__pragma so MSVC SDK headers
+    -- parse correctly, and ensures UNICODE macros resolve to wide-char.
+    if _OPTIONS["mox_compiler"] == "clang" and _OPTIONS["mox_target_os"] == "windows" then
+        local arch_triple = { x86 = "i686", x86_64 = "x86_64", ARM = "armv7", ARM64 = "aarch64" }
+        local triple_arch = arch_triple[_OPTIONS["mox_premake_arch"]] or "x86_64"
+        local msvc_target = "--target=" .. triple_arch .. "-pc-windows-msvc"
+        buildoptions { msvc_target }
+        linkoptions { msvc_target }
+
+        -- Premake's gmake generator does not emit /MD or /MT for clang.
+        -- clang in gmake mode uses GCC-style flags, so /MD is misread as
+        -- -M -D (dependency generation + define), breaking compilation.
+        --
+        -- Instead we use --dependent-lib to embed the correct /DEFAULTLIB
+        -- directives in each .obj, telling the linker to pull in the dynamic
+        -- CRT (msvcrt/ucrt) instead of the static one (libcmt/libucrt).
+        -- We also define _DLL and _MT so CRT headers use __declspec(dllimport).
+        -- Finally we suppress the static CRT at link time with /NODEFAULTLIB.
+        -- The pre-built libs (assimp, imgui, draco, etc.) expect /MD.
+        for idx, conf in pairs(cmox_configurations_n) do
             local is_debug = cmox_configurations_d[idx]
             filter { "configurations:" .. conf }
-                defines {
-                    cmox_macro_prefix .. conf:upper()
-                }
-                if is_debug then
-                    defines {
-                        "DEBUG",
-                        cmox_macro_prefix .. "DEBUG",
-                    }
-                    symbols "On"
-                    if hmox_conan_release_only then
-                        runtime "Release"
-                    else
-                        runtime "Debug"
-                    end
-                else
-                    defines {
-                        "NDEBUG",
-                        cmox_macro_prefix .. "NDEBUG",
-                    }
-                    optimize "On"
-                    runtime "Release"
-                end
-            filter {}
-        end
-
-        -- Define: OS
-        filter { "system:windows" }
-            defines {
-                cmox_macro_prefix .. "OS_WINDOWS",
-                "WINVER=0x0A00",
-                "_WIN32_WINNT=0x0A00",
-                "UNICODE",
-                "_UNICODE",
-            }
-        filter {}
-        filter { "system:unix or linux" }
-            defines {
-                cmox_macro_prefix .. "OS_LINUX",
-            }
-        filter {}
-
-        -- Define: Architecture
-        filter { "architecture:x86" }
-            defines {
-                cmox_macro_prefix .. "ARCH_X86",
-                cmox_macro_prefix .. "ARCH_TYPE_X86",
-                cmox_macro_prefix .. "BIT_32",
-            }
-        filter {}
-        filter { "architecture:x86_64" }
-            defines {
-                cmox_macro_prefix .. "ARCH_X86_64",
-                cmox_macro_prefix .. "ARCH_TYPE_X86",
-                cmox_macro_prefix .. "BIT_64",
-            }
-        filter {}
-        filter { "architecture:ARM" }
-            defines {
-                cmox_macro_prefix .. "ARCH_ARM",
-                cmox_macro_prefix .. "ARCH_TYPE_ARM",
-                cmox_macro_prefix .. "BIT_32",
-            }
-        filter {}
-        filter { "architecture:ARM64" }
-            defines {
-                cmox_macro_prefix .. "ARCH_ARM64",
-                cmox_macro_prefix .. "ARCH_TYPE_ARM",
-                cmox_macro_prefix .. "BIT_64",
-            }
-        filter {}
-
-        -- DLL Distribution
-        if cmox_copy_dlls then
-            for idx,conf in pairs(cmox_configurations_n) do
-                local is_debug = cmox_configurations_d[idx]
-
-                filter { "configurations:" .. conf, "kind:ConsoleApp or WindowedApp" }
-                    if is_debug and not hmox_conan_release_only then
-                        mox_runpy_postbuild("distdlls %{wks.location}/dlls/Debug-%{cfg.architecture} %{cfg.targetdir}")
-                    else
-                        mox_runpy_postbuild("distdlls %{wks.location}/dlls/Release-%{cfg.architecture} %{cfg.targetdir}")
-                    end
-                filter {}
-            end
-        end
-
-        -- MSVC-specific options
-        if _OPTIONS["mox_compiler"] == "msvc" or (_ACTION and string.startswith(_ACTION, "vs")) then
-            filter { "system:Windows" }
-                -- Ignore linker warning on windows
-                linkoptions { 
-                    "/IGNORE:4099",
-                }
-                -- UTF8 build
+            if is_debug and not hmox_conan_release_only then
+                defines { "_DLL", "_MT", "_DEBUG" }
                 buildoptions {
-                    "/utf-8",
+                    "-Xclang --dependent-lib=msvcrtd",
+                    "-Xclang --dependent-lib=ucrtd",
+                    "-Xclang --dependent-lib=msvcprtd",
+                    "-Xclang --dependent-lib=oldnames",
                 }
-            filter {}
-        end
-
-        -- Linux options
-        if not mox_is_windows() then
-            filter { "system:not Windows" }
-                -- GCC Prefix
-                gccprefix (_OPTIONS["mox_gcc_prefix"])
-                
-                -- so search path
                 linkoptions {
-                    "-Wl,-rpath,'$$ORIGIN'",
-                    "-Wl,--disable-new-dtags",
+                    "-Xlinker /NODEFAULTLIB:libcmtd",
+                    "-Xlinker /NODEFAULTLIB:libcpmtd",
+                    "-Xlinker /NODEFAULTLIB:libucrtd",
+                    "-Xlinker /DEBUG:FULL",
                 }
+            else
+                defines { "_DLL", "_MT" }
+                buildoptions {
+                    "-Xclang --dependent-lib=msvcrt",
+                    "-Xclang --dependent-lib=ucrt",
+                    "-Xclang --dependent-lib=msvcprt",
+                    "-Xclang --dependent-lib=oldnames",
+                }
+                linkoptions {
+                    "-Xlinker /NODEFAULTLIB:libcmt",
+                    "-Xlinker /NODEFAULTLIB:libcpmt",
+                    "-Xlinker /NODEFAULTLIB:libucrt",
+                }
+            end
+            -- Emit PDB for debug configs (needed by CodeLLDB/LLDB)
+            if is_debug then
+                linkoptions {
+                    "-Xlinker /DEBUG:FULL",
+                }
+            end
             filter {}
         end
+    end
 
-        -- Compiler selection
-        if _OPTIONS["mox_compiler"] == "gcc" then
-            toolset "gcc"
-        elseif _OPTIONS["mox_compiler"] == "clang" then
-            toolset "clang"
-        elseif _OPTIONS["mox_compiler"] == "ClangCL" then
-            toolset "msc-ClangCL"
-        elseif _OPTIONS["mox_compiler"] == "msvc" then
-            toolset "msc"
-        end
+    multiprocessorcompile("On")
 
-        -- Clang-specific: suppress warnings from DirectX/system headers
-        if _OPTIONS["mox_compiler"] == "clang" or _OPTIONS["mox_compiler"] == "ClangCL" then
-            buildoptions {
-                "-Wno-defaulted-function-deleted",
-                "-Wno-class-conversion",
-            }
-        end
-
-        -- Clang on Windows: target MSVC ABI for COM interface compatibility.
-        -- GNU-mode clang uses a different struct-return ABI that breaks DX12
-        -- COM methods (GetDesc, GetCPUDescriptorHandleForHeapStart, etc.).
-        -- Targeting MSVC also enables __int64/__pragma so MSVC SDK headers
-        -- parse correctly, and ensures UNICODE macros resolve to wide-char.
-        if _OPTIONS["mox_compiler"] == "clang" and _OPTIONS["mox_target_os"] == "windows" then
-            local arch_triple = { x86 = "i686", x86_64 = "x86_64", ARM = "armv7", ARM64 = "aarch64" }
-            local triple_arch = arch_triple[_OPTIONS["mox_premake_arch"]] or "x86_64"
-            local msvc_target = "--target=" .. triple_arch .. "-pc-windows-msvc"
-            buildoptions { msvc_target }
-            linkoptions { msvc_target }
-
-            -- Premake's gmake generator does not emit /MD or /MT for clang.
-            -- clang in gmake mode uses GCC-style flags, so /MD is misread as
-            -- -M -D (dependency generation + define), breaking compilation.
-            --
-            -- Instead we use --dependent-lib to embed the correct /DEFAULTLIB
-            -- directives in each .obj, telling the linker to pull in the dynamic
-            -- CRT (msvcrt/ucrt) instead of the static one (libcmt/libucrt).
-            -- We also define _DLL and _MT so CRT headers use __declspec(dllimport).
-            -- Finally we suppress the static CRT at link time with /NODEFAULTLIB.
-            -- The pre-built libs (assimp, imgui, draco, etc.) expect /MD.
-            for idx,conf in pairs(cmox_configurations_n) do
-                local is_debug = cmox_configurations_d[idx]
-                filter { "configurations:" .. conf }
-                    if is_debug and not hmox_conan_release_only then
-                        defines { "_DLL", "_MT", "_DEBUG" }
-                        buildoptions {
-                            "-Xclang --dependent-lib=msvcrtd",
-                            "-Xclang --dependent-lib=ucrtd",
-                            "-Xclang --dependent-lib=msvcprtd",
-                            "-Xclang --dependent-lib=oldnames",
-                        }
-                        linkoptions {
-                            "-Xlinker /NODEFAULTLIB:libcmtd",
-                            "-Xlinker /NODEFAULTLIB:libcpmtd",
-                            "-Xlinker /NODEFAULTLIB:libucrtd",
-                            "-Xlinker /DEBUG:FULL",
-                        }
-                    else
-                        defines { "_DLL", "_MT" }
-                        buildoptions {
-                            "-Xclang --dependent-lib=msvcrt",
-                            "-Xclang --dependent-lib=ucrt",
-                            "-Xclang --dependent-lib=msvcprt",
-                            "-Xclang --dependent-lib=oldnames",
-                        }
-                        linkoptions {
-                            "-Xlinker /NODEFAULTLIB:libcmt",
-                            "-Xlinker /NODEFAULTLIB:libcpmt",
-                            "-Xlinker /NODEFAULTLIB:libucrt",
-                        }
-                    end
-                    -- Emit PDB for debug configs (needed by CodeLLDB/LLDB)
-                    if is_debug then
-                        linkoptions {
-                            "-Xlinker /DEBUG:FULL",
-                        }
-                    end
-                filter {}
-            end
-        end
-
-        multiprocessorcompile("On")
-
-        -- Custom project configuration
-        if cmox_function_setupproject~=nil then
-            cmox_function_setupproject()
-        end
-
+    -- Custom project configuration
+    if cmox_function_setupproject ~= nil then
+        cmox_function_setupproject()
+    end
 end
+
 function mox_c()
     language "C"
 
     mox_add_conan_building()
 end
+
 function mox_cs(dotnet)
-    if dotnet==nil then
+    if dotnet == nil then
         dotnet = "4.6"
     end
 
     language "C#"
     dotnetframework(dotnet)
 end
+
 function mox_cpp(cppstd)
     language "C++"
     cppdialect(cmox_cpp_version)
 
     mox_add_conan_building()
 end
+
 -- Link groups use -Wl,--start-group / --end-group which only GCC/ld understand.
 -- MSVC's linker (used by clang targeting MSVC) searches all libs by default
 -- and emits LNK4044 warnings for unrecognized --start-group / --end-group.
@@ -342,6 +350,7 @@ function mox_set_linkgroups()
         linkgroups "On"
     end
 end
+
 function mox_console()
     kind "ConsoleApp"
     defines {
@@ -351,6 +360,7 @@ function mox_console()
     mox_set_linkgroups()
     mox_add_conan_linking()
 end
+
 function mox_windowed()
     kind "WindowedApp"
     defines {
@@ -360,6 +370,7 @@ function mox_windowed()
     mox_set_linkgroups()
     mox_add_conan_linking()
 end
+
 function mox_sharedlib()
     kind "SharedLib"
     defines {
@@ -369,6 +380,7 @@ function mox_sharedlib()
     mox_set_linkgroups()
     mox_add_conan_linking()
 end
+
 function mox_staticlib()
     kind "StaticLib"
     defines {
@@ -376,6 +388,7 @@ function mox_staticlib()
         cmox_macro_prefix .. "LIB_STATIC",
     }
 end
+
 function mox_none()
     kind "None"
 end
@@ -388,33 +401,37 @@ function mox_setup_test()
     mox_console()
     links(hmox_test_requirements)
 end
+
 function mox_test_requirement()
     table.insert(hmox_test_requirements, hmox_project_name)
 end
-
 
 -- Internal functions
 function mox_add_conan_linking_step(conf)
     conan_setup_link(conf)
 end
+
 function mox_add_conan_building_step(conf)
     conan_setup_build(conf)
 end
+
 function mox_add_conan_itterate(func)
-    for idx,conf in pairs(cmox_configurations_n) do
+    for idx, conf in pairs(cmox_configurations_n) do
         local is_debug = cmox_configurations_d[idx]
         filter { "configurations:" .. conf }
-            if is_debug and not hmox_conan_release_only then
-                func("debug_" .. _OPTIONS["mox_premake_arch"]:lower())
-            else
-                func("release_" .. _OPTIONS["mox_premake_arch"]:lower())
-            end
+        if is_debug and not hmox_conan_release_only then
+            func("debug_" .. _OPTIONS["mox_premake_arch"]:lower())
+        else
+            func("release_" .. _OPTIONS["mox_premake_arch"]:lower())
+        end
         filter {}
     end
 end
+
 function mox_add_conan_linking()
     mox_add_conan_itterate(mox_add_conan_linking_step)
 end
+
 function mox_add_conan_building()
     mox_add_conan_itterate(mox_add_conan_building_step)
 end

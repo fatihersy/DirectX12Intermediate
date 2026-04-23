@@ -7,7 +7,7 @@ uuid("d54bdce0-8b62-11f0-b558-0800200c9a66")
 
 architecture "x64"
 system "windows"
-systemversion "10.0.26100.0:latest"
+systemversion "10.0.28000.0:latest"
 warnings "Default"
 buffersecuritycheck "On"
 fatalwarnings { "All" }

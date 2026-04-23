@@ -108,7 +108,8 @@ def MakefileBuild(conf, arch=None):
     # without needing the vcvarsall.bat environment.
     try:
         print("Generating compile_commands.json...")
-        import json, re
+        import json
+        import re
 
         # Build -isystem flags from the INCLUDE environment variable set by
         # vcvarsall.bat so clangd can find Windows SDK and MSVC STL headers.
@@ -131,7 +132,7 @@ def MakefileBuild(conf, arch=None):
             with open(top_makefile, "r") as f:
                 for mline in f:
                     # Match: @${MAKE} ... -C src/DXMaterial -f Makefile ...
-                    m = re.search(r'-C\s+(\S+)\s+-f\s+Makefile', mline)
+                    m = re.search(r"-C\s+(\S+)\s+-f\s+Makefile", mline)
                     if m:
                         project_dirs.append(m.group(1))
 
@@ -153,11 +154,14 @@ def MakefileBuild(conf, arch=None):
 
             for line in dry_run.stdout.splitlines():
                 # Match clang/clang++/gcc/g++ compile commands with -c flag
-                if re.search(r'\b(clang\+\+|clang|g\+\+|gcc|cc|c\+\+)\b', line) \
-                        and ' -c ' in line:
+                if (
+                    re.search(r"\b(clang\+\+|clang|g\+\+|gcc|cc|c\+\+)\b", line)
+                    and " -c " in line
+                ):
                     # Extract the source file (after -c)
-                    src_match = re.search(r'-c\s+"([^"]+)"', line) or \
-                                re.search(r'-c\s+(\S+)', line)
+                    src_match = re.search(r'-c\s+"([^"]+)"', line) or re.search(
+                        r"-c\s+(\S+)", line
+                    )
                     if src_match:
                         src = src_match.group(1)
                         cmd = line.strip()
@@ -168,28 +172,33 @@ def MakefileBuild(conf, arch=None):
                         # with just the header name so clangd processes the
                         # real header from the source directory.
                         def fix_pch_path(m):
-                            path = m.group(2).replace('\\', '/')
-                            if '/obj/' in path:
-                                return m.group(1) + path.rsplit('/', 1)[-1]
+                            path = m.group(2).replace("\\", "/")
+                            if "/obj/" in path:
+                                return m.group(1) + path.rsplit("/", 1)[-1]
                             return m.group(0)
-                        cmd = re.sub(r'(-include\s+)(\S+)', fix_pch_path, cmd)
+
+                        cmd = re.sub(r"(-include\s+)(\S+)", fix_pch_path, cmd)
 
                         # Inject MSVC/SDK include paths so clangd works
                         # without vcvarsall.bat environment
                         if system_include_flags:
                             cmd += system_include_flags
-                        entries.append({
-                            "directory": abs_proj_dir.replace("\\", "/"),
-                            "command": cmd,
-                            "file": src,
-                        })
+                        entries.append(
+                            {
+                                "directory": abs_proj_dir.replace("\\", "/"),
+                                "command": cmd,
+                                "file": src,
+                            }
+                        )
 
         with open("compile_commands.json", "w") as f:
             json.dump(entries, f, indent=2)
         if entries:
             print(f"compile_commands.json generated with {len(entries)} entries.")
         else:
-            print("Warning: compile_commands.json generated but no compile commands found.")
+            print(
+                "Warning: compile_commands.json generated but no compile commands found."
+            )
     except Exception as e:
         print(f"Warning: compile_commands.json generation skipped: {e}")
 
