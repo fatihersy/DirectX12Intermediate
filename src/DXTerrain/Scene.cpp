@@ -21,11 +21,11 @@ Scene::~Scene() {}
 
 void Scene::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
-    std::for_each(m_models.begin(), m_models.end(), [&rendererCtx](Model& model)
+    for (Model& model : m_models)
     {
         model.ResetUploadHeaps();
         model.UnloadGPU(rendererCtx);
-    });
+    }
 }
 
 void Scene::OnUpdate()

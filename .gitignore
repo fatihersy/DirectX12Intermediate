@@ -49,5 +49,8 @@ Makefile
 # Claude
 .claude/
 
+# Codex
+.codex/
+
 # App
 /app

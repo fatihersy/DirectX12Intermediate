@@ -32,6 +32,7 @@ public:
     std::wstring im_assetsPath;
     StepTimer m_timer;
 
+    bool isQuitting{};
 protected:
     static IApp* s_instance;
 };

@@ -111,7 +111,7 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_PAINT:
     {
-        if (iApp)
+        if (iApp and not iApp->isQuitting)
         {
             ImGui_ImplWin32_NewFrame();
             iApp->OnUpdate();
@@ -133,10 +133,11 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         if (iApp)
         {
-            ImGui_ImplWin32_Shutdown();
             iApp->OnDestroy();
+            iApp->isQuitting = true;
         }
         DestroyWindow(hWnd);
+        ImGui_ImplWin32_Shutdown();
         return S_OK;
     }
 

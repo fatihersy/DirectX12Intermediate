@@ -16,6 +16,13 @@ namespace NSDescriptor
             return thisHeap.ptr == offset.cpuAddr.ptr;
         }
 
+        const bool Owns(Handle handle) const
+        {
+            const CD3DX12_CPU_DESCRIPTOR_HANDLE thisHeap(im_cpuStart, handle.index, im_descriptorSize);
+
+            return thisHeap.ptr == handle.cpuAddr.ptr;
+        }
+
         Offset At(uint32_t index) const
         {
             assert(index < im_desc.NumDescriptors);

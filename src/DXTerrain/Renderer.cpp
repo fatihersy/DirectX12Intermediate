@@ -256,52 +256,26 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
 
 Renderer::~Renderer()
 {
-    ImGui_ImplDX12_Shutdown();
-    ImGui::DestroyContext();
-    m_imGuiSrvHeap.Reset();
 }
 void Renderer::OnDestroy()
 {
     WaitForGPU();
 
-    // Destroy render passes first (they reference heaps/device)
     for (auto& pass : m_passes) pass->OnDestroy();
     m_passes.clear();
 
-    // Unload registered models (cubemap textures, depth, descriptors)
-    auto modelsOpt = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    if (modelsOpt.has_value())
-    {
-        auto& models = modelsOpt->get();
-        for (size_t i = 0; i < models.size(); i++)
-        {
-            NSRenderer::Model& model = models[i];
-            model.m_envCubemap.cubemapDepth.Reset();
-            model.m_envCubemap.cubemapTexture.Reset();
-            FreeSRVStatic(model.m_envCubemap.srvHandle);
-            FreeSRVStatic(model.m_envCubemap.uavHandle);
-            FreeRTVStatic(model.m_envCubemap.rtvHandle);
-            FreeDSVStatic(model.m_envCubemap.dsvHandle);
-        }
-        models.clear();
-    }
-
-    // Release fallback texture
     FreeSRVStatic(m_fallbackTextureSRVhandle);
     m_fallbackTexture.defaultBuffer.Reset();
     m_fallbackTexture.uploadBuffer.Reset();
 
-    // Release render targets and depth stencil
     for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
     {
         m_renderTargets[i].Reset();
     }
     m_depthStencil.Reset();
 
-    // Release swap chain
     m_swapChain.Reset();
 
-    // Release command objects
     m_commandList.Reset();
     for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
     {
@@ -309,7 +283,6 @@ void Renderer::OnDestroy()
     }
     m_commandQueue.Reset();
 
-    // Release fence
     m_fence.Reset();
     if (m_fenceEvent)
     {
@@ -318,6 +291,10 @@ void Renderer::OnDestroy()
     }
 
     m_shaderCompiler.reset();
+
+    ImGui_ImplDX12_Shutdown();
+    ImGui::DestroyContext();
+    m_imGuiSrvHeap.Reset();
 }
 
 void Renderer::Execute(FnRendererExecutionBody Record)
@@ -622,16 +599,28 @@ void Renderer::UnloadModel(NSModel::RegisterModelKey key)
 
     NSRenderer::Model& model = models[key.index];
 
+    if (m_srvHeap.Owns(model.m_envCubemap.srvHandle))
+    {
+        FreeSRVStatic(model.m_envCubemap.srvHandle);
+    } 
+    if(m_srvHeap.Owns(model.m_envCubemap.uavHandle))
+    {
+        FreeSRVStatic(model.m_envCubemap.uavHandle);
+    }
+    if (m_rtvHeap.Owns(model.m_envCubemap.rtvHandle))
+    {
+        FreeRTVStatic(model.m_envCubemap.rtvHandle);
+    }
+    if (m_dsvHeap.Owns(model.m_envCubemap.dsvHandle))
+    {
+        FreeDSVStatic(model.m_envCubemap.dsvHandle);
+    }
+
     model.m_envCubemap.cubemapDepth.Reset();
     model.m_envCubemap.cubemapTexture.Reset();
     model.m_envCubemap.isDirty = false;
     model.m_envCubemap.isOnGPU = false;
     model.m_envCubemap.generation = 0;
-
-    FreeSRVStatic(model.m_envCubemap.srvHandle);
-    FreeSRVStatic(model.m_envCubemap.uavHandle);
-    FreeRTVStatic(model.m_envCubemap.rtvHandle);
-    FreeDSVStatic(model.m_envCubemap.dsvHandle);
 }
 
 void Renderer::Resize(UINT width, UINT height)
