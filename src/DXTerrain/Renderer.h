@@ -6,6 +6,7 @@
 #include "Allocator.h"
 #include "Blackboard.h"
 #include "ShaderCompiler.h"
+#include "Terrain.h"
 
 class Scene;
 
@@ -70,6 +71,11 @@ public:
     std::reference_wrapper<NSBarrier::IBarrierBatch> GetBarrierBatch() {
         assert(m_barrierBatch);
         return std::ref(*m_barrierBatch);
+    }
+
+    void CreateTerrain(NSRenderer::GraphicsCommandList cmdList, NSTerrain::TerrainDesc desc)
+    {
+        m_terrain.OnInit(cmdList, GetCtx(), desc);
     }
 
     NSRenderer::Ctx GetCtx() {
@@ -171,6 +177,8 @@ private:
     void WaitForGPU();
 
     constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
+
+    NSTerrain::Terrain m_terrain;
 
     //ImGui
     ComPtr<ID3D12DescriptorHeap> m_imGuiSrvHeap;

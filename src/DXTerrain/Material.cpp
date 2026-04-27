@@ -1,11 +1,6 @@
 #include "stdafx.h"
 #include "Material.h"
 
-#include "IApp.h"
-#include "DXSampleHelper.h"
-
-#include "Blackboard.h"
-
 Material::Material(IWICImagingFactory2* wicFactory) : m_wicFactory(wicFactory)
 {}
 

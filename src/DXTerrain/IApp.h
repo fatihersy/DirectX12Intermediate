@@ -27,6 +27,7 @@ public:
     constexpr static UINT ic_framesInFlight = 2u;
     constexpr static UINT ic_maxObjects = 128u;
 
+    uint32_t im_nextId{};
     float im_aspectRatio{};
     std::wstring im_executablePath;
     std::wstring im_assetsPath;

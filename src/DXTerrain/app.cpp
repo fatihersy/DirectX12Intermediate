@@ -150,6 +150,17 @@ void app::LoadAssets()
             12.f
         );
 
+        this->m_renderer.CreateTerrain(cmdList, NSTerrain::TerrainDesc
+        {
+            .worldWidth = 4096.f,
+            .worldDepth = 4096.f,
+            .maxHeight = 512.f,
+            .chunkCountX = 8,
+            .chunkCountZ = 8,
+            .vertsPerChunkEdge = 33,
+            .heightMapResolution = 1024
+        });
+
         Model& skyDome = m_scene.AddObject<NSModel::SDome>
         (
             NSModel::AddCtx { .name = L"SkyDome" },
@@ -161,7 +172,7 @@ void app::LoadAssets()
             ctx
         );
 
-        skyDome.m_sceneKey.id = this->m_nextModelId++;
+        skyDome.m_sceneKey.id = this->im_nextId++;
         skyDome.m_sceneKey.index = 0u;
         skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP);
 
@@ -200,7 +211,7 @@ void app::LoadAssets()
                     desc,
                     ctx
                 );
-                model.m_sceneKey.id = this->m_nextModelId++;
+                model.m_sceneKey.id = this->im_nextId++;
                 model.m_sceneKey.index = idx;
 
                 model.collision.radius = desc.desc.radius;
@@ -237,7 +248,7 @@ void app::LoadAssets()
                         ));
                     }
                 }
-        
+
                 // Post upload
                 {
                     ctx.barrierBatch.get().Add(NSBarrier::kApp_endModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(

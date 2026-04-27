@@ -52,14 +52,14 @@ cmox_project_architecture = "flat"
 -- BUILD SYSTEM
 -- "visualstudio"   Generate Visual Studio solution/project files
 -- "makefile"       Generate GNU Makefiles (gmake2)
-cmox_build_system = "visualstudio"
+cmox_build_system = "makefile"
 
 -- COMPILER
 -- Set to nil to auto-detect based on platform
 -- For Visual Studio: nil (default msvc), "clang-cl" (LLVM/Clang with MSVC compatibility)
 -- For makefiles on Windows: "msvc", "gcc", "clang"
 -- For makefiles on Linux: "gcc", "clang"
-cmox_compiler = "msvc"
+cmox_compiler = "clang"
 
 -- VISUAL STUDIO VERSION (Windows only)
 -- Defines the Visual Studio version year to use for project generation

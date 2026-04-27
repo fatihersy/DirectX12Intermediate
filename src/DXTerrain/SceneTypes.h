@@ -2,6 +2,19 @@
 
 namespace NSScene
 {
+    struct TerrainChunk
+    {
+        NSTerrain::ChunkKey key;
+        NSTerrain::ChunkBounds bound;
+        bool isVisible{};
+    };
+
+    struct Terrain
+    {
+        NSTerrain::TerrainDesc desc;
+        std::vector<TerrainChunk> chunks;
+    };
+
     struct Camera
     {
         Camera(){};
