@@ -7,5 +7,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
     app app(1280, 720, L"DXTerrain", hInstance, nCmdShow);
 
     app.OnInit();
-    app.Run();
+    
+    return app.Run();
 }

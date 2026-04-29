@@ -185,7 +185,7 @@ static_assert(offsetof(atmosphereConstants, PADDING_1) % 4 == 0);
 
 inline bool operator!=(const atmosphereConstants& lhs, const atmosphereConstants& rhs) noexcept
 {
-    if (not NSTool::Float3Equals(lhs.BetaR, rhs.BetaR)) return true;
+    if (not NSMath::Float3Equals(lhs.BetaR, rhs.BetaR)) return true;
     if (lhs.BetaMScatter != rhs.BetaMScatter) return true;
     if (lhs.BetaMExtinct != rhs.BetaMExtinct) return true;
     if (lhs.MieG         != rhs.MieG) return true;
@@ -194,7 +194,7 @@ inline bool operator!=(const atmosphereConstants& lhs, const atmosphereConstants
     if (lhs.Rg           != rhs.Rg) return true;
     if (lhs.Rt           != rhs.Rt) return true;
     if (lhs.SunIntensity != rhs.SunIntensity) return true;
-    if (not NSTool::Float3Equals(lhs.SunDir, rhs.SunDir)) return true;
+    if (not NSMath::Float3Equals(lhs.SunDir, rhs.SunDir)) return true;
 
     return false;
 }

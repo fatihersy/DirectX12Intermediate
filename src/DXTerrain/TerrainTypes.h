@@ -6,13 +6,12 @@ namespace NSTerrain
     {
         uint32_t gridX{};
         uint32_t gridZ{};
-        size_t index = INT_MAX;
+        size_t index = SIZE_MAX;
     };
 
     struct ChunkBounds
     {
-        DirectX::XMFLOAT3 aabbMin;
-        DirectX::XMFLOAT3 aabbMax;
+        NSMath::SBoundAABB aabb;
     };
 
     struct TerrainDesc

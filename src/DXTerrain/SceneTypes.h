@@ -49,29 +49,4 @@ namespace NSScene
         float camSpeed{};
         float lookSensitivity{};
     };
-
-    struct Frustum
-    {
-    public:
-        Frustum() {};
-        Frustum(DirectX::XMMATRIX viewProj);
-
-        bool TestSphere(DirectX::FXMVECTOR center, float radius) const
-        {
-            using namespace DirectX;
-            for (size_t i{}; i < 6; i++)
-            {
-                const float dist = XMVectorGetX(XMPlaneDotCoord(Planes[i], center));
-
-                if (dist < -radius)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        DirectX::XMVECTOR Planes[6]{};
-    };
 }

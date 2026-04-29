@@ -41,7 +41,9 @@ using OptRef = std::optional<std::reference_wrapper<T>>;
 
 constexpr std::wstring_view PROJECT_NAME = L"DXTerrain";
 
+#include "core/Math.h"
 #include "StepTimer.h"
+#include "Logger.h"
 #include "Tools.h"
 #include "TerrainTypes.h"
 #include "SceneTypes.h"

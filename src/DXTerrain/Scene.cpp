@@ -34,6 +34,30 @@ void Scene::OnUpdate()
     DirectX::XMStoreFloat3(&fcamEye, m_camera.camEye);
 
     UpdateCamera();
+
+    NSMath::SFrustum frustum(m_camera.viewMatrix * m_camera.projMatrix);
+
+    for (NSScene::TerrainChunk& chunk : m_terrain.chunks)
+    {
+        // Whole for loop can be moved
+        chunk.isVisible = frustum.TestAABB(chunk.bound.aabb);
+    }
+
+    // TODO: Remove Later
+    {
+        static bool fired = false;
+        if (not fired)
+        {
+            int count{};
+            for (NSScene::TerrainChunk& chunk : m_terrain.chunks) {
+                if (chunk.isVisible) count++;
+            }
+            g_FDebug("Scene::m_terrain.chunks -> chunk.isVisible == true : %d\n", count);
+
+            fired = true;
+        }
+    }
+
 }
 
 
@@ -62,7 +86,7 @@ void Scene::CullScene(const NSScene::Camera* camOverride, NSModel::SceneModelKey
 
     m_modelsCulled.clear();
 
-    NSScene::Frustum frustum(pCamera->viewMatrix * pCamera->projMatrix);
+    NSMath::SFrustum frustum(pCamera->viewMatrix * pCamera->projMatrix);
 
     for (size_t itr{}; itr < m_models.size(); itr++)
     {
@@ -73,49 +97,11 @@ void Scene::CullScene(const NSScene::Camera* camOverride, NSModel::SceneModelKey
         DirectX::XMFLOAT3 fPos = model.GetPosition();
         DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&fPos);
 
-        if (frustum.TestSphere(pos, model.collision.radius))
+        if (frustum.TestSphere(model.collision))
         {
             m_modelsCulled.push_back(model.m_sceneKey);
         }
     }
-}
-
-NSScene::Frustum::Frustum(DirectX::XMMATRIX viewProj)
-{
-    using namespace DirectX;
-
-    XMFLOAT4X4 m{};
-    XMStoreFloat4x4(&m, viewProj);
-
-    // Left:   row3 + row0
-    Planes[0] = XMPlaneNormalize(
-        XMVectorSet(m._14 + m._11, m._24 + m._21, m._34 + m._31, m._44 + m._41)
-    );
-
-    // Right:  row3 - row0
-    Planes[1] = XMPlaneNormalize(
-        XMVectorSet(m._14 - m._11, m._24 - m._21, m._34 - m._31, m._44 - m._41)
-    );
-
-    // Bottom: row3 + row1
-    Planes[2] = XMPlaneNormalize(
-        XMVectorSet(m._14 + m._12, m._24 + m._22, m._34 + m._32, m._44 + m._42)
-    );
-
-    // Top:    row3 - row1
-    Planes[3] = XMPlaneNormalize(
-        XMVectorSet(m._14 - m._12, m._24 - m._22, m._34 - m._32, m._44 - m._42)
-    );
-
-    // Near:   row2  (DX clip space z in [0,1])
-    Planes[4] = XMPlaneNormalize(
-        XMVectorSet(m._13, m._23, m._33, m._43)
-    );
-
-    // Far:    row3 - row2
-    Planes[5] = XMPlaneNormalize(
-        XMVectorSet(m._14 - m._13, m._24 - m._23, m._34 - m._33, m._44 - m._43)
-    );
 }
 
 void Scene::ForEachModel(std::function<void(Model& model)> ForEach)

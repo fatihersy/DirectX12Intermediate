@@ -107,7 +107,7 @@ public:
     std::filesystem::path m_assetsPath;
     bool isOnGPU{};
     bool isOnCPU{};
-    NSModel::SphereCollision collision;
+    NSMath::SBoundSphere collision;
 
     bool TestFlag(NSModel::EModelFlag flag) const {
         return m_flags.test(static_cast<uint32_t>(flag));

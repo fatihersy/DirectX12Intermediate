@@ -77,6 +77,9 @@ public:
     {
         m_terrain.OnInit(cmdList, GetCtx(), desc);
     }
+    const NSTerrain::Terrain& GetTerrain() const {
+        return m_terrain;
+    }
 
     NSRenderer::Ctx GetCtx() {
         return NSRenderer::Ctx(

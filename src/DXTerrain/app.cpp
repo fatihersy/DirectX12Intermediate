@@ -69,7 +69,7 @@ void app::OnDestroy()
     dxgiDebug.Reset();
 };
 
-void app::Run()
+int app::Run()
 {
     MSG msg{};
 
@@ -77,6 +77,8 @@ void app::Run()
     {
         plat.Dispatch(msg);
     }
+
+    return static_cast<int>(msg.wParam);
 }
 void app::LoadPipeline()
 {
@@ -132,7 +134,7 @@ void app::LoadPipeline()
             }
         }
 
-        ThrowIfFailed(D3D12CreateDevice(adapter.Detach(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&m_device)));
+        ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&m_device)));
     }
 
     m_renderer.Init(m_factory.Get(), m_device.Get(), plat.GetWindow(), im_width, im_height);
@@ -150,7 +152,7 @@ void app::LoadAssets()
             12.f
         );
 
-        this->m_renderer.CreateTerrain(cmdList, NSTerrain::TerrainDesc
+        m_scene.m_terrain.desc = NSTerrain::TerrainDesc
         {
             .worldWidth = 4096.f,
             .worldDepth = 4096.f,
@@ -159,7 +161,17 @@ void app::LoadAssets()
             .chunkCountZ = 8,
             .vertsPerChunkEdge = 33,
             .heightMapResolution = 1024
-        });
+        };
+        this->m_renderer.CreateTerrain(cmdList, m_scene.m_terrain.desc);
+
+        for (const NSTerrain::TerrainChunk& chunk : this->m_renderer.GetTerrain().GetChunks())
+        {
+            m_scene.m_terrain.chunks.push_back({
+                .key = chunk.key,
+                .bound = chunk.bounds,
+                .isVisible = false
+            });
+        }
 
         Model& skyDome = m_scene.AddObject<NSModel::SDome>
         (
@@ -214,6 +226,7 @@ void app::LoadAssets()
                 model.m_sceneKey.id = this->im_nextId++;
                 model.m_sceneKey.index = idx;
 
+                model.collision.position = { posX, posY, 0.f };
                 model.collision.radius = desc.desc.radius;
                 model.collision.sliceCount = desc.desc.sliceCount;
                 model.collision.stackCount = desc.desc.stackCount;

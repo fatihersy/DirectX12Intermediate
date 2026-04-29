@@ -1,7 +1,6 @@
 #include "stdafx.h"
 #include "Pipeline.h"
 
-#include "IApp.h"
 #include "DXSampleHelper.h"
 
 #include "ShaderCompiler.h"

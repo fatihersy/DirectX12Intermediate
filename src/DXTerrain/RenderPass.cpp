@@ -850,7 +850,7 @@ void EnvironmentCubemapPass::Execute(Scene& scene, Blackboard& blackboard, NSRen
         {
             for (NSRenderer::Model::Neighbor& neighbor : regModel.objsInFrustum)
             {
-                if (not NSTool::Float3Equals(neighbor.position, sceneModel.GetPosition()))
+                if (not NSMath::Float3Equals(neighbor.position, sceneModel.GetPosition()))
                 {
                     regModel.isDirty = true;
                 }

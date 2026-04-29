@@ -14,7 +14,7 @@ public:
     app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int nCmdShow);
     ~app();
 
-    void Run();
+    int Run();
 
     void OnInit() override;
     void OnUpdate() override;

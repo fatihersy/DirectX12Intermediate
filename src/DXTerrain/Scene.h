@@ -73,9 +73,11 @@ public:
 
     void ForEachModel(std::function<void(Model& model)> ForEach);
 
+    NSScene::Terrain m_terrain{};
+
     std::vector<Model> m_models;
     std::vector<NSModel::SceneModelKey> m_modelsCulled;
-    NSScene::Camera m_camera;
+    NSScene::Camera m_camera{};
 
     float m_timeOfDay{};
 

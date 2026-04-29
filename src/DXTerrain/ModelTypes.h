@@ -156,10 +156,4 @@ namespace NSModel
     inline bool operator!=(RegisterModelKey& lhs, RegisterModelKey& rhs) {
         return lhs.id != rhs.id or lhs.index != rhs.index;
     }
-
-    struct SphereCollision {
-        float radius{};
-        UINT sliceCount{};
-        UINT stackCount{};
-    };
 }

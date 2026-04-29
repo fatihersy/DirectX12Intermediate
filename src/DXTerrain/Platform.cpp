@@ -11,9 +11,33 @@
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
+enum class FConsoleColor : WORD {
+    White = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE,
+    Red = FOREGROUND_RED | FOREGROUND_INTENSITY,
+    Green = FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+    Blue = FOREGROUND_BLUE | FOREGROUND_INTENSITY,
+    Yellow = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+    Magenta = FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY,
+    Cyan = FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY,
+    Gray = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE
+};
+
 Platform::Platform(SWindow wnd)
 {
     assert(wnd.pApp);
+
+    if (AllocConsole())
+    {
+        SetConsoleTitle(L"Debug Console");
+
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD dwMode = 0;
+
+        GetConsoleMode(hOut, &dwMode);
+        dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        SetConsoleMode(hOut, dwMode);
+    }
+    g_PlatformConsoleWrite = &Platform::PlatformConsoleWrite;
 
     this->m_wnd = wnd;
 
@@ -52,7 +76,7 @@ void Platform::ShowWindow()
 }
 void Platform::Dispatch(MSG& msg)
 {
-    if (PeekMessage(&msg, m_wnd.hWnd, 0, 0, PM_REMOVE))
+    if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
     {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
@@ -131,13 +155,13 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_CLOSE:
     {
+        ImGui_ImplWin32_Shutdown();
         if (iApp)
         {
             iApp->OnDestroy();
             iApp->isQuitting = true;
         }
         DestroyWindow(hWnd);
-        ImGui_ImplWin32_Shutdown();
         return S_OK;
     }
 
@@ -162,4 +186,44 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     return DefWindowProc(hWnd, message, wParam, lParam);
+}
+
+void Platform::PlatformConsoleWrite(FlogLevel level, const std::string_view& message)
+{
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hConsole == INVALID_HANDLE_VALUE)
+    {
+        OutputDebugStringA(message.data());
+        return;
+    }
+
+    bool isError = level <= FlogLevel::FLOG_ERROR;
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hConsole, &csbi);
+    WORD originalColor = csbi.wAttributes;
+
+    WORD newColor = static_cast<WORD>(FConsoleColor::Red);
+
+    switch (level)
+    {
+    case FlogLevel::FLOG_FATAL:  break;
+    case FlogLevel::FLOG_ERROR: break;
+    case FlogLevel::FLOG_WARN: newColor = static_cast<WORD>(FConsoleColor::Yellow);
+        break;
+    case FlogLevel::FLOG_INFO: newColor = static_cast<WORD>(FConsoleColor::Blue);
+        break;
+    case FlogLevel::FLOG_DEBUG: newColor = static_cast<WORD>(FConsoleColor::White);
+        break;
+    case FlogLevel::FLOG_TRACE: newColor = static_cast<WORD>(FConsoleColor::White);
+        break;
+    default: break;
+    }
+
+    SetConsoleTextAttribute(hConsole, newColor);
+
+    DWORD charsWritten;
+    WriteConsoleA(hConsole, message.data(), static_cast<DWORD>(message.length()), &charsWritten, NULL);
+
+    SetConsoleTextAttribute(hConsole, originalColor);
 }

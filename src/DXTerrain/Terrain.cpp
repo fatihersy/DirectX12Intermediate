@@ -18,7 +18,7 @@ void Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
 }
 void Terrain::OnDestroy()
 {
-    assert(m_heightmapSRV.amount > 0);
+    assert(m_heightmapSRV.amount == 0);
 
     m_device = nullptr;
     m_chunks.clear();
@@ -49,12 +49,12 @@ void Terrain::GenerateHeightmap()
             float u = float(x) / float(m_hmWidth - 1);
             float v = float(z) / float(m_hmHeight - 1);
 
-            float h = NSTool::FBm(u * baseFrequency, v * baseFrequency, seed);
+            float h = NSMath::FBm(u * baseFrequency, v * baseFrequency, seed);
 
             // Optional shaping: more lowlands, slightly sharper peaks.
             h = std::pow(h, 1.35f);
 
-            m_cpuHeightData[size_t(z) * size_t(m_hmWidth) + size_t(x)] = NSTool::Saturate(h);
+            m_cpuHeightData[size_t(z) * size_t(m_hmWidth) + size_t(x)] = NSMath::Saturate(h);
         }
     }
 }
@@ -187,20 +187,86 @@ void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsComma
             assert(vertices.size() == expectedVertexCount);
             assert(triIndices.size() == expectedTriIndexCount);
             assert(patchIndices.size() == expectedPatchIndexCount);
+            assert(aabbMin.x <= aabbMax.x);
+            assert(aabbMin.y <= aabbMax.y);
+            assert(aabbMin.z <= aabbMax.z);
 
-            chunk.bounds = NSTerrain::ChunkBounds{
-                .aabbMin = aabbMin,
-                .aabbMax = aabbMax
+            chunk.key = ChunkKey {
+                .gridX = gx,
+                .gridZ = gz,
+                .index = chunkIndex
+            };
+            chunk.bounds.aabb = NSMath::SBoundAABB {
+                .min = aabbMin,
+                .max = aabbMax
             };
             m_chunks.push_back(std::move(chunk));
         }
     }
 
-    assert(m_chunks.size() == m_desc.chunkCountX * m_desc.chunkCountZ);
+    assert(m_chunks.size() == static_cast<size_t>(m_desc.chunkCountX) * m_desc.chunkCountZ);
+
+    // TODO: Remove after
+    {
+        g_FDebug("m_chunks.size():%zu\n", m_chunks.size());
+
+        {
+            TerrainChunk& fstchunk = m_chunks[0];
+            DirectX::XMFLOAT3& fstAabbMin = fstchunk.bounds.aabb.min;
+            DirectX::XMFLOAT3& fstAabbMax = fstchunk.bounds.aabb.max;
+
+            g_FDebug("chunks%zu : triangleIndexCount:%u\n", fstchunk.key.index, fstchunk.triangleIndexCount);
+            g_FDebug("chunks%zu : patchIndexCount:%u\n", fstchunk.key.index,  fstchunk.patchIndexCount);
+            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f\n", fstchunk.key.index,  fstAabbMin.y);
+            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s\n", fstchunk.key.index,  fstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
+            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s\n", fstchunk.key.index,  fstAabbMax.y, fstAabbMin.y, NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y) ? "TRUE" : "FALSE");
+        }
+
+        {
+            TerrainChunk& lstchunk = m_chunks[m_chunks.size() - 1u];
+            DirectX::XMFLOAT3& lstAabbMin = lstchunk.bounds.aabb.min;
+            DirectX::XMFLOAT3& lstAabbMax = lstchunk.bounds.aabb.max;
+
+            g_FDebug("chunks%zu : triangleIndexCount:%u\n", lstchunk.key.index, lstchunk.triangleIndexCount);
+            g_FDebug("chunks%zu : patchIndexCount:%u\n", lstchunk.key.index,  lstchunk.patchIndexCount);
+            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f\n", lstchunk.key.index,  lstAabbMin.y);
+            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s\n", lstchunk.key.index,  lstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
+            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s\n", lstchunk.key.index,  lstAabbMax.y, lstAabbMin.y, NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y) ? "TRUE" : "FALSE");
+        }
+    }
 }
 float Terrain::SampleHeight(float u, float v) const
 {
+    assert(not m_cpuHeightData.empty());
+    if (m_hmWidth == 0 || m_hmHeight == 0) return 0.0f;
 
+    u = NSMath::Saturate(u);
+    v = NSMath::Saturate(v);
 
-    return 0;
+    const float x = u * float(m_hmWidth - 1);
+    const float z = v * float(m_hmHeight - 1);
+
+    const uint32_t x0 = static_cast<uint32_t>(std::floor(x));
+    const uint32_t z0 = static_cast<uint32_t>(std::floor(z));
+
+    const uint32_t x1 = std::min(x0 + 1, m_hmWidth - 1);
+    const uint32_t z1 = std::min(z0 + 1, m_hmHeight - 1);
+
+    const float tx = x - float(x0);
+    const float tz = z - float(z0);
+
+    const auto At = [this](uint32_t sampleX, uint32_t sampleZ)
+    {
+        return m_cpuHeightData[size_t(sampleZ) * size_t(m_hmWidth) + size_t(sampleX)];
+    };
+
+    const float h00 = At(x0, z0);
+    const float h10 = At(x1, z0);
+    const float h01 = At(x0, z1);
+    const float h11 = At(x1, z1);
+
+    const float hx0 = NSMath::Lerp(h00, h10, tx);
+    const float hx1 = NSMath::Lerp(h01, h11, tx);
+
+    return NSMath::Lerp(hx0, hx1, tz);
 }

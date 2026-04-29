@@ -4,16 +4,16 @@ namespace NSTerrain
 {
     struct TerrainChunk
     {
-        ComPtr<ID3D12Resource> vertexBuffer;
+        ComPtr<ID3D12Resource> vertexDefault;
         ComPtr<ID3D12Resource> vertexUpload;
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
 
-        ComPtr<ID3D12Resource> triangleIndexBuffer;
+        ComPtr<ID3D12Resource> triangleIndexDefault;
         ComPtr<ID3D12Resource> triangleIndexUpload;
         D3D12_INDEX_BUFFER_VIEW triangleIndexBufferView{};
         uint32_t triangleIndexCount{};
 
-        ComPtr<ID3D12Resource> patchIndexBuffer;
+        ComPtr<ID3D12Resource> patchIndexDefault;
         ComPtr<ID3D12Resource> patchIndexUpload;
         D3D12_INDEX_BUFFER_VIEW patchIndexBufferView{};
         uint32_t patchIndexCount{};
@@ -21,6 +21,7 @@ namespace NSTerrain
         DirectX::XMFLOAT2 chunkUVOffset{};
         DirectX::XMFLOAT2 chunkUVScale{};
 
+        ChunkKey key;
         ChunkBounds bounds;
     };
 
@@ -36,10 +37,8 @@ namespace NSTerrain
         const TerrainDesc& GetDesc() const {
             return m_desc;
         }
-        const TerrainChunk& GetChunk(NSTerrain::ChunkKey key) const {
-            assert(m_chunks.size() > key.index);
-
-            return m_chunks[key.index];
+        const std::vector<TerrainChunk>& GetChunks() const {
+            return m_chunks;
         }
 
     private:

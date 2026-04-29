@@ -292,6 +292,12 @@ void Renderer::OnDestroy()
 
     m_shaderCompiler.reset();
 
+    m_srvHeap = NSDescriptor::RingHeap{};
+    m_rtvHeap = NSDescriptor::StaticHeap{};
+    m_dsvHeap = NSDescriptor::StaticHeap{};
+    m_constantAllocator = ConstantAllocator{};
+    m_barrierBatch.reset();
+
     ImGui_ImplDX12_Shutdown();
     ImGui::DestroyContext();
     m_imGuiSrvHeap.Reset();
@@ -593,7 +599,7 @@ void Renderer::UnloadModel(NSModel::RegisterModelKey key)
     auto modelsOpt = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     assert(modelsOpt.has_value() and "Blackboard key is has no value");
 
-    auto models = modelsOpt.value().get();
+    auto& models = modelsOpt.value().get();
 
     assert(models.size() > key.index and models[key.index].sceneKey.id == key.id and "Renderer::UnloadModel::Invalid Register model key");
 
