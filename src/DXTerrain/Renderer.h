@@ -15,7 +15,7 @@ using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSRender
 class Renderer
 {
 public:
-    Renderer(){};
+    Renderer() {}
     ~Renderer();
 
     void Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height);
@@ -182,6 +182,9 @@ private:
     constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
 
     NSTerrain::Terrain m_terrain;
+
+    ComPtr<ID3D12InfoQueue1> m_infoQueue1;
+    DWORD m_infoQueueCookie{};
 
     //ImGui
     ComPtr<ID3D12DescriptorHeap> m_imGuiSrvHeap;

@@ -3,30 +3,130 @@
 
 using namespace NSTerrain;
 
+#include "DXSampleHelper.h"
+
 Terrain::Terrain() {}
 Terrain::Terrain(ID3D12Device14* device) : m_device(device)
 {
 
 }
+
+Terrain::Terrain(Terrain&& other) noexcept
+    : m_device(other.m_device)
+    , m_desc(other.m_desc)
+    , m_chunks(std::move(other.m_chunks))
+    , m_cpuHeightData(std::move(other.m_cpuHeightData))
+    , m_hmWidth(other.m_hmWidth)
+    , m_hmHeight(other.m_hmHeight)
+    , m_heightmapBufferDefault(std::move(other.m_heightmapBufferDefault))
+    , m_heightmapBufferUpload(std::move(other.m_heightmapBufferUpload))
+    , m_heightmapSRV(other.m_heightmapSRV)
+{
+    other.m_device = nullptr;
+    other.m_desc = {};
+    other.m_hmWidth = 0;
+    other.m_hmHeight = 0;
+    other.m_heightmapSRV = {};
+}
+
+Terrain& Terrain::operator=(Terrain&& other) noexcept
+{
+    if (this != &other)
+    {
+        m_device = other.m_device;
+        m_desc = other.m_desc;
+        m_chunks = std::move(other.m_chunks);
+        m_cpuHeightData = std::move(other.m_cpuHeightData);
+        m_hmWidth = other.m_hmWidth;
+        m_hmHeight = other.m_hmHeight;
+        m_heightmapBufferDefault = std::move(other.m_heightmapBufferDefault);
+        m_heightmapBufferUpload = std::move(other.m_heightmapBufferUpload);
+        m_heightmapSRV = other.m_heightmapSRV;
+
+        other.m_device = nullptr;
+        other.m_desc = {};
+        other.m_hmWidth = 0;
+        other.m_hmHeight = 0;
+        other.m_heightmapSRV = {};
+    }
+
+    return *this;
+}
+
+
 void Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc)
 {
     this->m_desc = desc;
 
     GenerateHeightmap();
 
+    auto createUplBufferAndUpload = [this](std::wstring_view name, size_t dataSize, void* data, ComPtr<ID3D12Resource>& buffer)
+    {
+        const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
+        const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &props,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&buffer)
+        ));
+        buffer->SetName(name.data());
+
+        void* ppData = nullptr;
+        ThrowIfFailed(buffer->Map(0u, nullptr, reinterpret_cast<void**>(&ppData)));
+        memcpy(ppData, data, dataSize);
+        buffer->Unmap(0u, nullptr);
+    };
+    auto createDefBuffer = [this](std::wstring_view name, size_t dataSize, ComPtr<ID3D12Resource>& buffer)
+    {
+        const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
+        const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &props,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&buffer)
+        ));
+        buffer->SetName(name.data());
+    };
+
+    size_t dataSize = m_cpuHeightData.size() * sizeof(float);
+    createUplBufferAndUpload(L"NSTerrain::Terrain::m_heightmapTextureUpload", dataSize, m_cpuHeightData.data(), m_heightmapBufferUpload);
+    createDefBuffer(L"NSTerrain::Terrain::m_heightmapTextureDefault", dataSize, m_heightmapBufferDefault);
+
+    m_heightmapSRV = rendererCtx.allocSRVStatic(1u);
+
     BuildChunks(rendererCtx, cmdList);
 }
-void Terrain::OnDestroy()
+void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
-    assert(m_heightmapSRV.amount == 0);
-
     m_device = nullptr;
+
+    rendererCtx.freeSRVStatic(m_heightmapSRV);
+    m_heightmapSRV = NSDescriptor::Handle{};
+
+    for (auto& chunk : m_chunks)
+    {
+        chunk.vertexDefault.Reset();
+        chunk.vertexUpload.Reset();
+        chunk.triangleIndexDefault.Reset();
+        chunk.triangleIndexUpload.Reset();
+        chunk.patchIndexDefault.Reset();
+        chunk.patchIndexUpload.Reset();
+    }
+
     m_chunks.clear();
     m_chunks.resize(0);
     m_cpuHeightData.clear();
     m_cpuHeightData.resize(0);
-    m_heightmapTextureDefault.Reset();
-    m_heightmapTextureUpload.Reset();
+    m_heightmapBufferDefault.Reset();
+    m_heightmapBufferUpload.Reset();
     m_hmWidth = 0;
     m_hmHeight = 0;
     m_desc = {};
@@ -172,12 +272,111 @@ void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsComma
                 1.f / float(m_desc.chunkCountX),
                 1.f / float(m_desc.chunkCountZ)
             };
+            chunk.key = ChunkKey {
+                .gridX = gx,
+                .gridZ = gz,
+                .index = chunkIndex
+            };
+            chunk.bounds.aabb = NSMath::SBoundAABB {
+                .min = aabbMin,
+                .max = aabbMax
+            };
 
-            // TODO: GPU upload:
-            // - create vertex buffer
-            // - create triangle index buffer
-            // - create patch index buffer
-            // - fill VB/IB views
+            std::wstring chunkName = NSTool::wformat(L"NSTerrain::Terrain::Chunk%zu", chunkIndex);
+
+            auto createUplBufferAndUpload = [this](std::wstring_view name, size_t dataSize, void* data, ComPtr<ID3D12Resource>& buffer)
+            {
+                const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
+                const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+
+                ThrowIfFailed(m_device->CreateCommittedResource(
+                    &props,
+                    D3D12_HEAP_FLAG_NONE,
+                    &desc,
+                    D3D12_RESOURCE_STATE_GENERIC_READ,
+                    nullptr,
+                    IID_PPV_ARGS(&buffer)
+                ));
+                buffer->SetName(name.data());
+
+                void* ppData = nullptr;
+                ThrowIfFailed(buffer->Map(0u, nullptr, reinterpret_cast<void**>(&ppData)));
+                memcpy(ppData, data, dataSize);
+                buffer->Unmap(0u, nullptr);
+            };
+            auto createDefBuffer = [this](std::wstring_view name, size_t dataSize, ComPtr<ID3D12Resource>& buffer)
+            {
+                const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
+                const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+
+                ThrowIfFailed(m_device->CreateCommittedResource(
+                    &props,
+                    D3D12_HEAP_FLAG_NONE,
+                    &desc,
+                    D3D12_RESOURCE_STATE_COMMON,
+                    nullptr,
+                    IID_PPV_ARGS(&buffer)
+                ));
+                buffer->SetName(name.data());
+            };
+
+            // Vertices
+            {
+                size_t dataSize = vertices.size() * sizeof(NSModel::Vertex);
+                createUplBufferAndUpload(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"vertexUpload").c_str(), dataSize, vertices.data(), chunk.vertexUpload);
+                createDefBuffer(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"vertexDefault").c_str(), dataSize, chunk.vertexDefault);
+                chunk.vertexBufferView.BufferLocation = chunk.vertexDefault->GetGPUVirtualAddress();
+                chunk.vertexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
+                chunk.vertexBufferView.StrideInBytes = sizeof(NSModel::Vertex);
+            }
+
+            // Triangle indices
+            {
+                size_t dataSize = chunk.triangleIndexCount * sizeof(UINT);
+                createUplBufferAndUpload(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"triangleIndexUpload").c_str(), dataSize, triIndices.data(), chunk.triangleIndexUpload);
+                createDefBuffer(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"triangleIndexDefault").c_str(), dataSize, chunk.triangleIndexDefault);
+                chunk.triangleIndexBufferView.BufferLocation = chunk.triangleIndexDefault->GetGPUVirtualAddress();
+                chunk.triangleIndexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
+                chunk.triangleIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
+            }
+
+            // Patch indices
+            {
+                size_t dataSize = chunk.patchIndexCount * sizeof(UINT);
+                createUplBufferAndUpload(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"patchIndexUpload").c_str(), dataSize, patchIndices.data(), chunk.patchIndexUpload);
+                createDefBuffer(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"patchIndexDefault").c_str(), dataSize, chunk.patchIndexDefault);
+                chunk.patchIndexBufferView.BufferLocation = chunk.patchIndexDefault->GetGPUVirtualAddress();
+                chunk.patchIndexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
+                chunk.patchIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
+            }
+
+            // Barriers
+            {
+                std::vector<D3D12_RESOURCE_BARRIER> preCopy;
+                preCopy.reserve(3);
+
+                preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.vertexDefault.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST));
+                preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.triangleIndexDefault.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST));
+                preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.patchIndexDefault.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST));
+
+                cmdList.ResourceBarrier(static_cast<UINT>(preCopy.size()), preCopy.data());
+            }
+
+            cmdList.CopyResource(chunk.vertexDefault.Get(), chunk.vertexUpload.Get());
+            cmdList.CopyResource(chunk.triangleIndexDefault.Get(), chunk.triangleIndexUpload.Get());
+            cmdList.CopyResource(chunk.patchIndexDefault.Get(), chunk.patchIndexUpload.Get());
+
+            // Barriers
+            {
+                std::vector<D3D12_RESOURCE_BARRIER> postCopy;
+                postCopy.reserve(3);
+
+                postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.vertexDefault.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
+                postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.triangleIndexDefault.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
+                postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.patchIndexDefault.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
+
+                cmdList.ResourceBarrier(static_cast<UINT>(postCopy.size()), postCopy.data());
+            }
 
             const uint32_t expectedVertexCount = vertsPerEdge * vertsPerEdge;
             const uint32_t expectedQuadCount = (vertsPerEdge - 1) * (vertsPerEdge - 1);
@@ -191,15 +390,6 @@ void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsComma
             assert(aabbMin.y <= aabbMax.y);
             assert(aabbMin.z <= aabbMax.z);
 
-            chunk.key = ChunkKey {
-                .gridX = gx,
-                .gridZ = gz,
-                .index = chunkIndex
-            };
-            chunk.bounds.aabb = NSMath::SBoundAABB {
-                .min = aabbMin,
-                .max = aabbMax
-            };
             m_chunks.push_back(std::move(chunk));
         }
     }
@@ -208,18 +398,18 @@ void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsComma
 
     // TODO: Remove after
     {
-        g_FDebug("m_chunks.size():%zu\n", m_chunks.size());
+        g_FDebug("m_chunks.size():%zu", m_chunks.size());
 
         {
             TerrainChunk& fstchunk = m_chunks[0];
             DirectX::XMFLOAT3& fstAabbMin = fstchunk.bounds.aabb.min;
             DirectX::XMFLOAT3& fstAabbMax = fstchunk.bounds.aabb.max;
 
-            g_FDebug("chunks%zu : triangleIndexCount:%u\n", fstchunk.key.index, fstchunk.triangleIndexCount);
-            g_FDebug("chunks%zu : patchIndexCount:%u\n", fstchunk.key.index,  fstchunk.patchIndexCount);
-            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f\n", fstchunk.key.index,  fstAabbMin.y);
-            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s\n", fstchunk.key.index,  fstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
-            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s\n", fstchunk.key.index,  fstAabbMax.y, fstAabbMin.y, NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y) ? "TRUE" : "FALSE");
+            g_FDebug("chunks%zu : triangleIndexCount:%u", fstchunk.key.index, fstchunk.triangleIndexCount);
+            g_FDebug("chunks%zu : patchIndexCount:%u", fstchunk.key.index,  fstchunk.patchIndexCount);
+            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f", fstchunk.key.index,  fstAabbMin.y);
+            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s", fstchunk.key.index,  fstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
+            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s", fstchunk.key.index,  fstAabbMax.y, fstAabbMin.y, NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y) ? "TRUE" : "FALSE");
         }
 
         {
@@ -227,11 +417,11 @@ void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsComma
             DirectX::XMFLOAT3& lstAabbMin = lstchunk.bounds.aabb.min;
             DirectX::XMFLOAT3& lstAabbMax = lstchunk.bounds.aabb.max;
 
-            g_FDebug("chunks%zu : triangleIndexCount:%u\n", lstchunk.key.index, lstchunk.triangleIndexCount);
-            g_FDebug("chunks%zu : patchIndexCount:%u\n", lstchunk.key.index,  lstchunk.patchIndexCount);
-            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f\n", lstchunk.key.index,  lstAabbMin.y);
-            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s\n", lstchunk.key.index,  lstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
-            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s\n", lstchunk.key.index,  lstAabbMax.y, lstAabbMin.y, NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y) ? "TRUE" : "FALSE");
+            g_FDebug("chunks%zu : triangleIndexCount:%u", lstchunk.key.index, lstchunk.triangleIndexCount);
+            g_FDebug("chunks%zu : patchIndexCount:%u", lstchunk.key.index,  lstchunk.patchIndexCount);
+            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f", lstchunk.key.index,  lstAabbMin.y);
+            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s", lstchunk.key.index,  lstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
+            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s", lstchunk.key.index,  lstAabbMax.y, lstAabbMin.y, NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y) ? "TRUE" : "FALSE");
         }
     }
 }

@@ -80,13 +80,33 @@ public:
 private:
     std::map<std::string, std::vector<D3D12_RESOURCE_BARRIER>> m_entries;
 };
-
 void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height)
 {
     m_factory = factory;
     m_device = device;
     m_width = width;
     m_height = height;
+
+    if (FAILED(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue1)))) return;
+
+    m_infoQueue1->RegisterMessageCallback(
+        [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY severity,
+           D3D12_MESSAGE_ID, LPCSTR description, void*)
+        {
+            FlogLevel level = FlogLevel::FLOG_DEBUG;
+            switch (severity) {
+            case D3D12_MESSAGE_SEVERITY_CORRUPTION: level = FlogLevel::FLOG_FATAL; break;
+            case D3D12_MESSAGE_SEVERITY_ERROR:      level = FlogLevel::FLOG_ERROR; break;
+            case D3D12_MESSAGE_SEVERITY_WARNING:    level = FlogLevel::FLOG_WARN;  break;
+            case D3D12_MESSAGE_SEVERITY_INFO:       level = FlogLevel::FLOG_INFO;  break;
+            case D3D12_MESSAGE_SEVERITY_MESSAGE:    level = FlogLevel::FLOG_DEBUG; break;
+            }
+            if (g_PlatformConsoleWrite) g_PlatformConsoleWrite(level, description);
+        },
+        D3D12_MESSAGE_CALLBACK_FLAG_NONE,
+        nullptr,
+        &m_infoQueueCookie
+    );
 
     m_shaderCompiler = std::make_unique<ShaderCompiler>();
 
@@ -231,6 +251,11 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
 
     CreateFallbackTexture();
 
+    {
+        NSTerrain::Terrain terrain(device);
+        m_terrain = std::move(terrain);
+    }
+
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, width);
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, height);
 
@@ -253,7 +278,6 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
         for(auto& pass : m_passes) pass->OnInit(m_blackboard, GetCtx(), cmdList);
     });
 }
-
 Renderer::~Renderer()
 {
 }
@@ -261,12 +285,14 @@ void Renderer::OnDestroy()
 {
     WaitForGPU();
 
-    for (auto& pass : m_passes) pass->OnDestroy();
-    m_passes.clear();
+    m_terrain.OnDestroy(GetCtx());
 
     FreeSRVStatic(m_fallbackTextureSRVhandle);
     m_fallbackTexture.defaultBuffer.Reset();
     m_fallbackTexture.uploadBuffer.Reset();
+
+    for (auto& pass : m_passes) pass->OnDestroy();
+    m_passes.clear();
 
     for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
     {
@@ -292,11 +318,15 @@ void Renderer::OnDestroy()
 
     m_shaderCompiler.reset();
 
+    m_terrain = NSTerrain::Terrain{};
+
     m_srvHeap = NSDescriptor::RingHeap{};
     m_rtvHeap = NSDescriptor::StaticHeap{};
     m_dsvHeap = NSDescriptor::StaticHeap{};
     m_constantAllocator = ConstantAllocator{};
     m_barrierBatch.reset();
+
+    m_infoQueue1.Reset();
 
     ImGui_ImplDX12_Shutdown();
     ImGui::DestroyContext();
@@ -608,7 +638,7 @@ void Renderer::UnloadModel(NSModel::RegisterModelKey key)
     if (m_srvHeap.Owns(model.m_envCubemap.srvHandle))
     {
         FreeSRVStatic(model.m_envCubemap.srvHandle);
-    } 
+    }
     if(m_srvHeap.Owns(model.m_envCubemap.uavHandle))
     {
         FreeSRVStatic(model.m_envCubemap.uavHandle);

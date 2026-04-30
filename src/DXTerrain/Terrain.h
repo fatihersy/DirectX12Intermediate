@@ -31,14 +31,22 @@ namespace NSTerrain
         Terrain();
         Terrain(ID3D12Device14* device);
 
+        Terrain(const Terrain&) = delete;
+        Terrain& operator=(const Terrain&) = delete;
+        Terrain(Terrain&& other) noexcept;
+        Terrain& operator=(Terrain&& other) noexcept;
+
         void OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc);
-        void OnDestroy();
+        void OnDestroy(NSRenderer::Ctx rendererCtx);
 
         const TerrainDesc& GetDesc() const {
             return m_desc;
         }
         const std::vector<TerrainChunk>& GetChunks() const {
             return m_chunks;
+        }
+        const NSDescriptor::Handle& GetHeightmapSRV() const {
+            return m_heightmapSRV;
         }
 
     private:
@@ -50,8 +58,8 @@ namespace NSTerrain
         uint32_t m_hmWidth{};
         uint32_t m_hmHeight{};
 
-        ComPtr<ID3D12Resource> m_heightmapTextureDefault;
-        ComPtr<ID3D12Resource> m_heightmapTextureUpload;
+        ComPtr<ID3D12Resource> m_heightmapBufferDefault;
+        ComPtr<ID3D12Resource> m_heightmapBufferUpload;
         NSDescriptor::Handle m_heightmapSRV;
 
         void GenerateHeightmap();

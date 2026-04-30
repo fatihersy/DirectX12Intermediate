@@ -41,6 +41,17 @@ using OptRef = std::optional<std::reference_wrapper<T>>;
 
 constexpr std::wstring_view PROJECT_NAME = L"DXTerrain";
 
+enum EArguments {
+    ARG_CONSOLE_PID,
+    ARG_MAX
+};
+
+inline std::array<std::wstring, static_cast<size_t>(ARG_MAX)> argAccept =
+{
+    L"--console-pid=",
+};
+inline std::array<std::wstring, static_cast<size_t>(ARG_MAX)> argRecieved;
+
 #include "core/Math.h"
 #include "StepTimer.h"
 #include "Logger.h"

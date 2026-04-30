@@ -26,7 +26,9 @@ Platform::Platform(SWindow wnd)
 {
     assert(wnd.pApp);
 
-    if (AllocConsole())
+    int consolePid = std::stoul(argRecieved[ARG_CONSOLE_PID]);
+
+    if (AttachConsole(consolePid) or AllocConsole())
     {
         SetConsoleTitle(L"Debug Console");
 
@@ -194,6 +196,7 @@ void Platform::PlatformConsoleWrite(FlogLevel level, const std::string_view& mes
     if (hConsole == INVALID_HANDLE_VALUE)
     {
         OutputDebugStringA(message.data());
+        OutputDebugStringA("\n");
         return;
     }
 
@@ -224,6 +227,7 @@ void Platform::PlatformConsoleWrite(FlogLevel level, const std::string_view& mes
 
     DWORD charsWritten;
     WriteConsoleA(hConsole, message.data(), static_cast<DWORD>(message.length()), &charsWritten, NULL);
+    WriteConsoleA(hConsole, "\n", 1, nullptr, nullptr);
 
     SetConsoleTextAttribute(hConsole, originalColor);
 }
