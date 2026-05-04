@@ -15,18 +15,22 @@ Terrain::Terrain(Terrain&& other) noexcept
     : m_device(other.m_device)
     , m_desc(other.m_desc)
     , m_chunks(std::move(other.m_chunks))
-    , m_cpuHeightData(std::move(other.m_cpuHeightData))
+    , m_heightR16(std::move(other.m_heightR16))
     , m_hmWidth(other.m_hmWidth)
     , m_hmHeight(other.m_hmHeight)
-    , m_heightmapBufferDefault(std::move(other.m_heightmapBufferDefault))
-    , m_heightmapBufferUpload(std::move(other.m_heightmapBufferUpload))
+    , m_heightmapTextureDefault(std::move(other.m_heightmapTextureDefault))
+    , m_heightmapTextureUpload(std::move(other.m_heightmapTextureUpload))
     , m_heightmapSRV(other.m_heightmapSRV)
+    , m_isOnGPU(other.m_isOnGPU)
+    , m_initialized(other.m_initialized)
 {
     other.m_device = nullptr;
     other.m_desc = {};
     other.m_hmWidth = 0;
     other.m_hmHeight = 0;
     other.m_heightmapSRV = {};
+    other.m_isOnGPU = false;
+    other.m_initialized = false;
 }
 
 Terrain& Terrain::operator=(Terrain&& other) noexcept
@@ -36,75 +40,52 @@ Terrain& Terrain::operator=(Terrain&& other) noexcept
         m_device = other.m_device;
         m_desc = other.m_desc;
         m_chunks = std::move(other.m_chunks);
-        m_cpuHeightData = std::move(other.m_cpuHeightData);
+        m_heightR16 = std::move(other.m_heightR16);
         m_hmWidth = other.m_hmWidth;
         m_hmHeight = other.m_hmHeight;
-        m_heightmapBufferDefault = std::move(other.m_heightmapBufferDefault);
-        m_heightmapBufferUpload = std::move(other.m_heightmapBufferUpload);
+        m_heightmapTextureDefault = std::move(other.m_heightmapTextureDefault);
+        m_heightmapTextureUpload = std::move(other.m_heightmapTextureUpload);
         m_heightmapSRV = other.m_heightmapSRV;
+        m_isOnGPU = other.m_isOnGPU;
+        m_initialized = other.m_initialized;
 
         other.m_device = nullptr;
         other.m_desc = {};
         other.m_hmWidth = 0;
         other.m_hmHeight = 0;
         other.m_heightmapSRV = {};
+        other.m_isOnGPU = false;
+        other.m_initialized = false;
     }
 
     return *this;
 }
 
-
 void Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc)
+{
+    if (m_initialized) {
+        g_FWarn("%s", "Terrain::OnInit::Calling OnInit function twice without Destroy first");
+        return;
+    }
+
+    Generate(cmdList, rendererCtx, desc);
+
+    Upload(cmdList, rendererCtx);
+
+    m_initialized = true;
+}
+void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
+{
+    Destroy(rendererCtx);
+}
+
+void Terrain::Generate(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc)
 {
     this->m_desc = desc;
 
-    GenerateHeightmap();
-
-    auto createUplBufferAndUpload = [this](std::wstring_view name, size_t dataSize, void* data, ComPtr<ID3D12Resource>& buffer)
-    {
-        const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
-        const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
-
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &props,
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&buffer)
-        ));
-        buffer->SetName(name.data());
-
-        void* ppData = nullptr;
-        ThrowIfFailed(buffer->Map(0u, nullptr, reinterpret_cast<void**>(&ppData)));
-        memcpy(ppData, data, dataSize);
-        buffer->Unmap(0u, nullptr);
-    };
-    auto createDefBuffer = [this](std::wstring_view name, size_t dataSize, ComPtr<ID3D12Resource>& buffer)
-    {
-        const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
-        const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
-
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &props,
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&buffer)
-        ));
-        buffer->SetName(name.data());
-    };
-
-    size_t dataSize = m_cpuHeightData.size() * sizeof(float);
-    createUplBufferAndUpload(L"NSTerrain::Terrain::m_heightmapTextureUpload", dataSize, m_cpuHeightData.data(), m_heightmapBufferUpload);
-    createDefBuffer(L"NSTerrain::Terrain::m_heightmapTextureDefault", dataSize, m_heightmapBufferDefault);
-
-    m_heightmapSRV = rendererCtx.allocSRVStatic(1u);
-
-    BuildChunks(rendererCtx, cmdList);
+    InitAndGenerateHeightmap();
 }
-void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
+void Terrain::Destroy(NSRenderer::Ctx rendererCtx)
 {
     m_device = nullptr;
 
@@ -122,43 +103,156 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     }
 
     m_chunks.clear();
-    m_chunks.resize(0);
-    m_cpuHeightData.clear();
-    m_cpuHeightData.resize(0);
-    m_heightmapBufferDefault.Reset();
-    m_heightmapBufferUpload.Reset();
+    m_chunks.shrink_to_fit();
+    m_heightR16.clear();
+    m_heightR16.shrink_to_fit();
+    m_heightmapTextureDefault.Reset();
+    m_heightmapTextureUpload.Reset();
     m_hmWidth = 0;
     m_hmHeight = 0;
     m_desc = {};
+
+    m_isOnGPU = false;
+    m_initialized = false;
 }
 
-void Terrain::GenerateHeightmap()
+void Terrain::InitAndGenerateHeightmap(uint32_t seed)
 {
     m_hmWidth = m_desc.heightMapResolution;
     m_hmHeight = m_desc.heightMapResolution;
 
-    m_cpuHeightData.resize(size_t(m_hmWidth) * size_t(m_hmHeight));
+    m_heightR16.clear();
+    m_heightR16.resize(size_t(m_hmWidth) * size_t(m_hmHeight));
 
-    constexpr uint32_t seed = 1337u;
     constexpr float baseFrequency = 8.0f;
 
     for (uint32_t z = 0; z < m_hmHeight; ++z)
     {
         for (uint32_t x = 0; x < m_hmWidth; ++x)
         {
-            float u = float(x) / float(m_hmWidth - 1);
-            float v = float(z) / float(m_hmHeight - 1);
+            const float u = float(x) / float(m_hmWidth - 1);
+            const float v = float(z) / float(m_hmHeight - 1);
 
             float h = NSMath::FBm(u * baseFrequency, v * baseFrequency, seed);
 
-            // Optional shaping: more lowlands, slightly sharper peaks.
-            h = std::pow(h, 1.35f);
+            // Pow is an optional shaping: more lowlands, slightly sharper peaks.
+            h = NSMath::Saturate(std::pow(h, 1.35f)) ;
 
-            m_cpuHeightData[size_t(z) * size_t(m_hmWidth) + size_t(x)] = NSMath::Saturate(h);
+            const float hScaled = h * std::numeric_limits<uint16_t>::max();
+
+            const uint16_t hInt = static_cast<uint16_t>(std::round(hScaled));
+
+            m_heightR16[size_t(z) * size_t(m_hmWidth) + size_t(x)] = hInt;
         }
     }
+
+    if(not m_heightmapTextureDefault)
+    {
+        CD3DX12_RESOURCE_DESC desc(CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16_UNORM, m_hmWidth, m_hmHeight, 1, 1));
+        CD3DX12_HEAP_PROPERTIES defaultProps(D3D12_HEAP_TYPE_DEFAULT);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &defaultProps,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&m_heightmapTextureDefault)
+        ));
+        m_heightmapTextureDefault->SetName(L"NSTerrain::Terrain::m_heightmapTextureDefault");
+    }
+
+    if(not m_heightmapTextureUpload)
+    {
+        const UINT64 dataSize = GetRequiredIntermediateSize(m_heightmapTextureDefault.Get(), 0, 1);
+        const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+        const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &props,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&m_heightmapTextureUpload)
+        ));
+        m_heightmapTextureUpload->SetName(L"NSTerrain::Terrain::m_heightmapTextureUpload");
+    }
 }
-void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void Terrain::Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+{
+    if (m_isOnGPU) {
+        g_FWarn("%s", "Terrain::Upload::Calling Upload function twice without Unload first");
+        return;
+    };
+    assert(m_heightmapTextureDefault and m_heightmapTextureUpload and "Heightmap should be generated first");
+
+    D3D12_SUBRESOURCE_DATA data{};
+    data.pData = m_heightR16.data();
+    data.RowPitch = static_cast<LONG_PTR>(m_hmWidth * sizeof(uint16_t));
+    data.SlicePitch = data.RowPitch * m_hmHeight;
+
+    CD3DX12_RESOURCE_BARRIER toCopyDest = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_heightmapTextureDefault.Get(),
+        D3D12_RESOURCE_STATE_COMMON,
+        D3D12_RESOURCE_STATE_COPY_DEST
+    );
+    cmdList.ResourceBarrier(1, &toCopyDest);
+
+    cmdList.UpdateSubresources(m_heightmapTextureDefault.Get(), m_heightmapTextureUpload.Get(), 0, 0, 1, &data);
+
+    CD3DX12_RESOURCE_BARRIER toShaderRead = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_heightmapTextureDefault.Get(),
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+    );
+    cmdList.ResourceBarrier(1, &toShaderRead);
+
+    m_heightmapSRV = rendererCtx.allocSRVStatic(1u);
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+        desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        desc.Format = DXGI_FORMAT_R16_UNORM;
+        desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        desc.Texture2D.MostDetailedMip = 0;
+        desc.Texture2D.MipLevels = 1;
+        desc.Texture2D.PlaneSlice = 0;
+        desc.Texture2D.ResourceMinLODClamp = 0.f;
+
+        m_device->CreateShaderResourceView(m_heightmapTextureDefault.Get(), &desc, m_heightmapSRV.cpuAddr);
+    }
+
+    BuildChunks(cmdList, rendererCtx);
+
+    m_isOnGPU = true;
+}
+
+void Terrain::Unload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+{
+    rendererCtx.freeSRVStatic(m_heightmapSRV);
+    m_heightmapSRV = {};
+
+    m_heightmapTextureDefault.Reset();
+
+    m_heightmapTextureUpload.Reset();
+
+    for (auto& chunk : m_chunks)
+    {
+        chunk.vertexDefault.Reset();
+        chunk.vertexUpload.Reset();
+        chunk.triangleIndexDefault.Reset();
+        chunk.triangleIndexUpload.Reset();
+        chunk.patchIndexDefault.Reset();
+        chunk.patchIndexUpload.Reset();
+    }
+
+    m_chunks.clear();
+    m_chunks.shrink_to_fit();
+
+    m_isOnGPU = false;
+}
+
+void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     const uint32_t vertsPerEdge = m_desc.vertsPerChunkEdge;
     const uint32_t quadsPerEdge = vertsPerEdge - 1;
@@ -167,7 +261,7 @@ void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsComma
     const uint32_t totalVertsZ = m_desc.chunkCountZ * quadsPerEdge + 1;
 
     m_chunks.clear();
-    m_chunks.reserve(size_t(m_desc.chunkCountX) * m_desc.chunkCountZ);
+    m_chunks.shrink_to_fit();
 
     for (uint32_t gz = 0; gz < m_desc.chunkCountZ; ++gz)
     {
@@ -427,14 +521,14 @@ void Terrain::BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsComma
 }
 float Terrain::SampleHeight(float u, float v) const
 {
-    assert(not m_cpuHeightData.empty());
+    assert(not m_heightR16.empty());
     if (m_hmWidth == 0 || m_hmHeight == 0) return 0.0f;
 
     u = NSMath::Saturate(u);
     v = NSMath::Saturate(v);
 
-    const float x = u * float(m_hmWidth - 1);
-    const float z = v * float(m_hmHeight - 1);
+    const float x = u * static_cast<float>(m_hmWidth - 1);
+    const float z = v * static_cast<float>(m_hmHeight - 1);
 
     const uint32_t x0 = static_cast<uint32_t>(std::floor(x));
     const uint32_t z0 = static_cast<uint32_t>(std::floor(z));
@@ -442,12 +536,13 @@ float Terrain::SampleHeight(float u, float v) const
     const uint32_t x1 = std::min(x0 + 1, m_hmWidth - 1);
     const uint32_t z1 = std::min(z0 + 1, m_hmHeight - 1);
 
-    const float tx = x - float(x0);
-    const float tz = z - float(z0);
+    const float tx = x - static_cast<float>(x0);
+    const float tz = z - static_cast<float>(z0);
 
     const auto At = [this](uint32_t sampleX, uint32_t sampleZ)
     {
-        return m_cpuHeightData[size_t(sampleZ) * size_t(m_hmWidth) + size_t(sampleX)];
+        const uint16_t h = m_heightR16[size_t(sampleZ) * size_t(m_hmWidth) + size_t(sampleX)];
+        return static_cast<float>(h) / std::numeric_limits<uint16_t>::max();
     };
 
     const float h00 = At(x0, z0);

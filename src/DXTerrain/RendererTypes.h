@@ -225,6 +225,7 @@ namespace NSRenderer {
         GraphicsCommandList() = default;
         explicit GraphicsCommandList(ID3D12GraphicsCommandList10* cmdList) : m_cmdList(cmdList) {}
 
+        [[__deprecated__("Please do not use raw command list")]]
         ID3D12GraphicsCommandList* Raw() const { return m_cmdList; }
 
         void ResourceBarrier(UINT numBarriers, const D3D12_RESOURCE_BARRIER* pBarriers) const {
@@ -403,6 +404,96 @@ namespace NSRenderer {
         //    m_cmdList->SOSetTargets(startSlot, numViews, pViews);
         //}
 
+        // Additionals --------------------------------------------------------
+
+        inline UINT64 UpdateSubresources(
+            _In_ ID3D12Resource* pDestinationResource,
+            _In_ ID3D12Resource* pIntermediate,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
+            UINT64 RequiredSize,
+            _In_reads_(NumSubresources) const D3D12_PLACED_SUBRESOURCE_FOOTPRINT* pLayouts,
+            _In_reads_(NumSubresources) const UINT* pNumRows,
+            _In_reads_(NumSubresources) const UINT64* pRowSizesInBytes,
+            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
+        {
+            assert(m_cmdList);
+
+            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pSrcData);
+        }
+
+        inline UINT64 UpdateSubresources(
+            _In_ ID3D12Resource* pDestinationResource,
+            _In_ ID3D12Resource* pIntermediate,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
+            UINT64 RequiredSize,
+            _In_reads_(NumSubresources) const D3D12_PLACED_SUBRESOURCE_FOOTPRINT* pLayouts,
+            _In_reads_(NumSubresources) const UINT* pNumRows,
+            _In_reads_(NumSubresources) const UINT64* pRowSizesInBytes,
+            _In_ const void* pResourceData,
+            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
+        {
+            assert(m_cmdList);
+
+            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pResourceData, pSrcData);
+        }
+
+        inline UINT64 UpdateSubresources(
+            _In_ ID3D12Resource* pDestinationResource,
+            _In_ ID3D12Resource* pIntermediate,
+            UINT64 IntermediateOffset,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
+            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
+        {
+            assert(m_cmdList);
+
+            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
+        }
+
+        inline UINT64 UpdateSubresources(
+            _In_ ID3D12Resource* pDestinationResource,
+            _In_ ID3D12Resource* pIntermediate,
+            UINT64 IntermediateOffset,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
+            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
+            _In_ const void* pResourceData,
+            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
+        {
+            assert(m_cmdList);
+
+            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
+        }
+
+        template <UINT MaxSubresources>
+        inline UINT64 UpdateSubresources(
+            _In_ ID3D12Resource* pDestinationResource,
+            _In_ ID3D12Resource* pIntermediate,
+            UINT64 IntermediateOffset,
+            _In_range_(0,MaxSubresources) UINT FirstSubresource,
+            _In_range_(1,MaxSubresources-FirstSubresource) UINT NumSubresources,
+            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
+        {
+            assert(m_cmdList);
+
+            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
+        }
+
+        template <UINT MaxSubresources>
+        inline UINT64 UpdateSubresources(
+            _In_ ID3D12Resource* pDestinationResource,
+            _In_ ID3D12Resource* pIntermediate,
+            UINT64 IntermediateOffset,
+            _In_range_(0,MaxSubresources) UINT FirstSubresource,
+            _In_range_(1,MaxSubresources-FirstSubresource) UINT NumSubresources,
+            _In_ const void* pResourceData,
+            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
+        {
+            assert(m_cmdList);
+
+            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
+        }
     private:
         ID3D12GraphicsCommandList10* m_cmdList = nullptr;
     };

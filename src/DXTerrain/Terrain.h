@@ -39,6 +39,12 @@ namespace NSTerrain
         void OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc);
         void OnDestroy(NSRenderer::Ctx rendererCtx);
 
+        void Generate(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc);
+        void Destroy(NSRenderer::Ctx rendererCtx);
+
+        void Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        void Unload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+
         const TerrainDesc& GetDesc() const {
             return m_desc;
         }
@@ -54,16 +60,19 @@ namespace NSTerrain
         TerrainDesc m_desc;
         std::vector<TerrainChunk> m_chunks;
 
-        std::vector<float> m_cpuHeightData;
+        std::vector<uint16_t> m_heightR16;
         uint32_t m_hmWidth{};
         uint32_t m_hmHeight{};
 
-        ComPtr<ID3D12Resource> m_heightmapBufferDefault;
-        ComPtr<ID3D12Resource> m_heightmapBufferUpload;
+        ComPtr<ID3D12Resource> m_heightmapTextureDefault;
+        ComPtr<ID3D12Resource> m_heightmapTextureUpload;
         NSDescriptor::Handle m_heightmapSRV;
 
-        void GenerateHeightmap();
-        void BuildChunks(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        void InitAndGenerateHeightmap(uint32_t seed = 0);
+        void BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
         float SampleHeight(float u, float v) const;
+
+        bool m_isOnGPU{};
+        bool m_initialized{};
     };
 }
