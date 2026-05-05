@@ -118,7 +118,7 @@ namespace NSTexture
     };
 }
 
-struct frameConstants
+struct FrameConstants
 {
     DirectX::XMFLOAT4X4 view{};
     DirectX::XMFLOAT4X4 proj{};
@@ -127,15 +127,15 @@ struct frameConstants
     DirectX::XMFLOAT3 eye{};
     uint32_t PADDING_0{};
 };
-static_assert(sizeof(frameConstants) % 16 == 0);
-static_assert(offsetof(frameConstants, view) % 4 == 0);
-static_assert(offsetof(frameConstants, proj) % 4 == 0);
-static_assert(offsetof(frameConstants, lightDir) % 4 == 0);
-static_assert(offsetof(frameConstants, lightColor) % 4 == 0);
-static_assert(offsetof(frameConstants, eye) % 4 == 0);
-static_assert(offsetof(frameConstants, PADDING_0) % 4 == 0);
+static_assert(sizeof(FrameConstants) % 16 == 0);
+static_assert(offsetof(FrameConstants, view) % 4 == 0);
+static_assert(offsetof(FrameConstants, proj) % 4 == 0);
+static_assert(offsetof(FrameConstants, lightDir) % 4 == 0);
+static_assert(offsetof(FrameConstants, lightColor) % 4 == 0);
+static_assert(offsetof(FrameConstants, eye) % 4 == 0);
+static_assert(offsetof(FrameConstants, PADDING_0) % 4 == 0);
 
-struct meshConstants
+struct MeshConstants
 {
     DirectX::XMFLOAT4X4 worldMatrix{};
     DirectX::XMFLOAT3X4 normalMatrix{};
@@ -145,16 +145,16 @@ struct meshConstants
     float opacity{};
     uint32_t textureFlags{};
 };
-static_assert(sizeof(meshConstants) % 16 == 0);
-static_assert(offsetof(meshConstants, worldMatrix) % 4 == 0);
-static_assert(offsetof(meshConstants, normalMatrix) % 4 == 0);
-static_assert(offsetof(meshConstants, baseColor) % 4 == 0);
-static_assert(offsetof(meshConstants, metallic) % 4 == 0);
-static_assert(offsetof(meshConstants, roughness) % 4 == 0);
-static_assert(offsetof(meshConstants, opacity) % 4 == 0);
-static_assert(offsetof(meshConstants, textureFlags) % 4 == 0);
+static_assert(sizeof(MeshConstants) % 16 == 0);
+static_assert(offsetof(MeshConstants, worldMatrix) % 4 == 0);
+static_assert(offsetof(MeshConstants, normalMatrix) % 4 == 0);
+static_assert(offsetof(MeshConstants, baseColor) % 4 == 0);
+static_assert(offsetof(MeshConstants, metallic) % 4 == 0);
+static_assert(offsetof(MeshConstants, roughness) % 4 == 0);
+static_assert(offsetof(MeshConstants, opacity) % 4 == 0);
+static_assert(offsetof(MeshConstants, textureFlags) % 4 == 0);
 
-struct atmosphereConstants
+struct AtmosphereConstants
 {
     DirectX::XMFLOAT3 BetaR{};
     float PADDING_0{};
@@ -169,21 +169,21 @@ struct atmosphereConstants
     DirectX::XMFLOAT3 SunDir{};
     float PADDING_1{};
 };
-static_assert(sizeof(atmosphereConstants) % 16 == 0);
-static_assert(offsetof(atmosphereConstants, BetaR) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, PADDING_0) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, BetaMScatter) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, BetaMExtinct) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, MieG) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, HR) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, HM) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, Rg) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, Rt) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, SunIntensity) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, SunDir) % 4 == 0);
-static_assert(offsetof(atmosphereConstants, PADDING_1) % 4 == 0);
+static_assert(sizeof(AtmosphereConstants) % 16 == 0);
+static_assert(offsetof(AtmosphereConstants, BetaR) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, PADDING_0) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, BetaMScatter) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, BetaMExtinct) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, MieG) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, HR) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, HM) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, Rg) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, Rt) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, SunIntensity) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, SunDir) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, PADDING_1) % 4 == 0);
 
-inline bool operator!=(const atmosphereConstants& lhs, const atmosphereConstants& rhs) noexcept
+inline bool operator!=(const AtmosphereConstants& lhs, const AtmosphereConstants& rhs) noexcept
 {
     if (not NSMath::Float3Equals(lhs.BetaR, rhs.BetaR)) return true;
     if (lhs.BetaMScatter != rhs.BetaMScatter) return true;
@@ -199,7 +199,7 @@ inline bool operator!=(const atmosphereConstants& lhs, const atmosphereConstants
     return false;
 }
 
-struct envCaptureConstants
+struct EnvCaptureConstants
 {
     DirectX::XMFLOAT4X4 view{};
     DirectX::XMFLOAT4X4 proj{};
@@ -210,13 +210,38 @@ struct envCaptureConstants
     DirectX::XMFLOAT3 camPos{};
     float PADDING_1{};
 };
-static_assert(sizeof(envCaptureConstants) % 16 == 0);
-static_assert(offsetof(envCaptureConstants, view) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, proj) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, lightDir) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, lightColor) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, capturePos) % 4 == 0);
-static_assert(offsetof(envCaptureConstants, camPos) % 4 == 0);
+static_assert(sizeof(EnvCaptureConstants) % 16 == 0);
+static_assert(offsetof(EnvCaptureConstants, view) % 4 == 0);
+static_assert(offsetof(EnvCaptureConstants, proj) % 4 == 0);
+static_assert(offsetof(EnvCaptureConstants, lightDir) % 4 == 0);
+static_assert(offsetof(EnvCaptureConstants, lightColor) % 4 == 0);
+static_assert(offsetof(EnvCaptureConstants, capturePos) % 4 == 0);
+static_assert(offsetof(EnvCaptureConstants, camPos) % 4 == 0);
+
+struct TerrainConstants
+{
+    DirectX::XMFLOAT4X4 worldMatrix{};
+    float maxHeight{};
+    float worldTexelSpacing{};
+    float tessFactorScale{};
+    float textureTilingFactor{};
+    DirectX::XMFLOAT2 chunkUVOffset{};
+    DirectX::XMFLOAT2 chunkUVScale{};
+    uint32_t heightmapIndex{};
+    uint32_t splatIndices[4]{};
+    uint32_t PADDING_0[3]{};
+};
+static_assert(sizeof(TerrainConstants) % 16 == 0);
+static_assert(offsetof(TerrainConstants, worldMatrix) % 4 == 0);
+static_assert(offsetof(TerrainConstants, maxHeight) % 4 == 0);
+static_assert(offsetof(TerrainConstants, worldTexelSpacing) % 4 == 0);
+static_assert(offsetof(TerrainConstants, tessFactorScale) % 4 == 0);
+static_assert(offsetof(TerrainConstants, textureTilingFactor) % 4 == 0);
+static_assert(offsetof(TerrainConstants, chunkUVOffset) % 4 == 0);
+static_assert(offsetof(TerrainConstants, chunkUVScale) % 4 == 0);
+static_assert(offsetof(TerrainConstants, heightmapIndex) % 4 == 0);
+static_assert(offsetof(TerrainConstants, splatIndices) % 4 == 0);
+static_assert(offsetof(TerrainConstants, PADDING_0) % 4 == 0);
 
 namespace NSRenderer {
     class GraphicsCommandList
@@ -579,14 +604,15 @@ namespace NSRenderer
     };
 
     inline constexpr BlackboardKey kRenderer_frameIndex{ "Renderer.frameIndex" };
-    inline constexpr BlackboardKey kRenderer_width{ "Renderer.width" };
-    inline constexpr BlackboardKey kRenderer_height{ "Renderer.height" };
-    inline constexpr BlackboardKey kRenderer_models{ "Renderer.models" };
-    inline constexpr BlackboardKey kRenderer_mainRTV{ "Renderer.mainRTV" };
-    inline constexpr BlackboardKey kRenderer_mainDSV{ "Renderer.mainDSV" };
+    inline constexpr BlackboardKey kRenderer_width     { "Renderer.width" };
+    inline constexpr BlackboardKey kRenderer_height    { "Renderer.height" };
+    inline constexpr BlackboardKey kRenderer_models    { "Renderer.models" };
+    inline constexpr BlackboardKey kRenderer_mainRTV   { "Renderer.mainRTV" };
+    inline constexpr BlackboardKey kRenderer_mainDSV   { "Renderer.mainDSV" };
+    inline constexpr BlackboardKey kRenderer_terrain   { "Renderer.terrain" };
 
     inline constexpr BlackboardKey kAtmosphere_transmitScatterSRV{ "Atmosphere.transmitScatterSRV" };
-    inline constexpr BlackboardKey kAtmosphere_constants{ "Atmosphere.constants" };
+    inline constexpr BlackboardKey kAtmosphere_constants         { "Atmosphere.constants" };
 
     inline constexpr BlackboardKey kEnvCubemap_brdfLUTsrv{ "EnvCubemap.brdfLUTsrv" };
 

@@ -2,6 +2,12 @@
 
 namespace NSTerrain
 {
+    struct Vertex
+    {
+        DirectX::XMFLOAT3 position{};
+        DirectX::XMFLOAT2 texCoord{};
+    };
+
     struct TerrainChunk
     {
         ComPtr<ID3D12Resource> vertexDefault;
@@ -25,7 +31,17 @@ namespace NSTerrain
         ChunkBounds bounds;
     };
 
-    class Terrain
+    struct ITerrainView
+    {
+    public:
+        virtual ~ITerrainView() = default;
+
+        virtual const TerrainDesc& GetDesc() const = 0;
+        virtual const std::vector<TerrainChunk>& GetChunks() const = 0;
+        virtual const NSDescriptor::Handle& GetHeightmapSRV() const = 0;
+    };
+
+    class Terrain : public ITerrainView
     {
     public:
         Terrain();
@@ -45,13 +61,13 @@ namespace NSTerrain
         void Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
         void Unload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 
-        const TerrainDesc& GetDesc() const {
+        const TerrainDesc& GetDesc() const override {
             return m_desc;
         }
-        const std::vector<TerrainChunk>& GetChunks() const {
+        const std::vector<TerrainChunk>& GetChunks() const override {
             return m_chunks;
         }
-        const NSDescriptor::Handle& GetHeightmapSRV() const {
+        const NSDescriptor::Handle& GetHeightmapSRV() const override {
             return m_heightmapSRV;
         }
 

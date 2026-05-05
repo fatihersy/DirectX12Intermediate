@@ -16,6 +16,26 @@ struct GRAPHICS_PIPELINE_STATE_DESC
     D3D12_PIPELINE_STATE_FLAGS Flags;
 };
 
+struct TESSELLATION_PIPELINE_STATE_DESC
+{
+    D3D12_STREAM_OUTPUT_DESC StreamOutput;
+    UINT SampleMask;
+    D3D12_INPUT_LAYOUT_DESC InputLayout;
+    D3D12_INDEX_BUFFER_STRIP_CUT_VALUE IBStripCutValue;
+    UINT NumRenderTargets;
+    DXGI_FORMAT RTVFormats[8];
+    DXGI_FORMAT DSVFormat;
+    DXGI_SAMPLE_DESC SampleDesc;
+    UINT NodeMask;
+    D3D12_CACHED_PIPELINE_STATE CachedPSO;
+    D3D12_PIPELINE_STATE_FLAGS Flags;
+};
+
+struct ShaderMetadata {
+    LPCWSTR fileName;
+    std::vector<LPCWSTR> args;
+};
+
 using FnSetRootSignature = std::function<HRESULT(D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error)>;
 
 void MakeRootSignature(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& outSignature, FnSetRootSignature SetRootSignature);
@@ -61,10 +81,8 @@ public:
         CD3DX12_RASTERIZER_DESC raster,
         CD3DX12_DEPTH_STENCIL_DESC ds,
         CD3DX12_BLEND_DESC blend,
-        LPCWSTR vertexShaderFileName,
-        std::vector<LPCWSTR> vertexShaderArgs,
-        LPCWSTR indexShaderFileName,
-        std::vector<LPCWSTR> indexShaderArgs
+        ShaderMetadata vertexMetadata,
+        ShaderMetadata pixelMetadata
     );
 };
 
@@ -85,7 +103,33 @@ public:
 
     ComputePipeline&& Init(
         D3D12_PIPELINE_STATE_FLAGS flags,
-        LPCWSTR shaderFileName,
-        std::vector<LPCWSTR> shaderArgs
+        ShaderMetadata shaderMetadata
+    );
+};
+
+class TessellationPipeline : public IPipeline
+{
+public:
+    TessellationPipeline(){};
+    TessellationPipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature);
+    TessellationPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature);
+
+    void Bind(NSRenderer::GraphicsCommandList cmdList) const
+    {
+        assert(im_pipeline);
+
+        cmdList.SetPipelineState(im_pipeline.Get());
+        cmdList.SetGraphicsRootSignature(im_rootSignature.Get());
+    }
+
+    TessellationPipeline&& Init(
+        TESSELLATION_PIPELINE_STATE_DESC inDesc,
+        CD3DX12_RASTERIZER_DESC raster,
+        CD3DX12_DEPTH_STENCIL_DESC ds,
+        CD3DX12_BLEND_DESC blend,
+        ShaderMetadata vertexMetadata,
+        ShaderMetadata hullMetadata,
+        ShaderMetadata domainMetadata,
+        ShaderMetadata pixelMetadata = {}
     );
 };

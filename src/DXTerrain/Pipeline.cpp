@@ -35,14 +35,11 @@ void MakeRootSignature(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSi
     outSignature->SetName(name);
 }
 
-IPipeline::IPipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature)
-    : im_device(device), im_name(name)
+IPipeline::IPipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature) : im_device(device), im_name(name)
 {
     im_rootSignature = rootSignature;
 }
-
-IPipeline::IPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature)
-    : im_device(device), im_name(name)
+IPipeline::IPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature) : im_device(device), im_name(name)
 {
     MakeRootSignature(
         device,
@@ -69,17 +66,15 @@ GraphicsPipeline&& GraphicsPipeline::Init(
     CD3DX12_RASTERIZER_DESC raster,
     CD3DX12_DEPTH_STENCIL_DESC ds,
     CD3DX12_BLEND_DESC blend,
-    LPCWSTR vertexShaderFileName,
-    std::vector<LPCWSTR> vertexShaderArgs,
-    LPCWSTR indexShaderFileName,
-    std::vector<LPCWSTR> indexShaderArgs
+    ShaderMetadata vertexMetadata,
+    ShaderMetadata pixelMetadata
 )
 {
     ComPtr<IDxcBlob> vertexShader;
     ComPtr<IDxcBlob> indexShader;
 
-    ShaderCompiler::GetInstance()->CompileShader(vertexShaderFileName, vertexShader, vertexShaderArgs);
-    ShaderCompiler::GetInstance()->CompileShader(indexShaderFileName, indexShader, indexShaderArgs);
+    ShaderCompiler::GetInstance()->CompileShader(vertexMetadata.fileName, vertexShader, vertexMetadata.args);
+    ShaderCompiler::GetInstance()->CompileShader(pixelMetadata.fileName, indexShader, pixelMetadata.args);
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
     desc.pRootSignature = im_rootSignature.Get();
@@ -113,10 +108,10 @@ ComputePipeline::ComputePipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID
 ComputePipeline::ComputePipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature) : IPipeline(device, name, SetRootSignature)
 {}
 
-ComputePipeline&& ComputePipeline::Init(D3D12_PIPELINE_STATE_FLAGS flags, LPCWSTR shaderFileName, std::vector<LPCWSTR> shaderArgs)
+ComputePipeline&& ComputePipeline::Init(D3D12_PIPELINE_STATE_FLAGS flags, ShaderMetadata shaderMetadata)
 {
     ComPtr<IDxcBlob> shader;
-    ShaderCompiler::GetInstance()->CompileShader(shaderFileName, shader, shaderArgs);
+    ShaderCompiler::GetInstance()->CompileShader(shaderMetadata.fileName, shader, shaderMetadata.args);
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc{};
     desc.pRootSignature = im_rootSignature.Get();
@@ -124,6 +119,73 @@ ComputePipeline&& ComputePipeline::Init(D3D12_PIPELINE_STATE_FLAGS flags, LPCWST
     desc.Flags = flags;
 
     ThrowIfFailed(im_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&im_pipeline)));
+    im_pipeline->SetName(NSTool::wformat(L"%s::%s", im_name.data(), L"im_pipeline").c_str());
+
+    return std::move(*this);
+}
+
+TessellationPipeline::TessellationPipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature) : IPipeline(device, name, rootSignature)
+{}
+TessellationPipeline::TessellationPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature) : IPipeline(device, name, SetRootSignature)
+{}
+
+TessellationPipeline&& TessellationPipeline::Init(
+    TESSELLATION_PIPELINE_STATE_DESC inDesc,
+    CD3DX12_RASTERIZER_DESC raster,
+    CD3DX12_DEPTH_STENCIL_DESC ds,
+    CD3DX12_BLEND_DESC blend,
+    ShaderMetadata vertexMetadata,
+    ShaderMetadata hullMetadata,
+    ShaderMetadata domainMetadata,
+    ShaderMetadata pixelMetadata
+)
+{
+    assert(vertexMetadata.fileName and hullMetadata.fileName and domainMetadata.fileName and "Missing required shaders");
+
+    ComPtr<IDxcBlob> vertexShader;
+    ComPtr<IDxcBlob> hullShader;
+    ComPtr<IDxcBlob> domainShader;
+
+    ShaderCompiler::GetInstance()->CompileShader(vertexMetadata.fileName, vertexShader, vertexMetadata.args);
+    ShaderCompiler::GetInstance()->CompileShader(hullMetadata.fileName, hullShader, hullMetadata.args);
+    ShaderCompiler::GetInstance()->CompileShader(domainMetadata.fileName, domainShader, domainMetadata.args);
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+    desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
+    desc.pRootSignature = im_rootSignature.Get();
+    desc.VS = CD3DX12_SHADER_BYTECODE(vertexShader->GetBufferPointer(), vertexShader->GetBufferSize());
+
+    if(pixelMetadata.fileName)
+    {
+        ComPtr<IDxcBlob> pixelShader;
+        ShaderCompiler::GetInstance()->CompileShader(pixelMetadata.fileName, pixelShader, pixelMetadata.args);
+        desc.PS = CD3DX12_SHADER_BYTECODE(pixelShader->GetBufferPointer(),  pixelShader->GetBufferSize());
+        desc.NumRenderTargets = inDesc.NumRenderTargets;
+    }
+    else
+    {
+        desc.PS = {};
+        desc.NumRenderTargets = 0u;
+    }
+
+    desc.HS = CD3DX12_SHADER_BYTECODE(hullShader->GetBufferPointer(),   hullShader->GetBufferSize());
+    desc.DS = CD3DX12_SHADER_BYTECODE(domainShader->GetBufferPointer(), domainShader->GetBufferSize());
+    desc.RasterizerState = raster;
+    desc.DepthStencilState = ds;
+    desc.BlendState = blend;
+
+    desc.StreamOutput = inDesc.StreamOutput;
+    desc.SampleMask = inDesc.SampleMask;
+    desc.InputLayout = inDesc.InputLayout;
+    desc.IBStripCutValue = inDesc.IBStripCutValue;
+    memcpy(desc.RTVFormats, inDesc.RTVFormats, sizeof(DXGI_FORMAT) * 8u);
+    desc.DSVFormat = inDesc.DSVFormat;
+    desc.SampleDesc = inDesc.SampleDesc;
+    desc.NodeMask = inDesc.NodeMask;
+    desc.CachedPSO = inDesc.CachedPSO;
+    desc.Flags = inDesc.Flags;
+
+    ThrowIfFailed(im_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&im_pipeline)));
     im_pipeline->SetName(NSTool::wformat(L"%s::%s", im_name.data(), L"im_pipeline").c_str());
 
     return std::move(*this);

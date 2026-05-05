@@ -43,7 +43,7 @@ namespace NSRenderPass
         void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
-        atmosphereConstants m_constantsUpload{};
+        AtmosphereConstants m_constantsUpload{};
     private:
         ComPtr<ID3D12RootSignature> m_rootSignature;
         GraphicsPipeline m_graphics;
@@ -62,7 +62,7 @@ namespace NSRenderPass
         static constexpr UINT IDX_ROOT_DESC_TABLE_SRV = 4u;
 
         float m_timeOfDayDefault{};
-        atmosphereConstants m_constantsDefault{};
+        AtmosphereConstants m_constantsDefault{};
         static constexpr UINT IDX_CBV_FRAME = 0u;
         static constexpr UINT IDX_CBV_MESH = 1u;
         static constexpr UINT IDX_CBV_ATMOSPHERE = 2u;
@@ -89,7 +89,7 @@ namespace NSRenderPass
     private:
         GraphicsPipeline m_atmosPipeline;
         GraphicsPipeline m_geomPipeline;
-        atmosphereConstants m_atmosConstantsDefault{};
+        AtmosphereConstants m_atmosConstantsDefault{};
         NSDescriptor::Handle m_srvHandle{};
         ComPtr<ID3D12RootSignature> m_graphicsRoot;
         static constexpr UINT IDX_ROOT_CBV_CAPTURE = 0u;
@@ -111,11 +111,35 @@ namespace NSRenderPass
         ComputePipeline m_brdfPipeline;
         ComPtr<ID3D12RootSignature> m_brdfRoot;
 
-
         void Capture(Model& model, Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
         void PrefilterCubemap(NSRenderer::EnvironmentCubemap& envMap, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
         void GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
 
         static constexpr UINT BRDF_LUT_SIZE = 256u;
     };
+
+    class TerrainPass : public IRenderPass
+    {
+    public:
+        TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
+        ~TerrainPass() override;
+
+        void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void OnDestroy() override;
+
+        void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
+
+    private:
+        ComPtr<ID3D12RootSignature> m_rootSignature;
+        TessellationPipeline m_solidPipeline;
+        TessellationPipeline m_wireframePipeline;
+
+        static constexpr UINT IDX_ROOT_CBV_FRAME = 0u;
+        static constexpr UINT IDX_ROOT_CBV_TERRAIN = 1u;
+
+        static constexpr UINT IDX_CBV_FRAME = 0u;
+        static constexpr UINT IDX_CBV_TERRAIN = 1u;
+    };
+
 }

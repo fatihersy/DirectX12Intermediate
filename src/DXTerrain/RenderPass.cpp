@@ -5,8 +5,7 @@
 #include "DXSampleHelper.h"
 #include "Blackboard.h"
 #include "Scene.h"
-//#include "Tools.h"
-//#include "Renderer.h"
+#include "Terrain.h"
 
 using namespace NSRenderPass;
 
@@ -101,19 +100,23 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
             CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
             CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT),
             blendDesc,
-            L"GeometryPassVS.hlsl",
             {
-                L"-E", L"mainVS",
-                L"-T", L"vs_6_0",
-                L"-Zi",
-                L"-Od"
+                L"GeometryPassVS.hlsl",
+                {
+                    L"-E", L"mainVS",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                }
             },
-            L"GeometryPassPS.hlsl",
             {
-                L"-E", L"mainPS",
-                L"-T", L"ps_6_0",
-                L"-Zi",
-                L"-Od"
+                L"GeometryPassPS.hlsl",
+                {
+                    L"-E", L"mainPS",
+                    L"-T", L"ps_6_0",
+                    L"-Zi",
+                    L"-Od"
+                }
             }
         );
     }
@@ -133,11 +136,11 @@ void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx
 
     m_pipeline.Bind(cmdList);
 
-    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(frameConstants));
+    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
     {
         using namespace DirectX;
 
-        frameConstants& frameCB = frameCBAC.As<frameConstants>();
+        FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
 
         XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
         XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
@@ -179,8 +182,8 @@ void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx
 
         sceneModel.Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
         {
-            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(meshConstants));
-            meshConstants& meshCB = allocCtx.As<meshConstants>();
+            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
+            MeshConstants& meshCB = allocCtx.As<MeshConstants>();
 
             DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
             DirectX::XMVECTOR det;
@@ -240,25 +243,29 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
 
     this->m_transmittance = ComputePipeline(device, L"AtmospherePass::m_transmittance", m_rootSignature).Init(
         D3D12_PIPELINE_STATE_FLAG_NONE,
-        L"SkyDome.hlsl",
         {
-            L"-E", L"CS_Transmittance",
-            L"-T", L"cs_6_0",
-            L"-Zi",
-            L"-Od",
-            L"-D", L"COMPUTE_SHADER=1"
+            L"SkyDome.hlsl",
+            {
+                L"-E", L"CS_Transmittance",
+                L"-T", L"cs_6_0",
+                L"-Zi",
+                L"-Od",
+                L"-D", L"COMPUTE_SHADER=1"
+            }
         }
     );
 
     this->m_scattering = ComputePipeline(device, L"AtmospherePass::m_scattering", m_rootSignature).Init(
         D3D12_PIPELINE_STATE_FLAG_NONE,
-        L"SkyDome.hlsl",
         {
-            L"-E", L"CS_Scattering",
-            L"-T", L"cs_6_0",
-            L"-Zi",
-            L"-Od",
-            L"-D", L"COMPUTE_SHADER=1"
+            L"SkyDome.hlsl",
+            {
+                L"-E", L"CS_Scattering",
+                L"-T", L"cs_6_0",
+                L"-Zi",
+                L"-Od",
+                L"-D", L"COMPUTE_SHADER=1"
+            }
         }
     );
 
@@ -293,19 +300,23 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
         this->m_graphics = GraphicsPipeline(device, L"AtmospherePass::m_graphics", m_rootSignature).Init(
             desc,
             rasterDesc, dsDesc, blendDesc,
-            L"SkyDome.hlsl",
             {
-                L"-E", L"VS_Sky",
-                L"-T", L"vs_6_0",
-                L"-Zi",
-                L"-Od",
+                L"SkyDome.hlsl",
+                {
+                    L"-E", L"VS_Sky",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od",
+                },
             },
-            L"SkyDome.hlsl",
             {
-                L"-E", L"PS_Sky",
-                L"-T", L"ps_6_0",
-                L"-Zi",
-                L"-Od",
+                L"SkyDome.hlsl",
+                {
+                    L"-E", L"PS_Sky",
+                    L"-T", L"ps_6_0",
+                    L"-Zi",
+                    L"-Od",
+                }
             }
         );
 
@@ -453,24 +464,24 @@ void AtmospherePass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::C
         m_constantsDefault = m_constantsUpload;
         m_timeOfDayDefault = scene.m_timeOfDay;
 
-        blackboard.Set<atmosphereConstants&>(NSRenderer::kAtmosphere_constants, m_constantsDefault);
+        blackboard.Set<AtmosphereConstants&>(NSRenderer::kAtmosphere_constants, m_constantsDefault);
 
-        atmosCBAC = rendererCtx.constAlloc(sizeof(atmosphereConstants));
-        atmosCBAC.As<atmosphereConstants>() = m_constantsDefault;
+        atmosCBAC = rendererCtx.constAlloc(sizeof(AtmosphereConstants));
+        atmosCBAC.As<AtmosphereConstants>() = m_constantsDefault;
 
         UpdateAtmosphere(atmosCBAC.gpuAddr, rendererCtx, cmdList);
     }
     else
     {
-        atmosCBAC = rendererCtx.constAlloc(sizeof(atmosphereConstants));
-        atmosCBAC.As<atmosphereConstants>() = m_constantsDefault;
+        atmosCBAC = rendererCtx.constAlloc(sizeof(AtmosphereConstants));
+        atmosCBAC.As<AtmosphereConstants>() = m_constantsDefault;
     }
 
-    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(frameConstants));
+    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
     {
         using namespace DirectX;
 
-        frameConstants& frameCB = frameCBAC.As<frameConstants>();
+        FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
 
         XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
         XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
@@ -486,8 +497,8 @@ void AtmospherePass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::C
 
     scene.m_models[0].Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
     {
-        NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(meshConstants));
-        meshConstants meshCB = allocCtx.As<meshConstants>();
+        NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
+        MeshConstants meshCB = allocCtx.As<MeshConstants>();
         cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
 
         DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
@@ -624,19 +635,23 @@ EnvironmentCubemapPass::EnvironmentCubemapPass(ID3D12Device14* device, Blackboar
 
         m_atmosPipeline = GraphicsPipeline(device, L"EnvironmentCubemapPass::m_atmosPipeline", m_graphicsRoot).Init(
             desc, rasterizer, ds, blend,
-            L"EnvCaptureSky.hlsl",
             {
-                L"-E", L"VS_EnvSky",
-                L"-T", L"vs_6_0",
-                L"-Zi",
-                L"-Od"
+                L"EnvCaptureSky.hlsl",
+                {
+                    L"-E", L"VS_EnvSky",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                },
             },
-            L"EnvCaptureSky.hlsl",
             {
-                L"-E", L"PS_EnvSky",
-                L"-T", L"ps_6_0",
-                L"-Zi",
-                L"-Od"
+                L"EnvCaptureSky.hlsl",
+                {
+                    L"-E", L"PS_EnvSky",
+                    L"-T", L"ps_6_0",
+                    L"-Zi",
+                    L"-Od"
+                }
             }
         );
     }
@@ -667,19 +682,23 @@ EnvironmentCubemapPass::EnvironmentCubemapPass(ID3D12Device14* device, Blackboar
 
         m_geomPipeline = GraphicsPipeline(device, L"EnvironmentCubemapPass::m_geomPipeline", m_graphicsRoot).Init(
             desc, rasterizer, ds, blend,
-            L"EnvCaptureGeo.hlsl",
             {
-                L"-E", L"VS_EnvGeo",
-                L"-T", L"vs_6_0",
-                L"-Zi",
-                L"-Od"
+                L"EnvCaptureGeo.hlsl",
+                {
+                    L"-E", L"VS_EnvGeo",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                },
             },
-            L"EnvCaptureGeo.hlsl",
             {
-                L"-E", L"PS_EnvGeo",
-                L"-T", L"ps_6_0",
-                L"-Zi",
-                L"-Od"
+                L"EnvCaptureGeo.hlsl",
+                {
+                    L"-E", L"PS_EnvGeo",
+                    L"-T", L"ps_6_0",
+                    L"-Zi",
+                    L"-Od"
+                }
             }
         );
     }
@@ -711,12 +730,14 @@ EnvironmentCubemapPass::EnvironmentCubemapPass(ID3D12Device14* device, Blackboar
 
         m_prefilterPipeline = ComputePipeline(device, L"EnvironmentCubemapPass::m_prefilterPipeline", m_prefilterRoot).Init(
             D3D12_PIPELINE_STATE_FLAG_NONE,
-            L"PrefilterEnvMap.hlsl",
             {
-                L"-E", L"main",
-                L"-T", L"cs_6_0",
-                L"-Zi",
-                L"-Od"
+                L"PrefilterEnvMap.hlsl",
+                {
+                    L"-E", L"main",
+                    L"-T", L"cs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                }
             }
         );
     }
@@ -739,12 +760,14 @@ EnvironmentCubemapPass::EnvironmentCubemapPass(ID3D12Device14* device, Blackboar
 
         m_brdfPipeline = ComputePipeline(device, L"EnvironmentCubemapPass::m_brdfPipeline", m_brdfRoot).Init(
             D3D12_PIPELINE_STATE_FLAG_NONE,
-            L"IntegrateBRDF.hlsl",
             {
-                L"-E", L"main",
-                L"-T", L"cs_6_0",
-                L"-Zi",
-                L"-Od",
+                L"IntegrateBRDF.hlsl",
+                {
+                    L"-E", L"main",
+                    L"-T", L"cs_6_0",
+                    L"-Zi",
+                    L"-Od",
+                }
             }
         );
 
@@ -903,9 +926,9 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
 
         NSScene::Camera& cam = cams[face];
 
-        NSAllocator::Ctx captureCBAC = rendererCtx.constAlloc(sizeof(envCaptureConstants));
+        NSAllocator::Ctx captureCBAC = rendererCtx.constAlloc(sizeof(EnvCaptureConstants));
         {
-            envCaptureConstants& constants = captureCBAC.As<envCaptureConstants>();
+            EnvCaptureConstants& constants = captureCBAC.As<EnvCaptureConstants>();
             DirectX::XMStoreFloat4x4(&constants.view, cam.viewMatrix);
             DirectX::XMStoreFloat4x4(&constants.proj, cam.projMatrix);
             DirectX::XMStoreFloat4(&constants.lightDir, scene.m_lightDir);
@@ -919,11 +942,11 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
         {
             m_atmosPipeline.Bind(cmdList);
 
-            auto optAtmosConstDefault = blackboard.GetOpt<atmosphereConstants>(NSRenderer::kAtmosphere_constants);
+            auto optAtmosConstDefault = blackboard.GetOpt<AtmosphereConstants>(NSRenderer::kAtmosphere_constants);
             assert(optAtmosConstDefault.has_value());
 
-            NSAllocator::Ctx atmosCBCA = rendererCtx.constAlloc(sizeof(atmosphereConstants));
-            atmosphereConstants& atmosCB = atmosCBCA.As<atmosphereConstants>();
+            NSAllocator::Ctx atmosCBCA = rendererCtx.constAlloc(sizeof(AtmosphereConstants));
+            AtmosphereConstants& atmosCB = atmosCBCA.As<AtmosphereConstants>();
             atmosCB = optAtmosConstDefault->get();
 
             auto atmosphereSRVs = blackboard.GetOpt<NSDescriptor::Offset>(NSRenderer::kAtmosphere_transmitScatterSRV);
@@ -958,8 +981,8 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
 
                 sceneModel.Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
                 {
-                    NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(meshConstants));
-                    meshConstants& meshCB = allocCtx.As<meshConstants>();
+                    NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
+                    MeshConstants& meshCB = allocCtx.As<MeshConstants>();
                     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
 
                     DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
@@ -1113,3 +1136,101 @@ void EnvironmentCubemapPass::GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSRend
         cmdList.ResourceBarrier(1, &barrier);
     }
 }
+
+TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx)
+{
+    MakeRootSignature(device, L"TerrainPass::m_rootSignature", m_rootSignature, [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+    {
+        CD3DX12_ROOT_PARAMETER1 rp[2]{};
+        rp[IDX_ROOT_CBV_FRAME].InitAsConstantBufferView(IDX_CBV_FRAME, 0);
+        rp[IDX_ROOT_CBV_TERRAIN].InitAsConstantBufferView(IDX_CBV_TERRAIN, 0);
+
+        D3D12_STATIC_SAMPLER_DESC samplers[2]{};
+        samplers[0].ShaderRegister = 0;
+        samplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        samplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        samplers[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        samplers[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        samplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        samplers[0].MipLODBias = 0.f;
+        samplers[0].MaxAnisotropy = 0;
+        samplers[0].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        samplers[0].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+        samplers[0].MinLOD = 0.f;
+        samplers[0].MaxLOD = D3D12_FLOAT32_MAX;
+        samplers[0].RegisterSpace = 0;
+
+        samplers[1].ShaderRegister = 1;
+        samplers[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        samplers[1].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        samplers[1].AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplers[1].AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplers[1].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplers[1].MipLODBias = 0.f;
+        samplers[1].MaxAnisotropy = 0;
+        samplers[1].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        samplers[1].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+        samplers[1].MinLOD = 0.f;
+        samplers[1].MaxLOD = D3D12_FLOAT32_MAX;
+        samplers[1].RegisterSpace = 0;
+
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc{};
+        rsDesc.Init_1_1(
+            _countof(rp), rp, _countof(samplers), samplers, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
+        );
+
+        return D3DX12SerializeVersionedRootSignature(&rsDesc, version, &signature, &error);
+    });
+
+    m_solidPipeline = TessellationPipeline(device, L"", m_rootSignature);
+    m_wireframePipeline = TessellationPipeline(device, L"", m_rootSignature);
+
+    D3D12_INPUT_ELEMENT_DESC inputElements[] =
+    {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSTerrain::Vertex, position),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(NSTerrain::Vertex, texCoord),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+    };
+
+    CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
+    rasterDesc.FillMode = D3D12_FILL_MODE_SOLID;
+    rasterDesc.CullMode = D3D12_CULL_MODE_BACK;
+
+    CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
+    dsDesc.DepthEnable = TRUE;
+    dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+    CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
+
+    TESSELLATION_PIPELINE_STATE_DESC desc{};
+    desc.SampleMask = UINT_MAX;
+    desc.InputLayout = { inputElements, _countof(inputElements) };
+    desc.NumRenderTargets = 1;
+    desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    desc.SampleDesc.Count = 1;
+
+    this->m_solidPipeline = TessellationPipeline(device, L"TerrainPass::m_solidPipeline", m_rootSignature);
+}
+TerrainPass::~TerrainPass()
+{
+
+};
+
+void TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+
+};
+void TerrainPass::OnDestroy()
+{
+
+};
+
+void TerrainPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+
+};
+void TerrainPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
+{
+
+};

@@ -258,6 +258,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
 
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, width);
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, height);
+    m_blackboard.Set<std::reference_wrapper<const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain, std::cref(m_terrain));
 
     {
         std::vector<NSRenderer::Model> models;
