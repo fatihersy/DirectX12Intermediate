@@ -41,16 +41,35 @@ using OptRef = std::optional<std::reference_wrapper<T>>;
 
 constexpr std::wstring_view PROJECT_NAME = L"DXTerrain";
 
+constexpr std::wstring_view SHADERS_FOLDER = L"shaders";
+
 enum EArguments {
     ARG_CONSOLE_PID,
+    ARG_WAIT_FOR_DEBUGGER,
     ARG_MAX
 };
 
-inline std::array<std::wstring, static_cast<size_t>(ARG_MAX)> argAccept =
+struct SCmdArg
 {
-    L"--console-pid=",
+    std::vector<std::string> aliases;
+    std::string value;
+    bool present{};
+    bool expectsValue{};
 };
-inline std::array<std::wstring, static_cast<size_t>(ARG_MAX)> argRecieved;
+
+inline std::array<SCmdArg, static_cast<size_t>(ARG_MAX)> g_CmdArguments =
+{
+    SCmdArg
+    {
+        .aliases = {"--console-pid="},
+        .expectsValue = true
+    },
+    SCmdArg
+    {
+        .aliases = {"--debug", "-d"},
+        .expectsValue = false
+    }
+};
 
 #include "core/Math.h"
 #include "StepTimer.h"

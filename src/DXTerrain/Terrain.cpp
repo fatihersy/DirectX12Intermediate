@@ -64,7 +64,7 @@ Terrain& Terrain::operator=(Terrain&& other) noexcept
 void Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc)
 {
     if (m_initialized) {
-        g_FWarn("%s", "Terrain::OnInit::Calling OnInit function twice without Destroy first");
+        g_FWarn("Terrain::OnInit::Calling OnInit function twice without Destroy first");
         return;
     }
 
@@ -182,7 +182,7 @@ void Terrain::InitAndGenerateHeightmap(uint32_t seed)
 void Terrain::Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     if (m_isOnGPU) {
-        g_FWarn("%s", "Terrain::Upload::Calling Upload function twice without Unload first");
+        g_FWarn("Terrain::Upload::Calling Upload function twice without Unload first");
         return;
     };
     assert(m_heightmapTextureDefault and m_heightmapTextureUpload and "Heightmap should be generated first");
@@ -275,7 +275,7 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
                 .index = chunkIndex
             };
 
-            std::vector<NSModel::Vertex> vertices;
+            std::vector<NSTerrain::Vertex> vertices;
             std::vector<uint32_t> triIndices;
             std::vector<uint32_t> patchIndices;
 
@@ -309,11 +309,8 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
                     const float z = v * m_desc.worldDepth - 0.5f * m_desc.worldDepth;
                     const float y = SampleHeight(u, v) * m_desc.maxHeight;
 
-                    NSModel::Vertex vertex{};
+                    NSTerrain::Vertex vertex{};
                     vertex.position = { x, y, z };
-                    vertex.normal = { 0.f, 1.f, 0.f };
-                    vertex.tangent = { 1.f, 0.f, 0.f };
-                    vertex.bitangent = { 0.f, 0.f, 1.f };
                     vertex.texCoord = { u, v };
 
                     vertices.push_back(vertex);
@@ -416,12 +413,12 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
 
             // Vertices
             {
-                size_t dataSize = vertices.size() * sizeof(NSModel::Vertex);
+                size_t dataSize = vertices.size() * sizeof(NSTerrain::Vertex);
                 createUplBufferAndUpload(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"vertexUpload").c_str(), dataSize, vertices.data(), chunk.vertexUpload);
                 createDefBuffer(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"vertexDefault").c_str(), dataSize, chunk.vertexDefault);
                 chunk.vertexBufferView.BufferLocation = chunk.vertexDefault->GetGPUVirtualAddress();
                 chunk.vertexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
-                chunk.vertexBufferView.StrideInBytes = sizeof(NSModel::Vertex);
+                chunk.vertexBufferView.StrideInBytes = sizeof(NSTerrain::Vertex);
             }
 
             // Triangle indices

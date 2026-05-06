@@ -65,7 +65,7 @@ Pipeline::~Pipeline()
     //        rs = nullptr;
     //    }
     //    else rs.Reset();
-    //    
+    //
     //}, m_rsVar);
 }
 
@@ -92,7 +92,8 @@ ComputePipeline&& ComputePipeline::Init(
     ComPtr<IDxcBlob> shader;
     {
         ComPtr<IDxcBlobEncoding> shaderSource;
-        ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(shaderFileName, nullptr, &shaderSource));
+        std::wstring filepath = FString::wformat(L"%s/%s", SHADERS_FOLDER, shaderFileName);
+        ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(filepath.c_str(), nullptr, &shaderSource));
         ShaderCompiler::GetInstance()->CompileShader(shaderSource.Get(), shader, shaderArgs);
     }
 
@@ -122,12 +123,14 @@ GraphicsPipeline&& GraphicsPipeline::Init(
 
     {
         ComPtr<IDxcBlobEncoding> shaderSource;
-        ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(vertexShaderFileName, nullptr, &shaderSource));
+        std::wstring filepath = FString::wformat(L"%s/%s", SHADERS_FOLDER, vertexShaderFileName);
+        ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(filepath.c_str(), nullptr, &shaderSource));
         ShaderCompiler::GetInstance()->CompileShader(shaderSource.Get(), vertexShader, vertexShaderArgs);
     }
     {
         ComPtr<IDxcBlobEncoding> shaderSource;
-        ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(indexShaderFileName, nullptr, &shaderSource));
+        std::wstring filepath = FString::wformat(L"%s/%s", SHADERS_FOLDER, indexShaderFileName);
+        ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(filepath.c_str(), nullptr, &shaderSource));
         ShaderCompiler::GetInstance()->CompileShader(shaderSource.Get(), pixelShader, indexShaderArgs);
     }
 

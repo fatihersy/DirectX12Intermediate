@@ -29,7 +29,8 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
     HRESULT hr{};
 
     ComPtr<IDxcBlobEncoding> shaderSource;
-    ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(pFileName, nullptr, &shaderSource));
+    std::wstring filepath = NSTool::wformat(L"%s/%s", SHADERS_FOLDER, pFileName);
+    ThrowIfFailed(ShaderCompiler::GetInstance()->m_dxcUtils->LoadFile(filepath.c_str(), nullptr, &shaderSource));
 
     DxcBuffer sourceBuffer{};
     sourceBuffer.Encoding = DXC_CP_ACP;

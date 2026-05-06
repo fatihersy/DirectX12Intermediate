@@ -13,6 +13,15 @@ public:
     template<typename... Args>
     static std::string format(const std::string& format, Args&&... args)
     {
+        auto to_str = []<typename T>(const T & v) -> decltype(auto)
+        {
+            using U = std::remove_cvref_t<T>;
+
+            if constexpr (std::is_same_v<U, std::string>) return v.c_str();
+            else if constexpr (std::is_same_v<U, std::string_view>) return v.data();
+            else return v;
+        };
+
         int size = std::snprintf(nullptr, 0, format.c_str(), to_str(args)...);
         if (size < 0) return {};
         std::vector<char> buf(size + 1);
@@ -29,33 +38,20 @@ public:
     template<typename... Args>
     static std::wstring wformat(const std::wstring& format, Args&&... args)
     {
+        auto to_wstr = []<typename T>(const T & v) -> decltype(auto)
+        {
+            using U = std::remove_cvref_t<T>;
+
+            if constexpr (std::is_same_v<U, std::wstring>) return v.c_str();
+            else if constexpr (std::is_same_v<U, std::wstring_view>) return v.data();
+            else return v;
+        };
+
         int size = std::swprintf(nullptr, 0, format.c_str(), to_wstr(args)...);
         if (size < 0) return {};
         std::vector<wchar_t> buf(size + 1);
         std::swprintf(buf.data(), buf.size(), format.c_str(), to_wstr(args)...);
         return std::wstring(buf.data(), size);
-    }
-
-private:
-    static const char* to_str(const std::string& t)
-    {
-        return t.c_str();
-    }
-    static const wchar_t* to_wstr(const std::wstring& t)
-    {
-        return t.c_str();
-    }
-
-    // universal reference here would be always selected, including std::string
-    template<typename T>
-    static T to_str(const T& t)
-    {
-        return t;
-    }
-    template<typename T>
-    static T to_wstr(const T& t)
-    {
-        return t;
     }
 };
 

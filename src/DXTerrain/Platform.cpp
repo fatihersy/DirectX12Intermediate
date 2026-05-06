@@ -26,8 +26,8 @@ Platform::Platform(SWindow wnd)
 {
     assert(wnd.pApp);
 
-    int consolePid = std::stoul(argRecieved[ARG_CONSOLE_PID]);
-
+    int consolePid = std::stoul(g_CmdArguments[ARG_CONSOLE_PID].value);
+    FreeConsole();
     if (AttachConsole(consolePid) or AllocConsole())
     {
         SetConsoleTitle(L"Debug Console");
@@ -38,6 +38,7 @@ Platform::Platform(SWindow wnd)
         GetConsoleMode(hOut, &dwMode);
         dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
         SetConsoleMode(hOut, dwMode);
+        WriteConsoleA(hOut, "\n", 1, nullptr, nullptr);
     }
     g_PlatformConsoleWrite = &Platform::PlatformConsoleWrite;
 

@@ -22,33 +22,41 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-import os
-import sys
-import os.path
+
 import argparse
+import os
+import os.path
 import subprocess
+import sys
+
 
 def ScriptPath(script):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, f"{script}.py")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Process arguments
     p = argparse.ArgumentParser(prog="mox.py", allow_abbrev=False)
-    p.add_argument("script", nargs="?", default="autogen", help="Script name without .py")
+    p.add_argument(
+        "script", nargs="?", default="autogen", help="Script name without .py"
+    )
     args, passthrough = p.parse_known_args()
-
 
     # Validate script
     path = ScriptPath(args.script)
     if os.path.isfile(path):
-        returncode = subprocess.run((sys.executable, path, *passthrough)).returncode
+        try:
+            returncode = subprocess.run((sys.executable, path, *passthrough)).returncode
+        except KeyboardInterrupt:
+            sys.exit(130)
+
         sys.exit(returncode)
     else:
         print(f'Script "{args.script}" not found!')
-        print(f'')
-        print(f'Available scripts:')
+        print(f"")
+        print(f"Available scripts:")
         for file in os.listdir(os.path.dirname(os.path.abspath(__file__))):
-            if file.endswith('.py') and file != 'mox.py':
-                print(f'- {file[0:-3]}')
+            if file.endswith(".py") and file != "mox.py":
+                print(f"- {file[0:-3]}")
         sys.exit(-1)

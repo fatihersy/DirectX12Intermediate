@@ -173,23 +173,27 @@ void app::LoadAssets()
             });
         }
 
-        Model& skyDome = m_scene.AddObject<NSModel::SDome>
-        (
-            NSModel::AddCtx { .name = L"SkyDome" },
-            NSModel::SDome {
-                .radius = 10000.f,
-                .sliceCount = 64,
-                .stackCount = 32
-            },
-            ctx
-        );
+        NSModel::SceneModelKey sDomeKey{};
+        {
+            Model& skyDome = m_scene.AddObject<NSModel::SDome>
+            (
+                NSModel::AddCtx { .name = L"SkyDome" },
+                NSModel::SDome {
+                    .radius = 10000.f,
+                    .sliceCount = 64,
+                    .stackCount = 32
+                },
+                ctx
+            );
 
-        skyDome.m_sceneKey.id = this->im_nextId++;
-        skyDome.m_sceneKey.index = 0u;
-        skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP);
+            skyDome.m_sceneKey.id = this->im_nextId++;
+            skyDome.m_sceneKey.index = 0u;
+            skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP);
 
-        skyDome.UploadGPU(ctx, cmdList);
-        skyDome.m_registerKey = ctx.registerModel(skyDome.m_name, skyDome.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE).registerKey;
+            skyDome.UploadGPU(ctx, cmdList);
+            skyDome.m_registerKey = ctx.registerModel(skyDome.m_name, skyDome.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE).registerKey;
+            sDomeKey = skyDome.m_sceneKey;
+        }
 
         {
             const float stride = 11.f;
@@ -234,9 +238,9 @@ void app::LoadAssets()
             }
         }
 
-        m_scene.ForEachModel([&ctx, &skyDome](Model& model)
+        m_scene.ForEachModel([&ctx, &sDomeKey](Model& model)
         {
-            if (model.m_sceneKey.id == skyDome.m_sceneKey.id) return;
+            if (model.m_sceneKey.id == sDomeKey.id) return;
 
             model.ForEach([model, &ctx](Mesh& mesh, UINT meshIndex)
             {

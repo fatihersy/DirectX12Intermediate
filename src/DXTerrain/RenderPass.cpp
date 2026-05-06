@@ -1210,7 +1210,45 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
     desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     desc.SampleDesc.Count = 1;
 
-    this->m_solidPipeline = TessellationPipeline(device, L"TerrainPass::m_solidPipeline", m_rootSignature);
+    this->m_solidPipeline = TessellationPipeline(device, L"TerrainPass::m_solidPipeline", m_rootSignature).Init(
+        desc, rasterDesc, dsDesc, blendDesc,
+        {
+            L"TerrainVS.hlsl",
+            {
+                L"-E", L"VS_Terrain",
+                L"-T", L"vs_6_6",
+                L"-Zi",
+                L"-Od"
+            },
+        },
+        {
+            L"TerrainHS.hlsl",
+            {
+                L"-E", L"HS_Terrain",
+                L"-T", L"hs_6_6",
+                L"-Zi",
+                L"-Od"
+            },
+        },
+        {
+            L"TerrainDS.hlsl",
+            {
+                L"-E", L"DS_Terrain",
+                L"-T", L"ds_6_6",
+                L"-Zi",
+                L"-Od"
+            },
+        },
+        {
+            L"TerrainPS.hlsl",
+            {
+                L"-E", L"PS_Terrain",
+                L"-T", L"ps_6_6",
+                L"-Zi",
+                L"-Od"
+            },
+        }
+    );
 }
 TerrainPass::~TerrainPass()
 {

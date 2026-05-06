@@ -2,12 +2,21 @@
 
 namespace NSTool
 {
+    // No-args overload: return the string directly without snprintf
+    static std::string format(const std::string& str)
+    {
+        return str;
+    }
+
     template<typename... Args>
     static std::string format(const std::string_view& format, Args&&... args)
     {
         auto to_str = []<typename T>(const T & v) -> decltype(auto)
         {
-            if constexpr (std::is_same_v<T, std::string>) return v.c_str();
+            using U = std::remove_cvref_t<T>;
+
+            if constexpr (std::is_same_v<U, std::string>) return v.c_str();
+            else if constexpr (std::is_same_v<U, std::string_view>) return v.data();
             else return v;
         };
 
@@ -17,12 +26,22 @@ namespace NSTool
         std::snprintf(buf.data(), buf.size(), format.data(), to_str(args)...);
         return std::string(buf.data(), size);
     }
+
+    // No-args overload: return the string directly without swprintf
+    static std::wstring wformat(const std::wstring& str)
+    {
+        return str;
+    }
+
     template<typename... Args>
     static std::wstring wformat(const std::wstring_view& format, Args&&... args)
     {
         auto to_wstr = []<typename T>(const T & v) -> decltype(auto)
         {
-            if constexpr (std::is_same_v<T, std::wstring>) return v.c_str();
+            using U = std::remove_cvref_t<T>;
+
+            if constexpr (std::is_same_v<U, std::wstring>) return v.c_str();
+            else if constexpr (std::is_same_v<U, std::wstring_view>) return v.data();
             else return v;
         };
 

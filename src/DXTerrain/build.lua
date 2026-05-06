@@ -68,10 +68,16 @@ filter {}
 
 filter "files:**.hlsl"
 buildaction "CustomBuild"
-buildoutputs { "%{wks.location}/app/%{file.name}" }
-buildcommands { 'copy "%{file.relpath}" "%{wks.location}/app/%{file.name}" > NUL' }
+buildoutputs {
+    "%{wks.location}/app/%{prj.name}/%{file.reldirectory}/%{file.name}"
+}
+buildcommands {
+    'mkdir -p "%{wks.location}/app/%{prj.name}/%{file.reldirectory}"',
+    'cp "%{file.relpath}" "%{wks.location}/app/%{prj.name}/%{file.reldirectory}/%{file.name}"'
+}
 linkbuildoutputs "false"
 filter {}
+
 
 -- Use the following to build after other projects
 -- dependson {

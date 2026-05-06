@@ -37,6 +37,7 @@ template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
 
 constexpr std::wstring_view PROJECT_NAME = L"DXMaterial";
+constexpr std::wstring_view SHADERS_FOLDER = L"shaders";
 
 #include "StepTimer.h"
 #include "Tool.h"
