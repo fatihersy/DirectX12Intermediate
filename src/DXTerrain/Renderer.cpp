@@ -272,6 +272,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
         AddPass<NSRenderPass::EnvironmentCubemapPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
 
         AddPass<NSRenderPass::GeometryPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
+
+        AddPass<NSRenderPass::TerrainPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
     }
 
     Execute([this](NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)

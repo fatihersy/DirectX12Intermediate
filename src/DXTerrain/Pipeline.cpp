@@ -145,6 +145,7 @@ TessellationPipeline&& TessellationPipeline::Init(
     ComPtr<IDxcBlob> vertexShader;
     ComPtr<IDxcBlob> hullShader;
     ComPtr<IDxcBlob> domainShader;
+    ComPtr<IDxcBlob> pixelShader;
 
     ShaderCompiler::GetInstance()->CompileShader(vertexMetadata.fileName, vertexShader, vertexMetadata.args);
     ShaderCompiler::GetInstance()->CompileShader(hullMetadata.fileName, hullShader, hullMetadata.args);
@@ -157,7 +158,6 @@ TessellationPipeline&& TessellationPipeline::Init(
 
     if(pixelMetadata.fileName)
     {
-        ComPtr<IDxcBlob> pixelShader;
         ShaderCompiler::GetInstance()->CompileShader(pixelMetadata.fileName, pixelShader, pixelMetadata.args);
         desc.PS = CD3DX12_SHADER_BYTECODE(pixelShader->GetBufferPointer(),  pixelShader->GetBufferSize());
         desc.NumRenderTargets = inDesc.NumRenderTargets;

@@ -164,6 +164,7 @@ LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             iApp->OnDestroy();
             iApp->isQuitting = true;
         }
+        FreeConsole();
         DestroyWindow(hWnd);
         return S_OK;
     }

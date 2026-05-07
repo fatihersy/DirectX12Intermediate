@@ -137,20 +137,24 @@ void app::LoadPipeline()
         ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&m_device)));
     }
 
+    D3D12_FEATURE_DATA_SHADER_MODEL shaderModel{};
+    shaderModel.HighestShaderModel = D3D_SHADER_MODEL_6_7;
+
+    ThrowIfFailed(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+
+    if (shaderModel.HighestShaderModel < D3D_SHADER_MODEL_6_6)
+    {
+        g_FError("app::LoadPipeline()::Minimum required shader model is 0x67. Found:%#02x", shaderModel.HighestShaderModel);
+        throw std::runtime_error("");
+    }
+
     m_renderer.Init(m_factory.Get(), m_device.Get(), plat.GetWindow(), im_width, im_height);
 }
 void app::LoadAssets()
 {
     m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
     {
-        m_scene = Scene(m_device.Get(), m_wicFactory.Get(),
-            NSScene::Camera(
-                {0.f, 0.f, 100.f},
-                {0.f, 0.f,-1.f, 0.f},
-                {0.f, 1.f, 0.f, 0.f}
-            ),
-            12.f
-        );
+        m_scene = Scene(m_device.Get(), m_wicFactory.Get(), {}, 12.f);
 
         m_scene.m_terrain.desc = NSTerrain::TerrainDesc
         {
@@ -163,6 +167,12 @@ void app::LoadAssets()
             .heightMapResolution = 1024
         };
         this->m_renderer.CreateTerrain(cmdList, m_scene.m_terrain.desc);
+
+        m_scene.m_camera.SetCamera(
+            { 0.f, m_scene.m_terrain.desc.maxHeight * .5f, 0.f},
+            { 0.f, 0.f, -1.f, 0.f },
+            { 0.f, 1.f, 0.f, 0.f }
+        );
 
         for (const NSTerrain::TerrainChunk& chunk : this->m_renderer.GetTerrain().GetChunks())
         {

@@ -703,7 +703,7 @@ namespace NSRenderPass
         bool IsEnabled() const { return im_isEnabled; };
         void SetIsEnabled(bool val) { im_isEnabled = val; };
 
-    private:
+    protected:
         bool im_isEnabled{};
     };
 }

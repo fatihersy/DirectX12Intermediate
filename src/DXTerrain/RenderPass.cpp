@@ -132,7 +132,7 @@ GeometryPass::~GeometryPass()
 
 void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
-    if (not IsEnabled()) return;
+    if (not im_isEnabled) return;
 
     m_pipeline.Bind(cmdList);
 
@@ -440,7 +440,7 @@ AtmospherePass::~AtmospherePass()
 {};
 void AtmospherePass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
-    if (not IsEnabled()) return;
+    if (not im_isEnabled) return;
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
 
@@ -843,7 +843,7 @@ void EnvironmentCubemapPass::OnDestroy()
 }
 void EnvironmentCubemapPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
-    if (not IsEnabled()) return;
+    if (not im_isEnabled) return;
 
     blackboard.Set<NSDescriptor::Handle&>(NSRenderer::kEnvCubemap_brdfLUTsrv, m_brdfSRVhandle);
 
@@ -1182,9 +1182,6 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
         return D3DX12SerializeVersionedRootSignature(&rsDesc, version, &signature, &error);
     });
 
-    m_solidPipeline = TessellationPipeline(device, L"", m_rootSignature);
-    m_wireframePipeline = TessellationPipeline(device, L"", m_rootSignature);
-
     D3D12_INPUT_ELEMENT_DESC inputElements[] =
     {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSTerrain::Vertex, position),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -1210,44 +1207,50 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
     desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     desc.SampleDesc.Count = 1;
 
-    this->m_solidPipeline = TessellationPipeline(device, L"TerrainPass::m_solidPipeline", m_rootSignature).Init(
-        desc, rasterDesc, dsDesc, blendDesc,
+    ShaderMetadata vertexMetadata = { L"TerrainVS.hlsl",
         {
-            L"TerrainVS.hlsl",
-            {
-                L"-E", L"VS_Terrain",
-                L"-T", L"vs_6_6",
-                L"-Zi",
-                L"-Od"
-            },
+            L"-E", L"VS_Terrain",
+            L"-T", L"vs_6_6",
+            L"-Zi",
+            L"-Od"
         },
+    };
+    ShaderMetadata hullMetadata = { L"TerrainHS.hlsl",
         {
-            L"TerrainHS.hlsl",
-            {
-                L"-E", L"HS_Terrain",
-                L"-T", L"hs_6_6",
-                L"-Zi",
-                L"-Od"
-            },
+            L"-E", L"HS_Terrain",
+            L"-T", L"hs_6_6",
+            L"-Zi",
+            L"-Od"
         },
+    };
+    ShaderMetadata domainMetadata = { L"TerrainDS.hlsl",
         {
-            L"TerrainDS.hlsl",
-            {
-                L"-E", L"DS_Terrain",
-                L"-T", L"ds_6_6",
-                L"-Zi",
-                L"-Od"
-            },
+            L"-E", L"DS_Terrain",
+            L"-T", L"ds_6_6",
+            L"-Zi",
+            L"-Od"
         },
+    };
+    ShaderMetadata pixelMetadata = {
+        L"TerrainPS.hlsl",
         {
-            L"TerrainPS.hlsl",
-            {
-                L"-E", L"PS_Terrain",
-                L"-T", L"ps_6_6",
-                L"-Zi",
-                L"-Od"
-            },
-        }
+            L"-E", L"PS_Terrain",
+            L"-T", L"ps_6_6",
+            L"-Zi",
+            L"-Od"
+        },
+    };
+    this->m_solidPipeline = TessellationPipeline(device, L"", m_rootSignature).Init(
+        desc,
+        rasterDesc, dsDesc, blendDesc,
+        vertexMetadata, hullMetadata, domainMetadata, pixelMetadata
+    );
+
+    rasterDesc.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    m_wireframePipeline = TessellationPipeline(device, L"", m_rootSignature).Init(
+        desc,
+        rasterDesc, dsDesc, blendDesc,
+        vertexMetadata, hullMetadata, domainMetadata, pixelMetadata
     );
 }
 TerrainPass::~TerrainPass()
@@ -1266,6 +1269,73 @@ void TerrainPass::OnDestroy()
 
 void TerrainPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
+    if (not this->im_isEnabled) return;
+
+    auto optTerrainRef = blackboard.GetOpt
+        <std::reference_wrapper
+        <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
+    );
+
+    assert(optTerrainRef.has_value() and "TerrainPass must have access terrain through blackboard");
+
+    const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
+    const std::vector<NSTerrain::TerrainChunk>& regChunks = terrain.GetChunks();
+    const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
+
+    m_solidPipeline.Bind(cmdList);
+    cmdList.IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY::D3D_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
+
+    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
+    {
+        using namespace DirectX;
+
+        FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
+
+        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
+        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
+        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
+    }
+    cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
+
+    const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
+    const float worldTexelSpacing = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
+    const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
+
+    for (const NSScene::TerrainChunk& sceChunk : sceChunks)
+    {
+        if (not sceChunk.isVisible) continue;
+
+        assert(regChunks.size() > sceChunk.key.index);
+
+        const NSTerrain::TerrainChunk& regChunk = regChunks[sceChunk.key.index];
+
+        assert(regChunk.key.gridX == sceChunk.key.gridX and regChunk.key.gridZ == sceChunk.key.gridZ);
+
+        NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
+        {
+            TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
+            DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
+            cbuffer.maxHeight = desc.maxHeight;
+            cbuffer.worldTexelSpacing = worldTexelSpacing;
+            cbuffer.tessFactorScale = 1.f;
+            cbuffer.textureTilingFactor = 64.f;
+            cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
+            cbuffer.chunkUVScale = regChunk.chunkUVScale;
+            cbuffer.heightmapIndex = heightmapSrvIndex;
+            cbuffer.splatIndices[0] = rendererCtx.fallbackSRV.index;
+            cbuffer.splatIndices[1] = rendererCtx.fallbackSRV.index;
+            cbuffer.splatIndices[2] = rendererCtx.fallbackSRV.index;
+            cbuffer.splatIndices[3] = rendererCtx.fallbackSRV.index;
+        };
+
+        cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
+
+        cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
+        cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
+        cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
+    }
 
 };
 void TerrainPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)

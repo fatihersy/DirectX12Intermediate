@@ -79,7 +79,7 @@ DSOutput DS_Terrain(
     uint hmHeight;
     heightmap.GetDimensions(hmWidth, hmHeight);
 
-    float2 texelUV = 1.0f / float2(max(hmWidth - 1, 1), max(hmHeight - 1, 1));
+    float2 texelUV = 1.0f / float2(max(hmWidth - 1u, 1u), max(hmHeight - 1u, 1u));
 
     float hL = SampleHeight(heightmap, hmUV + float2(-texelUV.x, 0.0f));
     float hR = SampleHeight(heightmap, hmUV + float2( texelUV.x, 0.0f));

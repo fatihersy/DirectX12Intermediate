@@ -79,7 +79,7 @@ HSPatchConstants PatchConstants(InputPatch<HSInput, 4> patch)
 
 [domain("quad")]
 [partitioning("fractional_even")]
-[outputtopology("triangle_cw")]
+[outputtopology("triangle_ccw")]
 [outputcontrolpoints(4)]
 [patchconstantfunc("PatchConstants")]
 HSOutput HS_Terrain(InputPatch<HSInput, 4> patch, uint i : SV_OutputControlPointID)
