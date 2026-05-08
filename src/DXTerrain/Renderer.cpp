@@ -413,7 +413,7 @@ void Renderer::BeginFrame()
     m_blackboard.Set<D3D12_CPU_DESCRIPTOR_HANDLE&>(NSRenderer::kRenderer_mainDSV, m_dsHandle.cpuAddr);
 
     m_commandList->ClearRenderTargetView(OffsetRTV(m_rtHandle, frameIndex).cpuAddr, CLEAR_COLOR, 0, nullptr);
-    m_commandList->ClearDepthStencilView(m_dsHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
+    m_commandList->ClearDepthStencilView(m_dsHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 0.f, 0, 0, nullptr); // Clear Depth 1.f -> 0.f
 
     ID3D12DescriptorHeap* heaps[] = {
         const_cast<ID3D12DescriptorHeap*>(m_srvHeap.Raw())
@@ -691,7 +691,7 @@ void Renderer::Resize(UINT width, UINT height)
     {
         D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
         D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, width, height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
-        D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.f, 0);
+        D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 0.f, 0); // Clear value 1.f -> 0.f
         ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
     }
 
@@ -738,7 +738,7 @@ void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDe
     m_dsHandle = AllocDSVStatic(1u);
 
     D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 1.f, 0);
+    D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 0.f, 0); // Clear value 1.f -> 0.f
     D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(
         DXGI_FORMAT_D32_FLOAT,
         inDesc.width, inDesc.height,

@@ -46,7 +46,7 @@ namespace NSScene
         float camYaw{};
         float camPitch{};
 
-        float camSpeed{};
-        float lookSensitivity{};
+        float camSpeed = 15.f;
+        float lookSensitivity = .1f;
     };
 }

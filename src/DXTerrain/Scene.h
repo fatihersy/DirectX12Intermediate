@@ -6,7 +6,7 @@ class Scene
 {
 public:
     Scene(){};
-    Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSScene::Camera cam, float timeOfDay);
+    Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, float timeOfDay);
     ~Scene();
 
     void OnDestroy(NSRenderer::Ctx rendererCtx);
@@ -72,6 +72,8 @@ public:
     void CullScene(const NSScene::Camera* camOverride = nullptr, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey());
 
     void ForEachModel(std::function<void(Model& model)> ForEach);
+
+    void SetupCameraInfiniteProjection(float fovY, float aspect, float nearZ);
 
     NSScene::Terrain m_terrain{};
 

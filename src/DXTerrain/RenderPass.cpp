@@ -73,6 +73,11 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
             {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(NSModel::Vertex, texCoord), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
         };
 
+        CD3DX12_RASTERIZER_DESC rasterDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+
+        CD3DX12_DEPTH_STENCIL_DESC dsDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+
         D3D12_RENDER_TARGET_BLEND_DESC rtBlendDesc{};
         rtBlendDesc.BlendEnable = TRUE;
         rtBlendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
@@ -97,8 +102,8 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
 
         m_pipeline.Init(
             desc,
-            CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
-            CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT),
+            rasterDesc,
+            dsDesc,
             blendDesc,
             {
                 L"GeometryPassVS.hlsl",
@@ -284,7 +289,7 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
 
         CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
         dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL; // DepthFunc LESS_EQUAL to GREATER_EQUAL
 
         CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
 
@@ -1195,7 +1200,7 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
     CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
     dsDesc.DepthEnable = TRUE;
     dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL; // DepthFunc LESS_EQUAL to GREATER_EQUAL
 
     CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
 

@@ -154,7 +154,12 @@ void app::LoadAssets()
 {
     m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
     {
-        m_scene = Scene(m_device.Get(), m_wicFactory.Get(), {}, 12.f);
+        m_scene = Scene(m_device.Get(), m_wicFactory.Get(), 12.f);
+        m_scene.SetupCameraInfiniteProjection(
+            DirectX::XM_PIDIV4,
+            im_aspectRatio,
+            m_scene.NEAR_CLIP
+        );
 
         m_scene.m_terrain.desc = NSTerrain::TerrainDesc
         {
@@ -359,7 +364,7 @@ void app::OnResize(UINT width, UINT height)
 
     m_renderer.Resize(im_width, im_height);
 
-    m_scene.m_camera.projMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, im_aspectRatio, m_scene.NEAR_CLIP, m_scene.FAR_CLIP);
+    m_scene.SetupCameraInfiniteProjection(DirectX::XM_PIDIV4, im_aspectRatio, m_scene.NEAR_CLIP);
 };
 void app::ToggleFullScreen()
 {

@@ -1,21 +1,14 @@
 #include "stdafx.h"
 #include "Scene.h"
 
-#include "IApp.h"
-
 #include "Renderer.h"
 
-Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSScene::Camera cam, float timeOfDay) : m_device(device), m_wicFactory(wicFactory)
+Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, float timeOfDay) : m_device(device), m_wicFactory(wicFactory)
 {
-    m_camera = cam;
-    m_camera.projMatrix = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, IApp::GetInstance()->im_aspectRatio, NEAR_CLIP, FAR_CLIP);
-    m_camera.camSpeed = 10.f;
-    m_camera.lookSensitivity = .1f;
-
     m_timeOfDay = timeOfDay;
-
     m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.f);
     m_lightColor = DirectX::XMVectorSet(0.9f, 0.9f, 0.9f, 1.0f);
+    m_camera = NSScene::Camera({}, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
 }
 Scene::~Scene() {}
 
@@ -94,4 +87,15 @@ void Scene::ForEachModel(std::function<void(Model& model)> ForEach)
     {
         ForEach(model);
     }
+}
+
+void Scene::SetupCameraInfiniteProjection(float fovY, float aspect, float nearZ)
+{
+    const float f = 1.f / tanf(fovY * 0.5f);
+    m_camera.projMatrix = DirectX::XMMATRIX(
+        f / aspect, 0.f,   0.f,  0.f,
+        0.f,          f,   0.f,  0.f,
+        0.f,        0.f,   0.f,  1.f,
+        0.f,        0.f, nearZ,  0.f
+    );
 }
