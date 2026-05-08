@@ -154,7 +154,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
     CreateDepthStencil(L"Renderer::m_depthStencil", NSRenderer::DepthStencilCreateDescription {
         .format = DXGI_FORMAT_D32_FLOAT,
         .flags = D3D12_DSV_FLAG_NONE,
-        .dimention = D3D12_DSV_DIMENSION::D3D12_DSV_DIMENSION_TEXTURE2D,
+        .dimension = D3D12_DSV_DIMENSION::D3D12_DSV_DIMENSION_TEXTURE2D,
         .width = m_width,
         .height = m_height,
         .outDSV = m_depthStencil
@@ -733,7 +733,7 @@ void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDe
     D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
     desc.Format = inDesc.format;
     desc.Flags = inDesc.flags;
-    desc.ViewDimension = inDesc.dimention;
+    desc.ViewDimension = inDesc.dimension;
 
     m_dsHandle = AllocDSVStatic(1u);
 

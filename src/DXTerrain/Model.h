@@ -45,6 +45,10 @@ public:
         m_position.x = position.x;
         m_position.y = position.y;
         m_position.z = position.z;
+        m_collision.position.x = position.x;
+        m_collision.position.y = position.y;
+        m_collision.position.z = position.z;
+
         return std::move(*this);
     }
     Model&& SetMetallic(float val)
@@ -107,7 +111,7 @@ public:
     std::filesystem::path m_assetsPath;
     bool isOnGPU{};
     bool isOnCPU{};
-    NSMath::SBoundSphere collision;
+    NSMath::SBoundSphere m_collision;
 
     bool TestFlag(NSModel::EModelFlag flag) const {
         return m_flags.test(static_cast<uint32_t>(flag));

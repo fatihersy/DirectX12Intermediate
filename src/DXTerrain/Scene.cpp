@@ -42,22 +42,6 @@ void Scene::OnUpdate()
         // Whole for loop can be moved
         chunk.isVisible = frustum.TestAABB(chunk.bound.aabb);
     }
-
-    // TODO: Remove Later
-    {
-        static bool fired = false;
-        if (not fired)
-        {
-            int count{};
-            for (NSScene::TerrainChunk& chunk : m_terrain.chunks) {
-                if (chunk.isVisible) count++;
-            }
-            g_FDebug("Scene::m_terrain.chunks -> chunk.isVisible == true : %d\n", count);
-
-            fired = true;
-        }
-    }
-
 }
 
 
@@ -97,7 +81,7 @@ void Scene::CullScene(const NSScene::Camera* camOverride, NSModel::SceneModelKey
         DirectX::XMFLOAT3 fPos = model.GetPosition();
         DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&fPos);
 
-        if (frustum.TestSphere(model.collision))
+        if (frustum.TestSphere(model.m_collision))
         {
             m_modelsCulled.push_back(model.m_sceneKey);
         }

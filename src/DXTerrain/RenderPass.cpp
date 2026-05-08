@@ -1247,6 +1247,7 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
     );
 
     rasterDesc.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    rasterDesc.CullMode = D3D12_CULL_MODE_NONE;
     m_wireframePipeline = TessellationPipeline(device, L"", m_rootSignature).Init(
         desc,
         rasterDesc, dsDesc, blendDesc,
@@ -1276,13 +1277,21 @@ void TerrainPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx 
         <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
     );
 
-    assert(optTerrainRef.has_value() and "TerrainPass must have access terrain through blackboard");
+    assert(optTerrainRef.has_value() and "TerrainPass must have terrain access through blackboard");
 
     const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
     const std::vector<NSTerrain::TerrainChunk>& regChunks = terrain.GetChunks();
     const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
 
-    m_solidPipeline.Bind(cmdList);
+    if (rendererCtx.rendererTestFlag(NSRenderer::ERendererFlag::MODE_WIREFRAME))
+    {
+        m_wireframePipeline.Bind(cmdList);
+    }
+    else
+    {
+        m_solidPipeline.Bind(cmdList);
+    }
+
     cmdList.IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY::D3D_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
 
     NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
@@ -1324,10 +1333,10 @@ void TerrainPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx 
             cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
             cbuffer.chunkUVScale = regChunk.chunkUVScale;
             cbuffer.heightmapIndex = heightmapSrvIndex;
-            cbuffer.splatIndices[0] = rendererCtx.fallbackSRV.index;
-            cbuffer.splatIndices[1] = rendererCtx.fallbackSRV.index;
-            cbuffer.splatIndices[2] = rendererCtx.fallbackSRV.index;
-            cbuffer.splatIndices[3] = rendererCtx.fallbackSRV.index;
+            cbuffer.splatIndices[0] = rendererCtx.fallbackSRV.get().index;
+            cbuffer.splatIndices[1] = rendererCtx.fallbackSRV.get().index;
+            cbuffer.splatIndices[2] = rendererCtx.fallbackSRV.get().index;
+            cbuffer.splatIndices[3] = rendererCtx.fallbackSRV.get().index;
         };
 
         cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);

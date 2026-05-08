@@ -168,11 +168,12 @@ void app::LoadAssets()
         };
         this->m_renderer.CreateTerrain(cmdList, m_scene.m_terrain.desc);
 
-        m_scene.m_camera.SetCamera(
-            { 0.f, m_scene.m_terrain.desc.maxHeight * .5f, 0.f},
-            { 0.f, 0.f, -1.f, 0.f },
-            { 0.f, 1.f, 0.f, 0.f }
-        );
+        DirectX::XMFLOAT3 camEye = {
+            0.f,
+            m_scene.m_terrain.desc.maxHeight * .5f,
+            0.f
+        };
+        m_scene.m_camera.SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
 
         for (const NSTerrain::TerrainChunk& chunk : this->m_renderer.GetTerrain().GetChunks())
         {
@@ -217,8 +218,9 @@ void app::LoadAssets()
                 const int32_t row = itr / 6;
                 const float metallic = col * .2f;
                 const float roughness = row * .2f;
-                const float posX = -col * stride - gridStartPosX;
-                const float posY = row * stride + gridStartPosY;
+                const float posX = -col * stride - gridStartPosX + camEye.x;
+                const float posY = row * stride + gridStartPosY + camEye.y;
+                const float posZ = 0.f + camEye.z - 100.f;
 
                 NSModel::PrimitiveTraits<NSModel::SSphere> desc({
                     .radius = 5.f,
@@ -230,7 +232,7 @@ void app::LoadAssets()
                 (
                     NSModel::AddCtx {
                         .name = NSTool::wformat(L"Sphere%d", idx).c_str(),
-                        .position = { posX, posY, 0.f },
+                        .position = { posX, posY, posZ },
                         .metallic = metallic,
                         .roughness = roughness
                     },
@@ -240,10 +242,9 @@ void app::LoadAssets()
                 model.m_sceneKey.id = this->im_nextId++;
                 model.m_sceneKey.index = idx;
 
-                model.collision.position = { posX, posY, 0.f };
-                model.collision.radius = desc.desc.radius;
-                model.collision.sliceCount = desc.desc.sliceCount;
-                model.collision.stackCount = desc.desc.stackCount;
+                model.m_collision.radius = desc.desc.radius;
+                model.m_collision.sliceCount = desc.desc.sliceCount;
+                model.m_collision.stackCount = desc.desc.stackCount;
                 idx++;
             }
         }
@@ -397,15 +398,19 @@ void app::UpdateKeyBindings()
     auto kbState = m_keyboard->GetState();
     m_keyboardTracker.Update(kbState);
 
-    if (kbState.Escape) {
+    if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::F1))
+    {
+        m_renderer.FlipFlag(NSRenderer::ERendererFlag::MODE_WIREFRAME);
+    }
+    if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::Escape))
+    {
         m_mouse->SetMode(DirectX::Mouse::MODE_ABSOLUTE);
     }
-
-    if (kbState.End) {
+    if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::End))
+    {
         PostMessage(plat.GetWindow(), WM_CLOSE, 0, 0);
     }
-
-    if (kbState.Insert)
+    if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::Insert))
     {
         if (m_mouse->GetState().positionMode == DirectX::Mouse::MODE_RELATIVE)
         {

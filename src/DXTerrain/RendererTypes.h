@@ -546,6 +546,13 @@ namespace NSBarrier
 class Blackboard;
 namespace NSRenderer
 {
+    enum class ERendererFlag : uint32_t
+    {
+        MODE_WIREFRAME,
+        MAX,
+        Force32bit = UINT32_MAX
+    };
+
     struct BlackboardKey
     {
         const char* name;
@@ -585,16 +592,28 @@ namespace NSRenderer
         std::vector<Neighbor> objsInFrustum;
 
         bool TestFlag(NSModel::ERegModelFlag flag) const {
-            return m_flags.test(static_cast<uint32_t>(flag));
+            const size_t _flag = static_cast<size_t>(flag);
+            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+
+            return m_flags.test(_flag);
         }
         void SetFlag(NSModel::ERegModelFlag flag) {
-            m_flags.set(static_cast<uint32_t>(flag));
+            const size_t _flag = static_cast<size_t>(flag);
+            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+
+            m_flags.set(_flag);
         }
         void ResetFlag(NSModel::ERegModelFlag flag) {
-            m_flags.reset(static_cast<uint32_t>(flag));
+            const size_t _flag = static_cast<size_t>(flag);
+            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+
+            m_flags.reset(_flag);
         }
         void FlipFlag(NSModel::ERegModelFlag flag) {
-            m_flags.flip(static_cast<uint32_t>(flag));
+            const size_t _flag = static_cast<size_t>(flag);
+            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+
+            m_flags.flip(_flag);
         }
 
         bool isDirty{};
@@ -622,11 +641,15 @@ namespace NSRenderer
     using FnConstAlloc_t = std::function<NSAllocator::Ctx(size_t size)>;
     using FnRendererModelRegister_t = std::function<NSRenderer::Model&(std::wstring_view modelName, NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag)>;
     using FnRendererModelUnload_t = std::function<void(NSModel::RegisterModelKey key)>;
+    using FnRendererTestFlag_t = std::function<bool(NSRenderer::ERendererFlag flag)>;
+    using FnRendererSetFlag_t = std::function<void(NSRenderer::ERendererFlag flag)>;
+    using FnRendererResetFlag_t = std::function<void(NSRenderer::ERendererFlag flag)>;
+    using FnRendererFlipFlag_t = std::function<void(NSRenderer::ERendererFlag flag)>;
 
     struct DepthStencilCreateDescription {
         DXGI_FORMAT format{};
         D3D12_DSV_FLAGS flags{};
-        D3D12_DSV_DIMENSION dimention{};
+        D3D12_DSV_DIMENSION dimension{};
         UINT width;
         UINT height;
         ComPtr<ID3D12Resource2>& outDSV;
@@ -648,8 +671,12 @@ namespace NSRenderer
             FnConstAlloc_t fn_constAlloc,
             FnRendererModelRegister_t fn_registerModel,
             FnRendererModelUnload_t fn_unloadModel,
-            NSDescriptor::Handle in_fallbackSRV,
-            std::reference_wrapper<NSBarrier::IBarrierBatch> in_barrierBatch
+            std::reference_wrapper<const NSDescriptor::Handle> in_fallbackSRV,
+            std::reference_wrapper<NSBarrier::IBarrierBatch> in_barrierBatch,
+            FnRendererTestFlag_t fn_RendererTestFlag,
+            FnRendererSetFlag_t fn_RendererSetFlag,
+            FnRendererResetFlag_t fn_RendererResetFlag,
+            FnRendererFlipFlag_t fn_RendererFlipFlag
         )
         :   allocSRVRing(std::move(fn_allocSRVRing)),
             allocSRVStatic(std::move(fn_allocSRVStatic)),
@@ -665,7 +692,11 @@ namespace NSRenderer
             registerModel(std::move(fn_registerModel)),
             unloadModel(std::move(fn_unloadModel)),
             fallbackSRV(in_fallbackSRV),
-            barrierBatch(in_barrierBatch)
+            barrierBatch(in_barrierBatch),
+            rendererTestFlag(fn_RendererTestFlag),
+            rendererSetFlag(fn_RendererSetFlag),
+            rendererResetFlag(fn_RendererResetFlag),
+            rendererFlipFlag(fn_RendererFlipFlag)
         {};
 
         FnDescAlloc_t allocSRVRing;
@@ -681,8 +712,12 @@ namespace NSRenderer
         FnConstAlloc_t constAlloc;
         FnRendererModelRegister_t registerModel;
         FnRendererModelUnload_t unloadModel;
-        NSDescriptor::Handle fallbackSRV;
+        std::reference_wrapper<const NSDescriptor::Handle> fallbackSRV;
         std::reference_wrapper<NSBarrier::IBarrierBatch> barrierBatch;
+        FnRendererTestFlag_t rendererTestFlag;
+        FnRendererSetFlag_t rendererSetFlag;
+        FnRendererResetFlag_t rendererResetFlag;
+        FnRendererFlipFlag_t rendererFlipFlag;
     };
 }
 
@@ -702,7 +737,6 @@ namespace NSRenderPass
 
         bool IsEnabled() const { return im_isEnabled; };
         void SetIsEnabled(bool val) { im_isEnabled = val; };
-
     protected:
         bool im_isEnabled{};
     };

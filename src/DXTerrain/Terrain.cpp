@@ -487,34 +487,17 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
 
     assert(m_chunks.size() == static_cast<size_t>(m_desc.chunkCountX) * m_desc.chunkCountZ);
 
-    // TODO: Remove after
-    {
-        g_FDebug("m_chunks.size():%zu", m_chunks.size());
+    TerrainChunk& fstchunk = m_chunks[0];
+    DirectX::XMFLOAT3& fstAabbMin = fstchunk.bounds.aabb.min;
+    DirectX::XMFLOAT3& fstAabbMax = fstchunk.bounds.aabb.max;
+    assert(NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight));
+    assert(NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y));
 
-        {
-            TerrainChunk& fstchunk = m_chunks[0];
-            DirectX::XMFLOAT3& fstAabbMin = fstchunk.bounds.aabb.min;
-            DirectX::XMFLOAT3& fstAabbMax = fstchunk.bounds.aabb.max;
-
-            g_FDebug("chunks%zu : triangleIndexCount:%u", fstchunk.key.index, fstchunk.triangleIndexCount);
-            g_FDebug("chunks%zu : patchIndexCount:%u", fstchunk.key.index,  fstchunk.patchIndexCount);
-            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f", fstchunk.key.index,  fstAabbMin.y);
-            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s", fstchunk.key.index,  fstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
-            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s", fstchunk.key.index,  fstAabbMax.y, fstAabbMin.y, NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y) ? "TRUE" : "FALSE");
-        }
-
-        {
-            TerrainChunk& lstchunk = m_chunks[m_chunks.size() - 1u];
-            DirectX::XMFLOAT3& lstAabbMin = lstchunk.bounds.aabb.min;
-            DirectX::XMFLOAT3& lstAabbMax = lstchunk.bounds.aabb.max;
-
-            g_FDebug("chunks%zu : triangleIndexCount:%u", lstchunk.key.index, lstchunk.triangleIndexCount);
-            g_FDebug("chunks%zu : patchIndexCount:%u", lstchunk.key.index,  lstchunk.patchIndexCount);
-            g_FDebug("chunks%zu.bounds : aabbMin.y == %.2f", lstchunk.key.index,  lstAabbMin.y);
-            g_FDebug("chunks%zu.bounds : aabbMax.y <= maxHeight == %.2f <= %.2f == %s", lstchunk.key.index,  lstAabbMax.y, m_desc.maxHeight, NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight) ? "TRUE" : "FALSE");
-            g_FDebug("chunks%zu.bounds : aabbMax.y > aabbMin.y == %.2f > %.2f == %s", lstchunk.key.index,  lstAabbMax.y, lstAabbMin.y, NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y) ? "TRUE" : "FALSE");
-        }
-    }
+    TerrainChunk& lstchunk = m_chunks[m_chunks.size() - 1u];
+    DirectX::XMFLOAT3& lstAabbMin = lstchunk.bounds.aabb.min;
+    DirectX::XMFLOAT3& lstAabbMax = lstchunk.bounds.aabb.max;
+    assert(NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight));
+    assert(NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y));
 }
 float Terrain::SampleHeight(float u, float v) const
 {

@@ -37,6 +37,17 @@ public:
         return *m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
     }
 
+    NSRenderer::Model& GetRegisteredModel(NSModel::RegisterModelKey& key)
+    {
+        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+
+        NSRenderer::Model& regModel = optRegModels->get()[key.index];
+        assert(regModel.sceneKey.id == key.id);
+
+        return regModel;
+    }
+
     NSDescriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
         return m_srvHeap.AllocateRing(amount);
     }
@@ -99,38 +110,42 @@ public:
                 return this->RegisterModel(modelName, key, cmdList, flag);
             },
             [this](NSModel::RegisterModelKey key) { this->UnloadModel(key); },
-            m_fallbackTextureSRVhandle,
-            GetBarrierBatch()
+            std::cref(m_fallbackTextureSRVhandle),
+            GetBarrierBatch(),
+            [this](NSRenderer::ERendererFlag flag) -> bool { return this->TestFlag(flag); },
+            [this](NSRenderer::ERendererFlag flag) -> void { this->SetFlag(flag); },
+            [this](NSRenderer::ERendererFlag flag) -> void { this->ResetFlag(flag); },
+            [this](NSRenderer::ERendererFlag flag) -> void { this->FlipFlag(flag); }
         );
     }
 
-    bool TestFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    bool TestFlag(NSRenderer::ERendererFlag flag)
     {
-        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+        const size_t _flag = static_cast<size_t>(flag);
+        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
-        return optRegModels->get()[key.index].TestFlag(flag);
+        return m_flags.test(_flag);
     }
-    void SetFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    void SetFlag(NSRenderer::ERendererFlag flag)
     {
-        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+        const size_t _flag = static_cast<size_t>(flag);
+        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
-        optRegModels->get()[key.index].SetFlag(flag);
+        m_flags.set(static_cast<uint32_t>(_flag));
     }
-    void ResetFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    void ResetFlag(NSRenderer::ERendererFlag flag)
     {
-        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+        const size_t _flag = static_cast<size_t>(flag);
+        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
-        optRegModels->get()[key.index].ResetFlag(flag);
+        m_flags.reset(static_cast<uint32_t>(_flag));
     }
-    void FlipFlagForRegModel(Scene& scene, NSModel::RegisterModelKey& key, NSModel::ERegModelFlag flag)
+    void FlipFlag(NSRenderer::ERendererFlag flag)
     {
-        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+        const size_t _flag = static_cast<size_t>(flag);
+        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
-        optRegModels->get()[key.index].FlipFlag(flag);
+        m_flags.flip(static_cast<uint32_t>(_flag));
     }
 private:
     IDXGIFactory7* m_factory = nullptr;
@@ -178,6 +193,8 @@ private:
 
     void MoveToNextFrame();
     void WaitForGPU();
+
+    std::bitset<32> m_flags{};
 
     constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
 

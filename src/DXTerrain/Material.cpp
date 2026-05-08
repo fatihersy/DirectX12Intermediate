@@ -23,7 +23,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
     }
     if (FAILED(frame->GetSize(&tex.width, &tex.height)))
     {
-        OutputDebugStringA("Failed to get texture dimentions\n");
+        OutputDebugStringA("Failed to get texture dimensions\n");
         return E_FAIL;
     }
 
@@ -162,7 +162,7 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         handles.data(),
         nullptr,
         1u,
-        &rendererCtx.fallbackSRV.cpuAddr,
+        &rendererCtx.fallbackSRV.get().cpuAddr,
         nullptr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
     );
