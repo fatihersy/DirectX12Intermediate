@@ -42,19 +42,19 @@ public:
     }
 
     template<typename T>
-    std::optional<std::reference_wrapper<T>> GetOpt(NSRenderer::BlackboardKey key)
+    OptRef<T> GetOpt(NSRenderer::BlackboardKey key)
     {
         T* ptr = GetMut<T>(key);
 
-        return ptr ? std::optional<std::reference_wrapper<T>>{*ptr} : std::nullopt;
+        return ptr ? OptRef<T>{*ptr} : std::nullopt;
     }
 
     template<typename T>
-    std::optional<std::reference_wrapper<const T>> GetOpt(NSRenderer::BlackboardKey key) const
+    OptRef<const T> GetOpt(NSRenderer::BlackboardKey key) const
     {
         const T* ptr = GetConst<T>(key);
 
-        return ptr ? std::optional<std::reference_wrapper<const T>>{*ptr} : std::nullopt;
+        return ptr ? OptRef<const T>{*ptr} : std::nullopt;
     }
 
 private:

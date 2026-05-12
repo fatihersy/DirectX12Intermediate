@@ -126,18 +126,23 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
         );
     }
 }
-void GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
-{}
-void GeometryPass::OnDestroy()
+GeometryPass& GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+
+    return *this;
+}
+void GeometryPass::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
     m_pipeline.Reset();
 };
 GeometryPass::~GeometryPass()
 {}
 
-void GeometryPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
+
+    Scene& scene = static_cast<Scene&>(_scene);
 
     m_pipeline.Bind(cmdList);
 
@@ -324,7 +329,6 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
                 }
             }
         );
-
     }
 
     {
@@ -430,9 +434,11 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
         DirectX::XMStoreFloat3(&m_constantsUpload.SunDir, vSunDir);
     }
 }
-void AtmospherePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
-{}
-void AtmospherePass::OnDestroy()
+AtmospherePass& AtmospherePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+    return *this;
+}
+void AtmospherePass::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
     m_transmittanceLUT.Reset();
     m_scatteringLUT.Reset();
@@ -443,11 +449,13 @@ void AtmospherePass::OnDestroy()
 };
 AtmospherePass::~AtmospherePass()
 {};
-void AtmospherePass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
+
+    Scene& scene = static_cast<Scene&>(_scene);
 
     CD3DX12_VIEWPORT viewport(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
     CD3DX12_RECT scissor(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
@@ -831,11 +839,13 @@ EnvironmentCubemapPass::EnvironmentCubemapPass(ID3D12Device14* device, Blackboar
 }
 EnvironmentCubemapPass::~EnvironmentCubemapPass(){};
 
-void EnvironmentCubemapPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+EnvironmentCubemapPass& EnvironmentCubemapPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     GenerateBRDFLUT(rendererCtx, cmdList);
+
+    return *this;
 }
-void EnvironmentCubemapPass::OnDestroy()
+void EnvironmentCubemapPass::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
     m_brdfLUT.Reset();
     m_graphicsRoot.Reset();
@@ -846,9 +856,11 @@ void EnvironmentCubemapPass::OnDestroy()
     m_prefilterPipeline.Reset();
     m_brdfPipeline.Reset();
 }
-void EnvironmentCubemapPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
+
+    Scene& scene = static_cast<Scene&>(_scene);
 
     blackboard.Set<NSDescriptor::Handle&>(NSRenderer::kEnvCubemap_brdfLUTsrv, m_brdfSRVhandle);
 
@@ -970,9 +982,9 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
             m_geomPipeline.Bind(cmdList);
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_CAPTURE, captureCBAC.gpuAddr);
 
-            scene.CullScene(&cam, inModel.m_sceneKey);
+            std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(cam, inModel.m_sceneKey);
 
-            for (NSModel::SceneModelKey& sceneKey : scene.m_modelsCulled)
+            for (NSModel::SceneModelKey& sceneKey : modelsCulled)
             {
                 Model& sceneModel = scene.m_models[sceneKey.index];
 
@@ -1264,18 +1276,21 @@ TerrainPass::~TerrainPass()
 
 };
 
-void TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+
+    return *this;
+};
+void TerrainPass::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
 
 };
-void TerrainPass::OnDestroy()
-{
 
-};
-
-void TerrainPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     if (not this->im_isEnabled) return;
+
+    Scene& scene = static_cast<Scene&>(_scene);
 
     auto optTerrainRef = blackboard.GetOpt
         <std::reference_wrapper
@@ -1284,6 +1299,7 @@ void TerrainPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx 
 
     assert(optTerrainRef.has_value() and "TerrainPass must have terrain access through blackboard");
 
+    std::vector<NSTerrain::ChunkKey> visibleChunkkeys = scene.CullTerrain(scene.m_camera);
     const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
     const std::vector<NSTerrain::TerrainChunk>& regChunks = terrain.GetChunks();
     const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
@@ -1317,12 +1333,12 @@ void TerrainPass::Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx 
     const float worldTexelSpacing = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
     const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
-    for (const NSScene::TerrainChunk& sceChunk : sceChunks)
+    for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
     {
-        if (not sceChunk.isVisible) continue;
+        assert(sceChunks.size() > chunkKey.index);
+        const NSScene::TerrainChunk& sceChunk = sceChunks[chunkKey.index];
 
         assert(regChunks.size() > sceChunk.key.index);
-
         const NSTerrain::TerrainChunk& regChunk = regChunks[sceChunk.key.index];
 
         assert(regChunk.key.gridX == sceChunk.key.gridX and regChunk.key.gridZ == sceChunk.key.gridZ);
@@ -1356,3 +1372,417 @@ void TerrainPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rend
 {
 
 };
+
+DebugPass::DebugPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx) : m_device(device)
+{}
+DebugPass::~DebugPass()
+{}
+DebugPass& DebugPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, std::reference_wrapper<DebugUtils> utils)
+{
+    this->m_utils = utils;
+
+    {
+        D3D12_INPUT_ELEMENT_DESC inputElements[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSDebug::Vertex, position),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"COLOR",   0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, offsetof(NSDebug::Vertex, color),    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+
+        CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
+
+        CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
+        dsDesc.DepthEnable = FALSE;
+        dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+
+        CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
+
+        GRAPHICS_PIPELINE_STATE_DESC desc{};
+        desc.InputLayout = { inputElements, _countof(inputElements) };
+        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+        desc.NumRenderTargets = 1;
+        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        desc.SampleDesc.Count = 1;
+        desc.SampleMask = UINT_MAX;
+
+        this->m_linePipeline = GraphicsPipeline(m_device, L"DebugPass::m_linePipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+        {
+            CD3DX12_ROOT_PARAMETER1 rp[1]{};
+            rp[0].InitAsConstantBufferView(0, 0);
+
+            CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC desc{};
+            desc.Init_1_1(_countof(rp), rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+            return D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
+        }).Init(
+            desc,
+            rasterDesc, dsDesc, blendDesc,
+            {
+                L"DebugLine.hlsl",
+                {
+                    L"-E", L"VSMain",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                },
+            },
+            {
+                L"DebugLine.hlsl",
+                {
+                    L"-E", L"PSMain",
+                    L"-T", L"ps_6_0",
+                    L"-Zi",
+                    L"-Od"
+                },
+            }
+        );
+    }
+
+    {
+        D3D12_RESOURCE_DESC desc{};
+        desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Width = m_width;
+        desc.Height = m_height;
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+        D3D12_CLEAR_VALUE clear{};
+        clear.Format = desc.Format;
+        clear.Color[0] = 0.02f;
+        clear.Color[1] = 0.02f;
+        clear.Color[2] = 0.02f;
+        clear.Color[3] = 1.00f;
+
+        CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &props,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            D3D12_RESOURCE_STATE_COMMON,
+            &clear,
+            IID_PPV_ARGS(&m_color))
+        );
+        m_color->SetName(L"DebugPass::m_color");
+
+        m_colorRtv = rendererCtx.allocRTVStatic(1u);
+
+        D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
+        rtvDesc.Format = desc.Format;
+        rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        rtvDesc.Texture2D.MipSlice = 0;
+
+        m_device->CreateRenderTargetView(m_color.Get(), &rtvDesc, m_colorRtv.cpuAddr);
+
+        {
+            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                m_color.Get(),
+                D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+            );
+            cmdList.ResourceBarrier(1, &barrier);
+        }
+    }
+
+    {
+        m_utils->get().ImGuiSrvDescriptorAllocFn(
+            &imGuiDrawSrvCpuAddr,
+            &imGuiDrawSrvGpuAddr
+        );
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        desc.Texture2D.MipLevels = 1;
+
+        m_device->CreateShaderResourceView(m_color.Get(), &desc, imGuiDrawSrvCpuAddr);
+    }
+
+    {
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+        dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+
+        m_depthDsv = rendererCtx.allocDSVStatic(1u);
+
+        D3D12_HEAP_PROPERTIES props = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        D3D12_CLEAR_VALUE clear = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 0.f, 0);
+        D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, m_width, m_height, 1, 0, 1, 0,
+            D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL |
+            D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE
+        );
+
+        ThrowIfFailed(m_device->CreateCommittedResource(&props, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clear, IID_PPV_ARGS(&m_depth)));
+        m_device->CreateDepthStencilView(m_depth.Get(), &dsvDesc, m_depthDsv.cpuAddr);
+    }
+
+    this->m_utils->get().debugPassImageSrv = imGuiDrawSrvGpuAddr;
+    this->m_utils->get().debugPassImageWidth = m_width;
+    this->m_utils->get().debugPassImageHeight = m_height;
+    this->m_utils->get().isActive = true;
+
+    return *this;
+}
+void DebugPass::OnDestroy(NSRenderer::Ctx rendererCtx)
+{
+    assert(m_utils.has_value());
+
+    if(m_colorRtv.amount > 0) rendererCtx.freeRTVStatic(m_colorRtv);
+    m_colorRtv = {};
+
+    if(m_depthDsv.amount > 0) rendererCtx.freeDSVStatic(m_depthDsv);
+    m_depthDsv = {};
+
+    m_color.Reset();
+    m_depth.Reset();
+
+    if (imGuiDrawSrvCpuAddr.ptr)
+    {
+        m_utils->get().ImGuiSrvDescriptorFreeFn(imGuiDrawSrvCpuAddr, imGuiDrawSrvGpuAddr);
+    }
+    this->imGuiDrawSrvCpuAddr = {};
+    this->imGuiDrawSrvGpuAddr = {};
+
+    m_utils->get().debugPassImageSrv = {};
+    m_utils->get().debugPassImageWidth = 0u;
+    m_utils->get().debugPassImageHeight = 0u;
+    m_utils->get().isActive = false;
+}
+
+void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+    if (not im_isEnabled) return;
+
+    assert(m_utils);
+    DebugUtils& utils = m_utils->get();
+
+    const NSScene::Camera& mainCam = scene.GetMainCamera();
+    const NSScene::Terrain& terrain = scene.GetTerrain();
+    {
+        using namespace DirectX;
+
+        auto Store = [](XMVECTOR v)
+        {
+            XMFLOAT3 out{};
+            XMStoreFloat3(&out, v);
+            return out;
+        };
+        auto AddLine = [&utils](XMFLOAT3 a, XMFLOAT3 b, XMFLOAT4 color)
+        {
+            utils.m_debugLines.push_back({ { a, color }, { b, color } });
+        };
+        auto AddAabbTop = [&AddLine](const NSMath::SBoundAABB& aabb, XMFLOAT4 color)
+        {
+            const float y = aabb.max.y + 2.0f;
+            const XMFLOAT3 p0{ aabb.min.x, y, aabb.min.z };
+            const XMFLOAT3 p1{ aabb.max.x, y, aabb.min.z };
+            const XMFLOAT3 p2{ aabb.max.x, y, aabb.max.z };
+            const XMFLOAT3 p3{ aabb.min.x, y, aabb.max.z };
+
+            AddLine(p0, p1, color);
+            AddLine(p1, p2, color);
+            AddLine(p2, p3, color);
+            AddLine(p3, p0, color);
+        };
+
+        const std::vector<NSTerrain::ChunkKey> visibleKeys = scene.CullTerrain(mainCam);
+        std::vector<bool> visibleChunks(terrain.chunks.size(), false);
+        for (const NSTerrain::ChunkKey& key : visibleKeys)
+        {
+            if (key.index < visibleChunks.size()) visibleChunks[key.index] = true;
+        }
+
+        const XMFLOAT4 hiddenChunkColor{ 0.65f, 0.12f, 0.10f, 1.0f };
+        const XMFLOAT4 visibleChunkColor{ 0.10f, 0.85f, 0.25f, 1.0f };
+        utils.m_debugLines.clear();
+
+        for (const NSScene::TerrainChunk& chunk : terrain.chunks)
+        {
+            const bool isVisible = chunk.key.index < visibleChunks.size() && visibleChunks[chunk.key.index];
+            AddAabbTop(chunk.bound.aabb, isVisible ? visibleChunkColor : hiddenChunkColor);
+        }
+
+        const XMVECTOR frustumEye = mainCam.camEye;
+        const XMVECTOR frustumFwd = XMVector3Normalize(mainCam.camFwd);
+        const XMVECTOR frustumUp = XMVector3Normalize(mainCam.camUp);
+        const XMVECTOR frustumRight = XMVector3Normalize(XMVector3Cross(frustumUp, frustumFwd));
+
+        const float terrainRadius = std::sqrt(
+            terrain.desc.worldWidth * terrain.desc.worldWidth +
+            terrain.desc.worldDepth * terrain.desc.worldDepth
+        ) * 0.5f;
+        const float nearDist = std::max(XMVectorGetZ(mainCam.projMatrix.r[3]), 1.0f);
+        const float farDist = std::max(terrainRadius * 1.5f, nearDist + 10.0f);
+        const float projY = XMVectorGetY(mainCam.projMatrix.r[1]);
+        const float projX = XMVectorGetX(mainCam.projMatrix.r[0]);
+        const float aspect = projX != 0.0f ? projY / projX : 1.0f;
+
+        auto FrustumCorner = [&](float xSign, float ySign, float dist)
+        {
+            const float halfH = projY != 0.0f ? dist / projY : dist;
+            const float halfW = halfH * aspect;
+            XMVECTOR center = XMVectorAdd(frustumEye, XMVectorScale(frustumFwd, dist));
+            center = XMVectorAdd(center, XMVectorScale(frustumRight, xSign * halfW));
+            center = XMVectorAdd(center, XMVectorScale(frustumUp, ySign * halfH));
+            return Store(center);
+        };
+
+        const XMFLOAT3 ntl = FrustumCorner(-1.0f,  1.0f, nearDist);
+        const XMFLOAT3 ntr = FrustumCorner( 1.0f,  1.0f, nearDist);
+        const XMFLOAT3 nbl = FrustumCorner(-1.0f, -1.0f, nearDist);
+        const XMFLOAT3 nbr = FrustumCorner( 1.0f, -1.0f, nearDist);
+        const XMFLOAT3 ftl = FrustumCorner(-1.0f,  1.0f, farDist);
+        const XMFLOAT3 ftr = FrustumCorner( 1.0f,  1.0f, farDist);
+        const XMFLOAT3 fbl = FrustumCorner(-1.0f, -1.0f, farDist);
+        const XMFLOAT3 fbr = FrustumCorner( 1.0f, -1.0f, farDist);
+
+        const XMFLOAT4 nearColor{ 1.0f, 0.95f, 0.20f, 1.0f };
+        const XMFLOAT4 farColor{ 1.0f, 0.55f, 0.10f, 1.0f };
+        const XMFLOAT4 sideColor{ 1.0f, 0.80f, 0.20f, 1.0f };
+        const XMFLOAT4 camColor{ 0.95f, 0.95f, 1.0f, 1.0f };
+
+        AddLine(ntl, ntr, nearColor);
+        AddLine(ntr, nbr, nearColor);
+        AddLine(nbr, nbl, nearColor);
+        AddLine(nbl, ntl, nearColor);
+        AddLine(ftl, ftr, farColor);
+        AddLine(ftr, fbr, farColor);
+        AddLine(fbr, fbl, farColor);
+        AddLine(fbl, ftl, farColor);
+        AddLine(ntl, ftl, sideColor);
+        AddLine(ntr, ftr, sideColor);
+        AddLine(nbl, fbl, sideColor);
+        AddLine(nbr, fbr, sideColor);
+
+        const XMFLOAT3 camPos = Store(frustumEye);
+        const XMFLOAT3 camTip = Store(XMVectorAdd(frustumEye, XMVectorScale(frustumFwd, nearDist * 8.0f)));
+        const XMFLOAT3 camLeft = Store(XMVectorAdd(frustumEye, XMVectorScale(frustumRight, -nearDist * 2.0f)));
+        const XMFLOAT3 camRight = Store(XMVectorAdd(frustumEye, XMVectorScale(frustumRight, nearDist * 2.0f)));
+        AddLine(camLeft, camRight, camColor);
+        AddLine(camPos, camTip, camColor);
+    }
+
+    if (utils.m_debugLines.empty()) return;
+
+    {
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_color.Get(),
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_RESOURCE_STATE_RENDER_TARGET
+        );
+        cmdList.ResourceBarrier(1, &barrier);
+    }
+
+    const float clearColor[4] = { 0.02f, 0.02f, 0.02f, 1.00f };
+    cmdList.ClearRenderTargetView(m_colorRtv.cpuAddr, clearColor, 0, nullptr);
+    cmdList.ClearDepthStencilView(m_depthDsv.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 0.f, 0, 0, nullptr);
+
+    CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height));
+    CD3DX12_RECT scissor(0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height));
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
+
+    m_linePipeline.Bind(cmdList);
+
+    NSAllocator::Ctx frameAllocCtx = rendererCtx.constAlloc(sizeof(FrameConstants));
+    FrameConstants& frameCB = frameAllocCtx.As<FrameConstants>();
+
+    const float terrainWidth = std::max(terrain.desc.worldWidth, 1.0f);
+    const float terrainDepth = std::max(terrain.desc.worldDepth, 1.0f);
+    const float terrainMaxHeight = std::max(terrain.desc.maxHeight, 1.0f);
+    float minX = -terrainWidth * 0.5f;
+    float maxX = terrainWidth * 0.5f;
+    float minZ = -terrainDepth * 0.5f;
+    float maxZ = terrainDepth * 0.5f;
+
+    if (not terrain.chunks.empty())
+    {
+        minX = terrain.chunks.front().bound.aabb.min.x;
+        maxX = terrain.chunks.front().bound.aabb.max.x;
+        minZ = terrain.chunks.front().bound.aabb.min.z;
+        maxZ = terrain.chunks.front().bound.aabb.max.z;
+
+        for (const NSScene::TerrainChunk& chunk : terrain.chunks)
+        {
+            minX = std::min(minX, chunk.bound.aabb.min.x);
+            maxX = std::max(maxX, chunk.bound.aabb.max.x);
+            minZ = std::min(minZ, chunk.bound.aabb.min.z);
+            maxZ = std::max(maxZ, chunk.bound.aabb.max.z);
+        }
+    }
+
+    const float centerX = (minX + maxX) * 0.5f;
+    const float centerZ = (minZ + maxZ) * 0.5f;
+    const float mapWidth = std::max(maxX - minX, 1.0f);
+    const float mapDepth = std::max(maxZ - minZ, 1.0f);
+    const float debugAspect = static_cast<float>(m_width) / static_cast<float>(m_height);
+    const float orthoHeight = std::max(mapDepth, mapWidth / debugAspect) * 1.10f;
+    const float orthoWidth = orthoHeight * debugAspect;
+    const float debugHeight = terrainMaxHeight + std::max(orthoWidth, orthoHeight);
+    const DirectX::XMVECTOR debugEye = DirectX::XMVectorSet(centerX, debugHeight, centerZ, 1.0f);
+    const DirectX::XMVECTOR debugTarget = DirectX::XMVectorSet(centerX, 0.0f, centerZ, 1.0f);
+    const DirectX::XMVECTOR debugUp = DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+    const DirectX::XMMATRIX debugView = DirectX::XMMatrixLookAtLH(debugEye, debugTarget, debugUp);
+    const DirectX::XMMATRIX debugProj = DirectX::XMMatrixOrthographicLH(
+        orthoWidth,
+        orthoHeight,
+        0.1f,
+        debugHeight + terrainMaxHeight + 10.0f
+    );
+
+    DirectX::XMStoreFloat4x4(&frameCB.view, debugView);
+    DirectX::XMStoreFloat4x4(&frameCB.proj, debugProj);
+    cmdList.SetGraphicsRootConstantBufferView(0u, frameAllocCtx.gpuAddr);
+
+    cmdList.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+
+    std::vector<NSDebug::Vertex> vertices;
+    vertices.reserve(utils.m_debugLines.size() * 2u);
+
+    for (NSDebug::Line& line : utils.m_debugLines)
+    {
+        vertices.insert(vertices.end(), {line.a, line.b});
+    }
+
+    size_t dataSize = sizeof(NSDebug::Vertex) * vertices.size();
+
+    NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(dataSize);
+    memcpy(allocCtx.cpuAddr, vertices.data(), dataSize);
+
+    D3D12_VERTEX_BUFFER_VIEW vbv{};
+    vbv.BufferLocation = allocCtx.gpuAddr;
+    vbv.SizeInBytes = static_cast<UINT>(dataSize);
+    vbv.StrideInBytes = sizeof(NSDebug::Vertex);
+
+    cmdList.OMSetRenderTargets(1, &m_colorRtv.cpuAddr, false, &m_depthDsv.cpuAddr);
+    cmdList.IASetVertexBuffers(0u, 1u, &vbv);
+    cmdList.DrawInstanced(static_cast<UINT>(vertices.size()), 1u, 0u, 0u);
+
+    {
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_color.Get(),
+            D3D12_RESOURCE_STATE_RENDER_TARGET,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+        );
+        cmdList.ResourceBarrier(1, &barrier);
+    }
+
+    auto mainRTV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainRTV);
+    auto mainDSV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainDSV);
+
+    assert(mainRTV.has_value() and mainDSV.has_value());
+
+    cmdList.OMSetRenderTargets(1, &mainRTV->get(), false, &mainDSV->get());
+
+    utils.m_debugLines.clear();
+}
+void DebugPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
+{
+
+}

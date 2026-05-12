@@ -27,14 +27,6 @@ void Scene::OnUpdate()
     DirectX::XMStoreFloat3(&fcamEye, m_camera.camEye);
 
     UpdateCamera();
-
-    NSMath::SFrustum frustum(m_camera.viewMatrix * m_camera.projMatrix);
-
-    for (NSScene::TerrainChunk& chunk : m_terrain.chunks)
-    {
-        // Whole for loop can be moved
-        chunk.isVisible = frustum.TestAABB(chunk.bound.aabb);
-    }
 }
 
 
@@ -57,13 +49,11 @@ void Scene::UpdateCamera()
     m_camera.viewMatrix = DirectX::XMMatrixLookAtLH(m_camera.camEye, lookAt, m_camera.camUp);
 }
 
-void Scene::CullScene(const NSScene::Camera* camOverride, NSModel::SceneModelKey excludedModelKey)
+std::vector<NSModel::SceneModelKey> Scene::CullModels(const NSScene::Camera& camera, NSModel::SceneModelKey excludedModelKey)
 {
-    const NSScene::Camera* pCamera = camOverride ? camOverride : &m_camera;
+    std::vector<NSModel::SceneModelKey> m_modelsCulled;
 
-    m_modelsCulled.clear();
-
-    NSMath::SFrustum frustum(pCamera->viewMatrix * pCamera->projMatrix);
+    NSMath::SFrustum frustum(camera.viewMatrix * camera.projMatrix);
 
     for (size_t itr{}; itr < m_models.size(); itr++)
     {
@@ -79,6 +69,22 @@ void Scene::CullScene(const NSScene::Camera* camOverride, NSModel::SceneModelKey
             m_modelsCulled.push_back(model.m_sceneKey);
         }
     }
+
+    return m_modelsCulled;
+}
+
+std::vector<NSTerrain::ChunkKey> Scene::CullTerrain(const NSScene::Camera& camera)
+{
+    std::vector<NSTerrain::ChunkKey> chunksCulled;
+
+    NSMath::SFrustum frustum(camera.viewMatrix * camera.projMatrix);
+
+    for (NSScene::TerrainChunk& chunk : m_terrain.chunks)
+    {
+        if (frustum.TestAABB(chunk.bound.aabb)) chunksCulled.push_back(chunk.key);
+    }
+
+    return chunksCulled;
 }
 
 void Scene::ForEachModel(std::function<void(Model& model)> ForEach)

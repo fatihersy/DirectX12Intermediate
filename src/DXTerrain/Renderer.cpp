@@ -179,38 +179,39 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
         }
     }
 
-    // ImGui Init
     {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
-        ImGuiIO& io = ImGui::GetIO();
+        //ImGuiIO& io = ImGui::GetIO();
         //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-        ImGui_ImplDX12_InitInfo initInfo{};
-        initInfo.UserData = this;
-        initInfo.Device = m_device;
-        initInfo.CommandQueue = m_commandQueue.Get();
-        initInfo.NumFramesInFlight = IApp::ic_framesInFlight;
-        initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-        initInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        ImGui_ImplDX12_InitInfo m_imGuiInitInfo;
+        m_imGuiInitInfo.UserData = this;
+        m_imGuiInitInfo.Device = m_device;
+        m_imGuiInitInfo.CommandQueue = m_commandQueue.Get();
+        m_imGuiInitInfo.NumFramesInFlight = IApp::ic_framesInFlight;
+        m_imGuiInitInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        m_imGuiInitInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
-        D3D12_DESCRIPTOR_HEAP_DESC desc{};
-        desc.NumDescriptors = 100u;
-        desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_imGuiSrvHeap)));
-        m_imGuiSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        m_imGuiSrvHeap->SetName(L"app::im_imGuiSrvHeap");
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC desc{};
+            desc.NumDescriptors = 100u;
+            desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_imGuiSrvHeap)));
+            m_imGuiSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            m_imGuiSrvHeap->SetName(L"app::im_imGuiSrvHeap");
 
-        for (UINT i{}; i < desc.NumDescriptors; i++) m_freeImGuiSRVIndices.push_back(i);
+            for (UINT i{}; i < desc.NumDescriptors; i++) m_freeImGuiSRVIndices.push_back(i);
+        }
 
-        initInfo.SrvDescriptorHeap = m_imGuiSrvHeap.Get();
-        initInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc_handle)
+        m_imGuiInitInfo.SrvDescriptorHeap = m_imGuiSrvHeap.Get();
+        m_imGuiInitInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc_handle)
         {
             Renderer* userData = static_cast<Renderer*>(info->UserData);
             if (userData->m_freeImGuiSRVIndices.empty())
             {
-                OutputDebugStringA("No free SRV descriptors available\n");
+                g_FError("No free SRV descriptors available\n");
                 *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
                 *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
                 return;
@@ -225,7 +226,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
             CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
             *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
         };
-        initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
+        m_imGuiInitInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
         {
             Renderer* userData = static_cast<Renderer*>(info->UserData);
 
@@ -233,20 +234,59 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
             ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
             if (offset % userData->m_imGuiSrvDescriptorSize != 0 || offset < 0)
             {
-                OutputDebugStringA("Invalid SRV descriptor handle to free!\n");
+                g_FError("Invalid SRV descriptor handle to free!\n");
                 return;
             }
 
             INT idx = static_cast<INT>(offset / userData->m_imGuiSrvDescriptorSize);
             if (idx >= static_cast<INT>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
             {
-                OutputDebugStringA("SRV descriptor index out of bounds!\n");
+                g_FError("SRV descriptor index out of bounds!\n");
                 return;
             }
 
             userData->m_freeImGuiSRVIndices.push_back(idx);
         };
-        ImGui_ImplDX12_Init(&initInfo);
+        ImGui_ImplDX12_Init(&m_imGuiInitInfo);
+
+        m_debugUtils.ImGuiSrvDescriptorAllocFn = [this](D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle)
+        {
+            if (m_freeImGuiSRVIndices.empty())
+            {
+                g_FError("No free SRV descriptors available\n");
+                *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
+                return;
+            }
+
+            INT idx = m_freeImGuiSRVIndices.back();
+            m_freeImGuiSRVIndices.pop_back();
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(m_imGuiSrvHeap->GetCPUDescriptorHandleForHeapStart());
+            *out_cpu_desc_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, m_imGuiSrvDescriptorSize);
+
+            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(m_imGuiSrvHeap->GetGPUDescriptorHandleForHeapStart());
+            *out_gpu_desc_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, m_imGuiSrvDescriptorSize);
+        };
+        m_debugUtils.ImGuiSrvDescriptorFreeFn = [this](D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)
+        {
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(m_imGuiSrvHeap->GetCPUDescriptorHandleForHeapStart());
+            ptrdiff_t offset = cpu_desc_handle.ptr - cpuHandle.ptr;
+            if (offset % m_imGuiSrvDescriptorSize != 0 || offset < 0)
+            {
+                g_FError("Invalid SRV descriptor handle to free!\n");
+                return;
+            }
+
+            INT idx = static_cast<INT>(offset / m_imGuiSrvDescriptorSize);
+            if (idx >= static_cast<INT>(m_imGuiSrvHeap->GetDesc().NumDescriptors))
+            {
+                g_FError("SRV descriptor index out of bounds!\n");
+                return;
+            }
+
+            m_freeImGuiSRVIndices.push_back(idx);
+        };
     }
 
     CreateFallbackTexture();
@@ -265,20 +305,27 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
         m_blackboard.Set<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models, std::move(models));
     }
 
-    // Passes
+    Execute([this, &device](NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
     {
-        AddPass<NSRenderPass::AtmospherePass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
+        AddPass<NSRenderPass::AtmospherePass>(device, m_blackboard, GetCtx())
+            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .SetIsEnabled(true);
 
-        AddPass<NSRenderPass::EnvironmentCubemapPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
+        AddPass<NSRenderPass::EnvironmentCubemapPass>(device, m_blackboard, GetCtx())
+            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .SetIsEnabled(true);
 
-        AddPass<NSRenderPass::GeometryPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
+        AddPass<NSRenderPass::GeometryPass>(device, m_blackboard, GetCtx())
+            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .SetIsEnabled(true);
 
-        AddPass<NSRenderPass::TerrainPass>(device, m_blackboard, GetCtx()).SetIsEnabled(true);
-    }
+        AddPass<NSRenderPass::TerrainPass>(device, m_blackboard, GetCtx())
+            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .SetIsEnabled(true);
 
-    Execute([this](NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
-    {
-        for(auto& pass : m_passes) pass->OnInit(m_blackboard, GetCtx(), cmdList);
+        AddPass<NSRenderPass::DebugPass>(device, m_blackboard, GetCtx())
+            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList), m_debugUtils)
+            .SetIsEnabled(true);
     });
 }
 Renderer::~Renderer()
@@ -288,13 +335,15 @@ void Renderer::OnDestroy()
 {
     WaitForGPU();
 
-    m_terrain.OnDestroy(GetCtx());
+    NSRenderer::Ctx rendererCtx = GetCtx();
+
+    m_terrain.OnDestroy(rendererCtx);
 
     FreeSRVStatic(m_fallbackTextureSRVhandle);
     m_fallbackTexture.defaultBuffer.Reset();
     m_fallbackTexture.uploadBuffer.Reset();
 
-    for (auto& pass : m_passes) pass->OnDestroy();
+    for (auto& pass : m_passes) pass->OnDestroy(rendererCtx);
     m_passes.clear();
 
     for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
@@ -422,7 +471,7 @@ void Renderer::BeginFrame()
 
     m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
-void Renderer::DrawScene(Scene& scene)
+void Renderer::DrawScene(NSScene::IScene& scene)
 {
     m_blackboard.Set(NSRenderer::kRenderer_frameIndex, m_swapChain->GetCurrentBackBufferIndex());
 
@@ -434,7 +483,7 @@ void Renderer::DrawScene(Scene& scene)
         pass->Execute(scene, m_blackboard, rendererCtx, cmdList);
     }
 
-    ImGui::ShowDemoWindow();
+    DrawDebugImage(scene);
 }
 void Renderer::EndFrame()
 {
@@ -861,4 +910,227 @@ void Renderer::CreateFallbackTexture()
             srvDesc.Format = fbTex.format;
             device->CreateShaderResourceView(fbTex.defaultBuffer.Get(), &srvDesc, fbHandle.cpuAddr);
         });
+}
+
+void Renderer::DrawDebugImage(NSScene::IScene& scene)
+{
+    static bool terrainCullingDebug = true;
+
+    if (!ImGui::Begin("Terrain Culling", &terrainCullingDebug))
+    {
+        ImGui::End();
+        return;
+    }
+
+    if (m_debugUtils.isActive and m_debugUtils.debugPassImageSrv.ptr)
+    {
+        ImGui::Text("Debug Pass");
+        ImGui::Image(
+            static_cast<ImTextureID>(m_debugUtils.debugPassImageSrv.ptr),
+            ImVec2(
+                static_cast<float>(m_debugUtils.debugPassImageWidth),
+                static_cast<float>(m_debugUtils.debugPassImageHeight)
+            )
+        );
+    }
+
+    bool drawLegacyDebug = false;
+
+    if (not drawLegacyDebug) {
+        ImGui::End();
+        return; // Legacy debug
+    }
+
+    ImGui::Separator();
+
+    const NSScene::Camera& mainCamera = scene.GetMainCamera();
+    const std::vector<NSTerrain::ChunkKey> visibleKeys = scene.CullTerrain(mainCamera);
+    const NSScene::Terrain& terrain = scene.GetTerrain();
+
+    if (terrain.chunks.empty())
+    {
+        ImGui::Text("No terrain chunks to display.");
+        ImGui::End();
+        return;
+    }
+
+    const float terrainWidth = terrain.desc.worldWidth;
+    const float terrainDepth = terrain.desc.worldDepth;
+
+    if (terrainWidth <= 0.0f || terrainDepth <= 0.0f)
+    {
+        ImGui::Text("Invalid terrain dimensions.");
+        ImGui::End();
+        return;
+    }
+
+    // Mark visible chunks
+    const size_t chunkCount = terrain.chunks.size();
+    std::vector<bool> visibleChunks(chunkCount, false);
+    for (const NSTerrain::ChunkKey& key : visibleKeys)
+    {
+        if (static_cast<size_t>(key.index) < chunkCount)
+            visibleChunks[static_cast<size_t>(key.index)] = true;
+    }
+
+    // Canvas setup
+    const ImVec2 canvasPos  = ImGui::GetCursorScreenPos();
+    const ImVec2 canvasSize(360.0f, 360.0f);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+
+    draw->PushClipRect(canvasPos, ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y), true);
+    draw->AddRectFilled(
+        canvasPos,
+        ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y),
+        IM_COL32(22, 22, 24, 255)
+    );
+
+    auto WorldToMap = [canvasPos, canvasSize, terrainWidth, terrainDepth](float x, float z) -> ImVec2
+    {
+        const float u = std::clamp((x + terrainWidth * 0.5f) / terrainWidth, 0.0f, 1.0f);
+        const float v = std::clamp((z + terrainDepth * 0.5f) / terrainDepth, 0.0f, 1.0f);
+        return ImVec2(
+            canvasPos.x + u * canvasSize.x,
+            canvasPos.y + (1.0f - v) * canvasSize.y
+        );
+    };
+
+    // Draw terrain chunks
+    for (const NSScene::TerrainChunk& chunk : terrain.chunks)
+    {
+        const bool isVisible = (static_cast<size_t>(chunk.key.index) < chunkCount) && visibleChunks[static_cast<size_t>(chunk.key.index)];
+        const auto& aabb = chunk.bound.aabb;
+
+        ImVec2 p0 = WorldToMap(aabb.min.x, aabb.min.z);
+        ImVec2 p1 = WorldToMap(aabb.max.x, aabb.max.z);
+
+        ImVec2 minPt(std::min(p0.x, p1.x), std::min(p0.y, p1.y));
+        ImVec2 maxPt(std::max(p0.x, p1.x), std::max(p0.y, p1.y));
+
+        ImU32 fill   = isVisible ? IM_COL32(50,  180, 50,  210) : IM_COL32(180, 50,  50,  210);
+        ImU32 border = isVisible ? IM_COL32(100, 255, 100, 230) : IM_COL32(255, 100, 100, 230);
+
+        draw->AddRectFilled(minPt, maxPt, fill);
+        draw->AddRect(minPt, maxPt, border, 0.0f, 0, 1.0f);
+    }
+
+    // -------------------------------------------------------------------------
+    // Frustum corner unprojection via inverse view-projection matrix
+    // NDC corners: X in [-1, 1], Y in [-1, 1], Z in [0, 1] (DirectX NDC)
+    //
+    //  Near plane (z=0):  NTL, NTR, NBL, NBR
+    //  Far  plane (z=1):  FTL, FTR, FBL, FBR
+    //
+    //       NTL----NTR        FTL----FTR
+    //        |      |    =>    |      |
+    //       NBL----NBR        FBL----FBR
+    // -------------------------------------------------------------------------
+
+    // Build inverse view-projection matrix
+    const DirectX::XMMATRIX viewProj    = DirectX::XMMatrixMultiply(mainCamera.viewMatrix, mainCamera.projMatrix);
+    const DirectX::XMMATRIX invViewProj = DirectX::XMMatrixInverse(nullptr, viewProj);
+
+    const float nearZ = DirectX::XMVectorGetZ(mainCamera.projMatrix.r[3]);
+
+    // Unproject a single NDC point to world space
+    auto UnprojectNDC = [&](float ndcX, float ndcY, float ndcZ) -> DirectX::XMFLOAT3
+    {
+        const DirectX::XMVECTOR ndc   = DirectX::XMVectorSet(ndcX, ndcY, ndcZ, 1.0f);
+        const DirectX::XMVECTOR world = DirectX::XMVector4Transform(ndc, invViewProj);
+        const float             w     = DirectX::XMVectorGetW(world);
+
+        DirectX::XMFLOAT3 result{};
+        if (std::abs(w) > 1e-6f)
+        {
+            DirectX::XMStoreFloat3(&result, DirectX::XMVectorScale(world, 1.0f / w));
+        }
+        return result;
+    };
+
+    const float terrainRadius =
+        std::sqrt(terrainWidth * terrainWidth + terrainDepth * terrainDepth) * 0.5f;
+
+    const float debugNearDist = std::max(nearZ, 1.0f);
+    const float debugFarDist = terrainRadius * 2.0f;
+
+    const float nearNdcZ = nearZ / debugNearDist;
+    const float farNdcZ = nearZ / debugFarDist;
+
+    // 8 corners: [0..3] near plane, [4..7] far plane
+    // Layout per plane: TL, TR, BL, BR (top-left, top-right, bottom-left, bottom-right)
+    const DirectX::XMFLOAT3 corners[8] =
+    {
+        UnprojectNDC(-1.0f,  1.0f, nearNdcZ), // 0: near top-left
+        UnprojectNDC( 1.0f,  1.0f, nearNdcZ), // 1: near top-right
+        UnprojectNDC(-1.0f, -1.0f, nearNdcZ), // 2: near bottom-left
+        UnprojectNDC( 1.0f, -1.0f, nearNdcZ), // 3: near bottom-right
+
+        UnprojectNDC(-1.0f,  1.0f, farNdcZ), // 4: far top-left
+        UnprojectNDC( 1.0f,  1.0f, farNdcZ), // 5: far top-right
+        UnprojectNDC(-1.0f, -1.0f, farNdcZ), // 6: far bottom-left
+        UnprojectNDC( 1.0f, -1.0f, farNdcZ)  // 7: far bottom-right
+    };
+
+    // Map all 8 corners to 2D canvas (XZ top-down projection)
+    ImVec2 pts[8];
+    for (int i = 0; i < 8; ++i)
+        pts[i] = WorldToMap(corners[i].x, corners[i].z);
+
+    // -------------------------------------------------------------------------
+    // Draw frustum faces (filled, then outlined)
+    // Each face uses the XZ-projected corners — the top/bottom faces are the
+    // most meaningful in top-down view; left/right/near/far edges still convey
+    // the full wireframe shape.
+    // -------------------------------------------------------------------------
+
+    // Face fill (semi-transparent) — draw back faces first to reduce overlap z-fighting
+    // Far face
+    draw->AddQuadFilled(pts[4], pts[5], pts[7], pts[6], IM_COL32(255, 230, 40, 25));
+    // Side faces
+    draw->AddQuadFilled(pts[0], pts[4], pts[6], pts[2], IM_COL32(255, 180, 40, 20)); // left
+    draw->AddQuadFilled(pts[1], pts[5], pts[7], pts[3], IM_COL32(255, 180, 40, 20)); // right
+    draw->AddQuadFilled(pts[0], pts[1], pts[5], pts[4], IM_COL32(200, 230, 40, 20)); // top
+    draw->AddQuadFilled(pts[2], pts[3], pts[7], pts[6], IM_COL32(200, 230, 40, 20)); // bottom
+    // Near face (brightest — closest to camera)
+    draw->AddQuadFilled(pts[0], pts[1], pts[3], pts[2], IM_COL32(255, 230, 40, 35));
+
+    // Wireframe edges
+    const ImU32 edgeNear = IM_COL32(255, 245, 120, 230);
+    const ImU32 edgeFar  = IM_COL32(255, 200,  60, 180);
+    const ImU32 edgeSide = IM_COL32(255, 220,  80, 200);
+
+    // Near plane edges
+    draw->AddLine(pts[0], pts[1], edgeNear, 1.5f); // top
+    draw->AddLine(pts[2], pts[3], edgeNear, 1.5f); // bottom
+    draw->AddLine(pts[0], pts[2], edgeNear, 1.5f); // left
+    draw->AddLine(pts[1], pts[3], edgeNear, 1.5f); // right
+
+    // Far plane edges
+    draw->AddLine(pts[4], pts[5], edgeFar, 1.5f);  // top
+    draw->AddLine(pts[6], pts[7], edgeFar, 1.5f);  // bottom
+    draw->AddLine(pts[4], pts[6], edgeFar, 1.5f);  // left
+    draw->AddLine(pts[5], pts[7], edgeFar, 1.5f);  // right
+
+    // Connecting edges (near to far)
+    draw->AddLine(pts[0], pts[4], edgeSide, 1.5f); // top-left
+    draw->AddLine(pts[1], pts[5], edgeSide, 1.5f); // top-right
+    draw->AddLine(pts[2], pts[6], edgeSide, 1.5f); // bottom-left
+    draw->AddLine(pts[3], pts[7], edgeSide, 1.5f); // bottom-right
+
+    // Camera position dot
+    DirectX::XMFLOAT3 cameraPos{};
+    DirectX::XMStoreFloat3(&cameraPos, mainCamera.camEye);
+    const ImVec2 cam = WorldToMap(cameraPos.x, cameraPos.z);
+    draw->AddCircleFilled(cam, 4.0f, IM_COL32(255, 255, 255, 255));
+
+    draw->PopClipRect();
+
+    ImGui::InvisibleButton("terrain_culling_canvas", canvasSize);
+    ImGui::Text(
+        "Visible chunks: %u / %zu",
+        static_cast<uint32_t>(visibleKeys.size()),
+        chunkCount
+    );
+
+    ImGui::End();
 }

@@ -184,8 +184,7 @@ void app::LoadAssets()
         {
             m_scene.m_terrain.chunks.push_back({
                 .key = chunk.key,
-                .bound = chunk.bounds,
-                .isVisible = false
+                .bound = chunk.bounds
             });
         }
 

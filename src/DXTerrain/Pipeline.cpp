@@ -26,7 +26,7 @@ void MakeRootSignature(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSi
             size_t errlen = error->GetBufferSize();
             std::string stdstr = std::string(errstr, errlen).append("\n");
 
-            OutputDebugStringA(stdstr.c_str());
+            g_FError(stdstr.c_str());
         }
         throw std::runtime_error("Failed to serialize root signature");
     }

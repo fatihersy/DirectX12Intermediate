@@ -6,7 +6,6 @@ namespace NSScene
     {
         NSTerrain::ChunkKey key;
         NSTerrain::ChunkBounds bound;
-        bool isVisible{};
     };
 
     struct Terrain
@@ -46,7 +45,22 @@ namespace NSScene
         float camYaw{};
         float camPitch{};
 
-        float camSpeed = 15.f;
+        float camSpeed = 100.f;
         float lookSensitivity = .1f;
+    };
+
+    class IScene
+    {
+    public:
+        virtual void OnDestroy(NSRenderer::Ctx rendererCtx) = 0;
+
+        virtual bool ValidateKey(NSModel::SceneModelKey sceneKey) = 0;
+        virtual bool ValidateKeys(NSModel::SceneModelKey sceneKey, NSModel::RegisterModelKey regKey) = 0;
+
+        virtual const NSScene::Terrain& GetTerrain() const = 0;
+        virtual const NSScene::Camera& GetMainCamera() const = 0;
+
+        virtual std::vector<NSModel::SceneModelKey> CullModels(const NSScene::Camera& camera, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey()) = 0;
+        virtual std::vector<NSTerrain::ChunkKey> CullTerrain(const NSScene::Camera& camera) = 0;
     };
 }

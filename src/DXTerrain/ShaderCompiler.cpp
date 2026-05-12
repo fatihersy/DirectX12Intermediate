@@ -55,7 +55,7 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
         size_t errlen = error->GetBufferSize();
         std::string stdstr = std::string(errstr, errlen).append("\n");
 
-        OutputDebugStringA(stdstr.c_str());
+        g_FError(stdstr.c_str());
     }
 
     compileResult->GetStatus(&hr);
@@ -103,7 +103,7 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
                 size_t errlen = errorBlobUtf8->GetBufferSize();
                 std::string stdstr = std::string(errstr, errlen).append("\n");
 
-                OutputDebugStringA(stdstr.c_str());
+                g_FError(stdstr.c_str());
             }
         }
     }

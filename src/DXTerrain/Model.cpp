@@ -193,7 +193,7 @@ void Model::ProcessNode(NSRenderer::Ctx rendererCtx, aiNode* node, const aiScene
 
     if (m_meshes.size() >= IApp::ic_maxObjects)
     {
-        OutputDebugStringA("Mesh count is exceeding\n");
+        g_FError("Mesh count is exceeding\n");
     }
 
     for (uint32_t itr_000{}; itr_000 < node->mNumMeshes; itr_000++)
@@ -624,7 +624,7 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel:
             return std::move(*this);
         }
 
-        default: OutputDebugStringA("Unable to create mesh\n");
+        default: g_FError("Unable to create mesh\n");
     }
 
     return std::move(*this);

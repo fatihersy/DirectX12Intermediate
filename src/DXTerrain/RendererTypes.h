@@ -721,18 +721,48 @@ namespace NSRenderer
     };
 }
 
+namespace NSDebug
+{
+    struct Vertex
+    {
+        DirectX::XMFLOAT3 position;
+        DirectX::XMFLOAT4 color;
+    };
+
+    struct Line
+    {
+        Vertex a;
+        Vertex b;
+    };
+}
+
+namespace NSScene
+{
+    class IScene;
+}
+
 class Scene;
 namespace NSRenderPass
 {
+    struct DebugUtils {
+        std::function<void(D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle)> ImGuiSrvDescriptorAllocFn;
+        std::function<void(D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)> ImGuiSrvDescriptorFreeFn;
+        std::vector<NSDebug::Line> m_debugLines;
+        D3D12_GPU_DESCRIPTOR_HANDLE debugPassImageSrv;
+        uint32_t debugPassImageWidth{};
+        uint32_t debugPassImageHeight{};
+        bool isActive{};
+
+    };
+
     class IRenderPass
     {
     public:
         virtual ~IRenderPass() = default;
 
-        virtual void OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
-        virtual void OnDestroy() = 0;
+        virtual void OnDestroy(NSRenderer::Ctx rendererCtx) = 0;
 
-        virtual void Execute(Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
+        virtual void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
         virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) = 0;
 
         bool IsEnabled() const { return im_isEnabled; };

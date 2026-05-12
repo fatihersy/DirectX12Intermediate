@@ -8,8 +8,6 @@
 #include "ShaderCompiler.h"
 #include "Terrain.h"
 
-class Scene;
-
 using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)>;
 
 class Renderer
@@ -21,7 +19,7 @@ public:
     void Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height);
 
     void BeginFrame();
-    void DrawScene(Scene& scene);
+    void DrawScene(NSScene::IScene& scene);
     void EndFrame();
     NSRenderer::Model& RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag);
     void UnloadModel(NSModel::RegisterModelKey key);
@@ -33,8 +31,8 @@ public:
     void Execute(FnRendererExecutionBody Record);
 
     template<typename T, typename... Args> requires std::derived_from<T, NSRenderPass::IRenderPass>
-    NSRenderPass::IRenderPass& AddPass(Args&&... args) {
-        return *m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...));
+    T& AddPass(Args&&... args) {
+        return static_cast<T&>(*m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...)));
     }
 
     NSRenderer::Model& GetRegisteredModel(NSModel::RegisterModelKey& key)
@@ -118,6 +116,9 @@ public:
             [this](NSRenderer::ERendererFlag flag) -> void { this->FlipFlag(flag); }
         );
     }
+    NSRenderPass::DebugUtils& GetDebugUtils() {
+        return m_debugUtils;
+    }
 
     bool TestFlag(NSRenderer::ERendererFlag flag)
     {
@@ -187,6 +188,8 @@ private:
     uint32_t m_width{};
     uint32_t m_height{};
 
+    void DrawDebugImage(NSScene::IScene& scene);
+
     void CreateSwapChain(HWND hwnd, UINT width, UINT height);
     void CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription desc);
     void CreateFallbackTexture();
@@ -199,6 +202,8 @@ private:
     constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
 
     NSTerrain::Terrain m_terrain;
+
+    NSRenderPass::DebugUtils m_debugUtils;
 
     ComPtr<ID3D12InfoQueue1> m_infoQueue1;
     DWORD m_infoQueueCookie{};

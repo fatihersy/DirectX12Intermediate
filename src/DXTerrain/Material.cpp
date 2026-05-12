@@ -18,12 +18,12 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
     ComPtr<IWICBitmapFrameDecode> frame;
     if (FAILED(decoder->GetFrame(0, &frame)))
     {
-        OutputDebugStringA("Failed to get frame from decoder\n");
+        g_FError("Failed to get frame from decoder\n");
         return E_FAIL;
     }
     if (FAILED(frame->GetSize(&tex.width, &tex.height)))
     {
-        OutputDebugStringA("Failed to get texture dimensions\n");
+        g_FError("Failed to get texture dimensions\n");
         return E_FAIL;
     }
 
@@ -36,13 +36,13 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
     ComPtr<IWICFormatConverter> converter;
     if (FAILED(m_wicFactory->CreateFormatConverter(&converter)))
     {
-        OutputDebugStringA("Failed to create format converter\n");
+        g_FError("Failed to create format converter\n");
         return E_FAIL;
     }
 
     if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.f, WICBitmapPaletteTypeCustom)))
     {
-        OutputDebugStringA("Failed to initialize format converter\n");
+        g_FError("Failed to initialize format converter\n");
         return E_FAIL;
     }
 
@@ -58,21 +58,21 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
         IID_PPV_ARGS(&tex.uploadBuffer)
     )))
     {
-        OutputDebugStringA("Failed to create upload buffer\n");
+        g_FError("Failed to create upload buffer\n");
         return E_FAIL;
     }
 
     void* pMappedData = nullptr;
     if (FAILED(tex.uploadBuffer->Map(0, nullptr, &pMappedData)))
     {
-        OutputDebugStringA("Failed to map upload buffer\n");
+        g_FError("Failed to map upload buffer\n");
         return E_FAIL;
     }
 
     if (FAILED(converter->CopyPixels(nullptr, rowPitch, uploadSize, reinterpret_cast<BYTE*>(pMappedData))))
     {
         tex.uploadBuffer->Unmap(0, nullptr);
-        OutputDebugStringA("Failed to copy pixels\n");
+        g_FError("Failed to copy pixels\n");
         return E_FAIL;
     }
 
@@ -103,7 +103,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
             IID_PPV_ARGS(&tex.defaultBuffer)
         )))
         {
-            OutputDebugStringA("Failed to create default resource heap\n");
+            g_FError("Failed to create default resource heap\n");
             return E_FAIL;
         }
 
