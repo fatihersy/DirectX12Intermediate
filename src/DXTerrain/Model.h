@@ -79,19 +79,19 @@ public:
     const std::vector<Mesh>& GetMeshes() const { return m_meshes; }
     float GetMetallic() const
     {
-        assert(not m_meshes.empty());
+        ASSERT(not m_meshes.empty());
 
         return m_meshes[0].material.m_metallic;
     }
     float GetRoughness() const
     {
-        assert(not m_meshes.empty());
+        ASSERT(not m_meshes.empty());
 
         return m_meshes[0].material.m_roughness;
     }
     float GetOpacity() const
     {
-        assert(not m_meshes.empty());
+        ASSERT(not m_meshes.empty());
 
         return m_meshes[0].material.m_opacity;
     }

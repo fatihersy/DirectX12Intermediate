@@ -8,7 +8,7 @@ namespace NSAllocator
 
         template<typename T> T& As()
         {
-            assert(cpuAddr);
+            ASSERT(cpuAddr);
             return * reinterpret_cast<T*>(cpuAddr);
         }
 
@@ -18,4 +18,3 @@ namespace NSAllocator
         };
     };
 };
-

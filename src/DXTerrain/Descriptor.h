@@ -25,7 +25,7 @@ namespace NSDescriptor
 
         Offset At(uint32_t index) const
         {
-            assert(index < im_desc.NumDescriptors);
+            ASSERT(index < im_desc.NumDescriptors);
 
             return Offset {
                 .cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, index, im_descriptorSize),
@@ -36,7 +36,7 @@ namespace NSDescriptor
 
         Offset OffsetOf(const Handle& from, uint32_t offset)
         {
-            assert(offset < from.amount and Validate({ .cpuAddr = from.cpuAddr, .index = from.index }));
+            ASSERT(offset < from.amount and Validate({ .cpuAddr = from.cpuAddr, .index = from.index }));
 
             return Offset {
                 .cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, from.index + offset, im_descriptorSize),
@@ -99,6 +99,3 @@ namespace NSDescriptor
         uint32_t m_heapFrameIndexOffset{};
     };
 }
-
-
-

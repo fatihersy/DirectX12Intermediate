@@ -46,7 +46,7 @@ SsearchBlockResult GetFirstContiguousBlock(std::vector<uint32_t>& vec, uint32_t 
 
 IDescriptor::IDescriptor(ID3D12Device14* device, LPCWSTR name, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT capacity, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
 {
-    assert(device);
+    ASSERT(device);
 
     im_device = device;
 
@@ -59,7 +59,7 @@ IDescriptor::IDescriptor(ID3D12Device14* device, LPCWSTR name, D3D12_DESCRIPTOR_
 
     im_descriptorSize = device->GetDescriptorHandleIncrementSize(im_desc.Type);
     im_cpuStart = im_heap->GetCPUDescriptorHandleForHeapStart();
-    
+
     if (flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE)
         im_gpuStart = im_heap->GetGPUDescriptorHandleForHeapStart();
 }
@@ -80,13 +80,13 @@ StaticHeap::~StaticHeap(){}
 
 Handle StaticHeap::Allocate(uint32_t amount)
 {
-    assert(m_freeList.size() >= amount and "Insufficient free index");
+    ASSERT(m_freeList.size() >= amount and "Insufficient free index");
 
     SsearchBlockResult result = GetFirstContiguousBlock(m_freeList, amount);
-    assert(result.success);
+    ASSERT(result.success);
 
     const std::vector<uint32_t>::const_iterator blockBegin = m_freeList.begin() + static_cast<size_t>(result.vectorIndexBegin);
-    assert(blockBegin + amount <= m_freeList.end());
+    ASSERT(blockBegin + amount <= m_freeList.end());
 
     m_freeList.erase(blockBegin, blockBegin + amount);
 
@@ -100,11 +100,11 @@ Handle StaticHeap::Allocate(uint32_t amount)
 
 void StaticHeap::Free(Handle handle)
 {
-    assert(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }) and "Invalid handle");
+    ASSERT(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }) and "Invalid handle");
 
     std::vector<uint32_t>::const_iterator pItr = std::lower_bound(m_freeList.begin(), m_freeList.end(), handle.index);
 
-    assert(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount and "Double free");
+    ASSERT(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount and "Double free");
 
     for (uint32_t itr{}; itr < handle.amount; itr++)
     {
@@ -126,7 +126,7 @@ RingHeap::~RingHeap(){}
 
 Handle RingHeap::AllocateRing(uint32_t amount)
 {
-    assert(m_heapFrameIndexOffset + amount <= m_heapFrameEnd and "Out of slots");
+    ASSERT(m_heapFrameIndexOffset + amount <= m_heapFrameEnd and "Out of slots");
 
     Handle handle = Handle {
         .cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, m_heapFrameIndexOffset, im_descriptorSize),
@@ -142,13 +142,13 @@ Handle RingHeap::AllocateRing(uint32_t amount)
 
 Handle RingHeap::AllocateStatic(uint32_t amount)
 {
-    assert(m_freeList.size() >= amount and "Insufficient free index");
+    ASSERT(m_freeList.size() >= amount and "Insufficient free index");
 
     SsearchBlockResult result = GetFirstContiguousBlock(m_freeList, amount);
-    assert(result.success);
+    ASSERT(result.success);
 
     const std::vector<uint32_t>::const_iterator blockBegin = m_freeList.begin() + static_cast<size_t>(result.vectorIndexBegin);
-    assert(blockBegin + amount <= m_freeList.end());
+    ASSERT(blockBegin + amount <= m_freeList.end());
 
     m_freeList.erase(blockBegin, blockBegin + amount);
 
@@ -162,11 +162,11 @@ Handle RingHeap::AllocateStatic(uint32_t amount)
 
 void RingHeap::FreeStatic(Handle handle)
 {
-    assert(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }) and "Invalid handle");
+    ASSERT(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }) and "Invalid handle");
 
     std::vector<uint32_t>::const_iterator pItr = std::lower_bound(m_freeList.begin(), m_freeList.end(), handle.index);
 
-    assert(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount and "Double free");
+    ASSERT(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount and "Double free");
 
     for (uint32_t itr{}; itr < handle.amount; itr++)
     {

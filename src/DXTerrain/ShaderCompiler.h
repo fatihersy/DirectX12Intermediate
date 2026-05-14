@@ -14,7 +14,7 @@ public:
 
     static ShaderCompiler* GetInstance()
     {
-        assert(s_instance);
+        ASSERT(s_instance);
         return s_instance;
     }
 

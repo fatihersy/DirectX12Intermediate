@@ -7,7 +7,7 @@ public:
 
     static IApp* GetInstance()
     {
-        assert(s_instance);
+        ASSERT(s_instance);
         return s_instance;
     }
 

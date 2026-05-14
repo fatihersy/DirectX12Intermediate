@@ -26,7 +26,7 @@ aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node)
 Model::Model() : m_device(nullptr), m_wicFactory(nullptr) {};
 Model::Model(ID3D12Device14* device, IWICImagingFactory2* wicFactory, std::wstring_view name) : m_device(device), m_wicFactory(wicFactory), m_name(name)
 {
-    assert(device and wicFactory);
+    ASSERT(device and wicFactory);
 }
 
 void Model::RotateAdd(DirectX::XMFLOAT3 rotation)
@@ -56,7 +56,7 @@ bool Model::Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path)
         aiProcess_JoinIdenticalVertices
     );
 
-    assert(scene and (not (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)) and scene->mRootNode);
+    ASSERT(scene and (not (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)) and scene->mRootNode);
 
     m_assetsPath = path;
 
@@ -68,7 +68,7 @@ bool Model::Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path)
 }
 bool Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition)
 {
-    assert(isOnCPU);
+    ASSERT(isOnCPU);
 
     if (isOnGPU) return false;
 
@@ -189,7 +189,7 @@ void Model::ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach)
 
 void Model::ProcessNode(NSRenderer::Ctx rendererCtx, aiNode* node, const aiScene* scene)
 {
-    assert(node and scene and m_wicFactory and "Invalid Parameter");
+    ASSERT(node and scene and m_wicFactory and "Invalid Parameter");
 
     if (m_meshes.size() >= IApp::ic_maxObjects)
     {
@@ -218,7 +218,7 @@ void Model::ProcessNode(NSRenderer::Ctx rendererCtx, aiNode* node, const aiScene
 
 void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mesh& outMesh)
 {
-    assert(m_device and pAiMesh and scene);
+    ASSERT(m_device and pAiMesh and scene);
 
     std::vector<NSModel::Vertex> vertices;
     std::vector<UINT> indices;
@@ -245,7 +245,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
     DirectX::XMVECTOR outRotQ = DirectX::XMVectorZero();
     DirectX::XMVECTOR outScale = DirectX::XMVectorZero();
 
-    assert(DirectX::XMMatrixDecompose(&outScale, &outRotQ, &outPos, globalMatrix) and "Cannot decompose mesh matrix");
+    ASSERT(DirectX::XMMatrixDecompose(&outScale, &outRotQ, &outPos, globalMatrix) and "Cannot decompose mesh matrix");
 
     DirectX::XMStoreFloat3(&outMesh.m_position, outPos);
     DirectX::XMStoreFloat4(&outMesh.m_rotationQ, outRotQ);
@@ -435,7 +435,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
             aiString path;
             if (material->GetTexture(static_cast<aiTextureType>(type), 0u, &path) == aiReturn_SUCCESS)
             {
-                assert(not path.Empty());
+                ASSERT(not path.Empty());
 
                 const aiTexture* embeddedTex = scene->GetEmbeddedTexture(path.C_Str());
 
@@ -470,7 +470,7 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMo
 {
     IApp* iApp = IApp::GetInstance();
 
-    assert(iApp and not name.empty() and not inVertices.empty() and not inIndices.empty());
+    ASSERT(iApp and not name.empty() and not inVertices.empty() and not inIndices.empty());
 
     Mesh& outMesh = m_meshes.emplace_back(Mesh(m_wicFactory));
     outMesh.m_name = NSTool::wformat(L"%s::%s", m_name, name);
@@ -560,7 +560,7 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMo
 
 Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel::EPrimitive type, void* pDesc)
 {
-    assert(pDesc and not name.empty() and type > NSModel::EPrimitive::PRIMITIVE_TYPE_NONE and type < NSModel::EPrimitive::PRIMITIVE_TYPE_MAX);
+    ASSERT(pDesc and not name.empty() and type > NSModel::EPrimitive::PRIMITIVE_TYPE_NONE and type < NSModel::EPrimitive::PRIMITIVE_TYPE_MAX);
 
     UnloadGPU(rendererCtx);
     ResetUploadHeaps();

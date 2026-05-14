@@ -1,8 +1,6 @@
 #include "stdafx.h"
 #include "Scene.h"
 
-#include "Renderer.h"
-
 Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, float timeOfDay) : m_device(device), m_wicFactory(wicFactory)
 {
     m_timeOfDay = timeOfDay;

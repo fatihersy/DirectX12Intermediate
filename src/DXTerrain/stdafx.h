@@ -11,6 +11,7 @@
 #include <dxgi1_6.h>
 #include <dxcapi.h>
 #include <DirectXMath.h>
+#include <libassert/assert.hpp>
 
 #include <string>
 #include <vector>

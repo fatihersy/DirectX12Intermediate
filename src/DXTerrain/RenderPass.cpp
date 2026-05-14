@@ -61,6 +61,8 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
 
         return D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
     }))
+{}
+GeometryPass& GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     // Pipeline
     {
@@ -76,6 +78,7 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
         CD3DX12_RASTERIZER_DESC rasterDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 
         CD3DX12_DEPTH_STENCIL_DESC dsDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
         dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
 
         D3D12_RENDER_TARGET_BLEND_DESC rtBlendDesc{};
@@ -125,9 +128,6 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
             }
         );
     }
-}
-GeometryPass& GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
-{
 
     return *this;
 }
@@ -169,24 +169,29 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
     cmdList.RSSetScissorRects(1, &scissor);
 
     auto brdfLUTsrv = blackboard.GetOpt<NSDescriptor::Handle>(NSRenderer::kEnvCubemap_brdfLUTsrv);
-    assert(brdfLUTsrv.has_value());
+    ASSERT(brdfLUTsrv.has_value());
 
     cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_BRDF_LUT_SRV, brdfLUTsrv->get().gpuAddr);
 
     auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    assert(optRegModels.has_value());
+    ASSERT(optRegModels.has_value());
 
     std::vector<NSRenderer::Model>& regModels = optRegModels->get();
 
-    for (size_t itr{1u}; itr < scene.m_models.size(); itr++)
-    {
-        Model& sceneModel = scene.m_models[itr];
+    std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(scene.GetMainCamera(), {});
 
-        assert(regModels.size() > sceneModel.m_registerKey.index);
+    for (NSModel::SceneModelKey& key : modelsCulled)
+    {
+        ASSERT(key.index < scene.m_models.size());
+        Model& sceneModel = scene.m_models[key.index];
+
+        if (not sceneModel.TestFlag(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
+
+        ASSERT(sceneModel.m_registerKey.index < regModels.size());
 
         NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
 
-        assert(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
+        ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
 
         cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_CUBEMAP_SRV, regModel.m_envCubemap.srvHandle.gpuAddr);
 
@@ -508,7 +513,19 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_ATMOSPHERE, atmosCBAC.gpuAddr);
     cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_TABLE_SRV, rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE).gpuAddr);
 
-    scene.m_models[0].Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+    OptRef<Model> skyDome = std::nullopt;
+
+    scene.ForEachModel([&skyDome](Model& model)
+    {
+        if (model.TestFlag(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE) and model.isOnGPU) {
+            skyDome = model;
+            return;
+        }
+    });
+
+    if (not skyDome.has_value()) return;
+
+    skyDome->get().Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
     {
         NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
         MeshConstants meshCB = allocCtx.As<MeshConstants>();
@@ -867,19 +884,19 @@ void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackb
     using namespace DirectX;
 
     auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    assert(optRegModels.has_value());
+    ASSERT(optRegModels.has_value());
 
     std::vector<NSRenderer::Model>& regModels = optRegModels->get();
 
     for (Model& sceneModel : scene.m_models)
     {
-        assert(regModels.size() > sceneModel.m_registerKey.index);
+        ASSERT(regModels.size() > sceneModel.m_registerKey.index);
 
         NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
 
-        assert(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
+        ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
 
-        if (sceneModel.TestFlag(NSModel::EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP)) continue;
+        if (not sceneModel.TestFlag(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP)) continue;
 
         if (regModel.isDirty)
         {
@@ -960,14 +977,14 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
             m_atmosPipeline.Bind(cmdList);
 
             auto optAtmosConstDefault = blackboard.GetOpt<AtmosphereConstants>(NSRenderer::kAtmosphere_constants);
-            assert(optAtmosConstDefault.has_value());
+            ASSERT(optAtmosConstDefault.has_value());
 
             NSAllocator::Ctx atmosCBCA = rendererCtx.constAlloc(sizeof(AtmosphereConstants));
             AtmosphereConstants& atmosCB = atmosCBCA.As<AtmosphereConstants>();
             atmosCB = optAtmosConstDefault->get();
 
             auto atmosphereSRVs = blackboard.GetOpt<NSDescriptor::Offset>(NSRenderer::kAtmosphere_transmitScatterSRV);
-            assert(atmosphereSRVs.has_value());
+            ASSERT(atmosphereSRVs.has_value());
 
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_CAPTURE, captureCBAC.gpuAddr);
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_ATMOSPHERE, atmosCBCA.gpuAddr);
@@ -988,11 +1005,11 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
             {
                 Model& sceneModel = scene.m_models[sceneKey.index];
 
-                assert(regModels.size() > sceneModel.m_registerKey.index);
+                ASSERT(regModels.size() > sceneModel.m_registerKey.index);
 
                 NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
 
-                assert(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
+                ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
 
                 if (regModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) continue;
 
@@ -1036,7 +1053,7 @@ void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& b
 
     auto mainRTV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainRTV);
     auto mainDSV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainDSV);
-    assert(mainRTV.has_value() and mainDSV.has_value());
+    ASSERT(mainRTV.has_value() and mainDSV.has_value());
 
     cmdList.OMSetRenderTargets(1, &mainRTV->get(), FALSE, &mainDSV->get());
 }
@@ -1297,7 +1314,15 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
         <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
     );
 
-    assert(optTerrainRef.has_value() and "TerrainPass must have terrain access through blackboard");
+    ASSERT(optTerrainRef.has_value() and "TerrainPass must have terrain access through blackboard");
+
+    UINT width = IApp::GetInstance()->im_width;
+    UINT height = IApp::GetInstance()->im_height;
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
+    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
+
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
 
     std::vector<NSTerrain::ChunkKey> visibleChunkkeys = scene.CullTerrain(scene.m_camera);
     const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
@@ -1335,13 +1360,13 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
     for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
     {
-        assert(sceChunks.size() > chunkKey.index);
+        ASSERT(sceChunks.size() > chunkKey.index);
         const NSScene::TerrainChunk& sceChunk = sceChunks[chunkKey.index];
 
-        assert(regChunks.size() > sceChunk.key.index);
+        ASSERT(regChunks.size() > sceChunk.key.index);
         const NSTerrain::TerrainChunk& regChunk = regChunks[sceChunk.key.index];
 
-        assert(regChunk.key.gridX == sceChunk.key.gridX and regChunk.key.gridZ == sceChunk.key.gridZ);
+        ASSERT(regChunk.key.gridX == sceChunk.key.gridX and regChunk.key.gridZ == sceChunk.key.gridZ);
 
         NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
         {
@@ -1531,7 +1556,7 @@ DebugPass& DebugPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx
 }
 void DebugPass::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
-    assert(m_utils.has_value());
+    ASSERT(m_utils.has_value());
 
     if(m_colorRtv.amount > 0) rendererCtx.freeRTVStatic(m_colorRtv);
     m_colorRtv = {};
@@ -1559,7 +1584,7 @@ void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRender
 {
     if (not im_isEnabled) return;
 
-    assert(m_utils);
+    ASSERT(m_utils);
     DebugUtils& utils = m_utils->get();
 
     const NSScene::Camera& mainCam = scene.GetMainCamera();
@@ -1776,13 +1801,160 @@ void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRender
     auto mainRTV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainRTV);
     auto mainDSV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainDSV);
 
-    assert(mainRTV.has_value() and mainDSV.has_value());
+    ASSERT(mainRTV.has_value() and mainDSV.has_value());
 
     cmdList.OMSetRenderTargets(1, &mainRTV->get(), false, &mainDSV->get());
 
     utils.m_debugLines.clear();
 }
 void DebugPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
+{
+
+}
+
+ZPrePass::ZPrePass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx)
+    : m_modelDepthpipeline(GraphicsPipeline(device, L"ZPrePass::m_modelDepthpipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+    {
+        CD3DX12_ROOT_PARAMETER1 rp[2]{};
+        rp[IDX_ROOT_CBV_FRAME].InitAsConstantBufferView(IDX_CBV_FRAME, 0u);
+        rp[IDX_ROOT_CBV_MESH].InitAsConstantBufferView(IDX_CBV_MESH, 0u);
+
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC desc{};
+        desc.Init_1_1(_countof(rp), rp, 0u, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        return D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
+    }))
+{}
+ZPrePass::~ZPrePass()
+{}
+
+ZPrePass& ZPrePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+    // Pipeline
+    {
+        D3D12_INPUT_ELEMENT_DESC inputElements[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, position), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, normal),   D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TANGENT",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, tangent),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"BITANGENT",0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, bitangent),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(NSModel::Vertex, texCoord), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+        };
+
+        CD3DX12_RASTERIZER_DESC rasterDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+
+        CD3DX12_DEPTH_STENCIL_DESC dsDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        dsDesc.DepthEnable = TRUE;
+        dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+
+        CD3DX12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+
+        GRAPHICS_PIPELINE_STATE_DESC desc{};
+        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        desc.NumRenderTargets = 0;
+        desc.InputLayout = { inputElements, _countof(inputElements) };
+        desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        desc.SampleDesc.Count = 1;
+        desc.SampleMask = UINT_MAX;
+
+        m_modelDepthpipeline.Init(
+            desc,
+            rasterDesc,
+            dsDesc,
+            blendDesc,
+            {
+                L"ZPrePass.hlsl",
+                {
+                    L"-E", L"mainVS",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                }
+            }
+        );
+    }
+
+    return *this;
+}
+void ZPrePass::OnDestroy(NSRenderer::Ctx rendererCtx)
+{
+    this->m_modelDepthpipeline.Reset();
+}
+
+void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+{
+    if (not im_isEnabled) return;
+
+    Scene& scene = static_cast<Scene&>(_scene);
+
+    m_modelDepthpipeline.Bind(cmdList);
+
+    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
+    {
+        using namespace DirectX;
+
+        FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
+
+        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
+        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
+        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
+    }
+    cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
+
+    auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+    ASSERT(optRegModels.has_value());
+
+    std::vector<NSRenderer::Model>& regModels = optRegModels->get();
+
+    std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(scene.GetMainCamera(), {});
+
+    UINT width = IApp::GetInstance()->im_width;
+    UINT height = IApp::GetInstance()->im_height;
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
+    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
+
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
+
+    for (NSModel::SceneModelKey& key : modelsCulled)
+    {
+        ASSERT(key.index < scene.m_models.size());
+        Model& sceneModel = scene.m_models[key.index];
+
+        ASSERT(sceneModel.m_registerKey.index < regModels.size());
+
+        NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
+
+        ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
+
+        sceneModel.Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+        {
+            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
+            MeshConstants& meshCB = allocCtx.As<MeshConstants>();
+
+            DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
+            DirectX::XMVECTOR det;
+            DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
+            DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
+
+            meshCB.baseColor = mesh.material.m_baseColor;
+            meshCB.metallic = mesh.material.m_metallic;
+            meshCB.roughness = mesh.material.m_roughness;
+            meshCB.opacity = mesh.material.m_opacity;
+            meshCB.textureFlags = mesh.material.GetFlags();
+
+            cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
+
+            cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+            cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+            cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+        });
+    }
+}
+void ZPrePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {
 
 }

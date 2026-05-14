@@ -48,7 +48,9 @@ namespace NSModel
 
     enum class EModelFlag : uint32_t {
         MODEL_FLAG_NONE = 0,
-        MODEL_FLAG_NO_ENV_CUBEMAP = 1,
+        MODEL_FLAG_PBR_MODEL,
+        MODEL_FLAG_ATMOSPHERE,
+        MODEL_FLAG_GENERATE_ENV_CUBEMAP,
         MODEL_FLAG_MAX,
         MODEL_FLAG_Force32Bit = UINT32_MAX,
     };

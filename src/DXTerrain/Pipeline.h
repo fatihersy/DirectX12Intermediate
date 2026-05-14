@@ -50,6 +50,9 @@ public:
 
     void Reset()
     {
+        ASSERT(im_pipeline);
+        ASSERT(im_rootSignature);
+
         im_pipeline.Reset();
         im_rootSignature.Reset();
     }
@@ -70,7 +73,7 @@ public:
 
     void Bind(NSRenderer::GraphicsCommandList cmdList) const
     {
-        assert(im_pipeline);
+        ASSERT(im_pipeline);
 
         cmdList.SetPipelineState(im_pipeline.Get());
         cmdList.SetGraphicsRootSignature(im_rootSignature.Get());
@@ -82,7 +85,7 @@ public:
         CD3DX12_DEPTH_STENCIL_DESC ds,
         CD3DX12_BLEND_DESC blend,
         ShaderMetadata vertexMetadata,
-        ShaderMetadata pixelMetadata
+        ShaderMetadata pixelMetadata = {}
     );
 };
 
@@ -95,7 +98,7 @@ public:
 
     void Bind(NSRenderer::GraphicsCommandList cmdList) const
     {
-        assert(im_pipeline);
+        ASSERT(im_pipeline);
 
         cmdList.SetPipelineState(im_pipeline.Get());
         cmdList.SetComputeRootSignature(im_rootSignature.Get());
@@ -116,7 +119,7 @@ public:
 
     void Bind(NSRenderer::GraphicsCommandList cmdList) const
     {
-        assert(im_pipeline);
+        ASSERT(im_pipeline);
 
         cmdList.SetPipelineState(im_pipeline.Get());
         cmdList.SetGraphicsRootSignature(im_rootSignature.Get());

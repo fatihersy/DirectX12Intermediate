@@ -23,7 +23,7 @@ ShaderCompiler::~ShaderCompiler()
 
 void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShader, std::vector<LPCWSTR>& args)
 {
-    assert(pFileName and "Filename must be set");
+    ASSERT(pFileName and "Filename must be set");
 
     ComPtr<IDxcOperationResult> opResult;
     HRESULT hr{};

@@ -89,12 +89,12 @@ ConstantAllocator& ConstantAllocator::operator=(ConstantAllocator&& other) noexc
 
 NSAllocator::Ctx ConstantAllocator::Allocate(size_t size)
 {
-    assert(m_cpuAddr and m_bufferDefault);
+    ASSERT(m_cpuAddr and m_bufferDefault);
 
     constexpr size_t alignment = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
     size_t aligned = (m_blobOffset + alignment - 1) & ~(alignment - 1);
 
-    assert(aligned + size < m_blobFrameEnd);
+    ASSERT(aligned + size <= m_blobFrameEnd);
 
     NSAllocator::Ctx ctx{};
     ctx.gpuAddr = m_gpuAddr + aligned;

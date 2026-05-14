@@ -8,7 +8,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
 {
     NSTexture::EType tType = static_cast<NSTexture::EType>(textureType);
 
-    assert(device and decoder and tType > NSTexture::EType::EType_NONE and tType < NSTexture::EType::EType_MAX);
+    ASSERT(device and decoder and tType > NSTexture::EType::EType_NONE and tType < NSTexture::EType::EType_MAX);
 
     NSTexture::Texture& tex = m_textures.emplace_back(NSTexture::Texture{});
 
@@ -122,13 +122,13 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
 
 void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition)
 {
-    assert(device);
+    ASSERT(device);
 
     if (m_textures.empty() or not m_isOnCPU) return;
 
     std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
     {
-        assert(tex.defaultBuffer and tex.uploadBuffer);
+        ASSERT(tex.defaultBuffer and tex.uploadBuffer);
     });
 
     if (barrierTransition)

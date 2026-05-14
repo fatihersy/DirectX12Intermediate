@@ -442,7 +442,7 @@ namespace NSRenderer {
             _In_reads_(NumSubresources) const UINT64* pRowSizesInBytes,
             _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
         {
-            assert(m_cmdList);
+            ASSERT(m_cmdList);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pSrcData);
         }
@@ -459,7 +459,7 @@ namespace NSRenderer {
             _In_ const void* pResourceData,
             _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
         {
-            assert(m_cmdList);
+            ASSERT(m_cmdList);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pResourceData, pSrcData);
         }
@@ -472,7 +472,7 @@ namespace NSRenderer {
             _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
             _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
         {
-            assert(m_cmdList);
+            ASSERT(m_cmdList);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
         }
@@ -486,7 +486,7 @@ namespace NSRenderer {
             _In_ const void* pResourceData,
             _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
         {
-            assert(m_cmdList);
+            ASSERT(m_cmdList);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
         }
@@ -500,7 +500,7 @@ namespace NSRenderer {
             _In_range_(1,MaxSubresources-FirstSubresource) UINT NumSubresources,
             _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
         {
-            assert(m_cmdList);
+            ASSERT(m_cmdList);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
         }
@@ -515,7 +515,7 @@ namespace NSRenderer {
             _In_ const void* pResourceData,
             _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
         {
-            assert(m_cmdList);
+            ASSERT(m_cmdList);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
         }
@@ -593,25 +593,25 @@ namespace NSRenderer
 
         bool TestFlag(NSModel::ERegModelFlag flag) const {
             const size_t _flag = static_cast<size_t>(flag);
-            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
 
             return m_flags.test(_flag);
         }
         void SetFlag(NSModel::ERegModelFlag flag) {
             const size_t _flag = static_cast<size_t>(flag);
-            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
 
             m_flags.set(_flag);
         }
         void ResetFlag(NSModel::ERegModelFlag flag) {
             const size_t _flag = static_cast<size_t>(flag);
-            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
 
             m_flags.reset(_flag);
         }
         void FlipFlag(NSModel::ERegModelFlag flag) {
             const size_t _flag = static_cast<size_t>(flag);
-            assert(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
+            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
 
             m_flags.flip(_flag);
         }

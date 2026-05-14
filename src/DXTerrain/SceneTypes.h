@@ -46,7 +46,7 @@ namespace NSScene
         float camPitch{};
 
         float camSpeed = 100.f;
-        float lookSensitivity = .1f;
+        float lookSensitivity = .01f;
     };
 
     class IScene

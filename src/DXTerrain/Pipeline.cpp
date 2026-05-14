@@ -74,12 +74,22 @@ GraphicsPipeline&& GraphicsPipeline::Init(
     ComPtr<IDxcBlob> indexShader;
 
     ShaderCompiler::GetInstance()->CompileShader(vertexMetadata.fileName, vertexShader, vertexMetadata.args);
-    ShaderCompiler::GetInstance()->CompileShader(pixelMetadata.fileName, indexShader, pixelMetadata.args);
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
     desc.pRootSignature = im_rootSignature.Get();
     desc.VS = CD3DX12_SHADER_BYTECODE(vertexShader->GetBufferPointer(), vertexShader->GetBufferSize());
-    desc.PS = CD3DX12_SHADER_BYTECODE(indexShader->GetBufferPointer(), indexShader->GetBufferSize());
+
+    if (pixelMetadata.fileName)
+    {
+        ShaderCompiler::GetInstance()->CompileShader(pixelMetadata.fileName, indexShader, pixelMetadata.args);
+        desc.PS = CD3DX12_SHADER_BYTECODE(indexShader->GetBufferPointer(), indexShader->GetBufferSize());
+        desc.NumRenderTargets = inDesc.NumRenderTargets;
+    }
+    else {
+        desc.PS = {};
+        desc.NumRenderTargets = 0u;
+    }
+
     desc.RasterizerState = raster;
     desc.DepthStencilState = ds;
     desc.BlendState = blend;
@@ -89,7 +99,7 @@ GraphicsPipeline&& GraphicsPipeline::Init(
     desc.InputLayout = inDesc.InputLayout;
     desc.IBStripCutValue = inDesc.IBStripCutValue;
     desc.PrimitiveTopologyType = inDesc.PrimitiveTopologyType;
-    desc.NumRenderTargets = inDesc.NumRenderTargets;
+
     memcpy(desc.RTVFormats, inDesc.RTVFormats, sizeof(DXGI_FORMAT) * 8u);
     desc.DSVFormat = inDesc.DSVFormat;
     desc.SampleDesc = inDesc.SampleDesc;
@@ -140,7 +150,7 @@ TessellationPipeline&& TessellationPipeline::Init(
     ShaderMetadata pixelMetadata
 )
 {
-    assert(vertexMetadata.fileName and hullMetadata.fileName and domainMetadata.fileName and "Missing required shaders");
+    ASSERT(vertexMetadata.fileName and hullMetadata.fileName and domainMetadata.fileName and "Missing required shaders");
 
     ComPtr<IDxcBlob> vertexShader;
     ComPtr<IDxcBlob> hullShader;

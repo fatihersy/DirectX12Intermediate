@@ -38,10 +38,10 @@ public:
     NSRenderer::Model& GetRegisteredModel(NSModel::RegisterModelKey& key)
     {
         auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-        assert(optRegModels.has_value() and optRegModels->get().size() > key.index);
+        ASSERT(optRegModels.has_value() and optRegModels->get().size() > key.index);
 
         NSRenderer::Model& regModel = optRegModels->get()[key.index];
-        assert(regModel.sceneKey.id == key.id);
+        ASSERT(regModel.sceneKey.id == key.id);
 
         return regModel;
     }
@@ -78,7 +78,7 @@ public:
     }
 
     std::reference_wrapper<NSBarrier::IBarrierBatch> GetBarrierBatch() {
-        assert(m_barrierBatch);
+        ASSERT(m_barrierBatch);
         return std::ref(*m_barrierBatch);
     }
 
@@ -123,28 +123,28 @@ public:
     bool TestFlag(NSRenderer::ERendererFlag flag)
     {
         const size_t _flag = static_cast<size_t>(flag);
-        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
+        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
         return m_flags.test(_flag);
     }
     void SetFlag(NSRenderer::ERendererFlag flag)
     {
         const size_t _flag = static_cast<size_t>(flag);
-        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
+        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
         m_flags.set(static_cast<uint32_t>(_flag));
     }
     void ResetFlag(NSRenderer::ERendererFlag flag)
     {
         const size_t _flag = static_cast<size_t>(flag);
-        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
+        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
         m_flags.reset(static_cast<uint32_t>(_flag));
     }
     void FlipFlag(NSRenderer::ERendererFlag flag)
     {
         const size_t _flag = static_cast<size_t>(flag);
-        assert(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
+        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
 
         m_flags.flip(static_cast<uint32_t>(_flag));
     }

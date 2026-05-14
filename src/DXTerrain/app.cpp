@@ -203,7 +203,7 @@ void app::LoadAssets()
 
             skyDome.m_sceneKey.id = this->im_nextId++;
             skyDome.m_sceneKey.index = 0u;
-            skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_NO_ENV_CUBEMAP);
+            skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE);
 
             skyDome.UploadGPU(ctx, cmdList);
             skyDome.m_registerKey = ctx.registerModel(skyDome.m_name, skyDome.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE).registerKey;
@@ -245,6 +245,8 @@ void app::LoadAssets()
                 );
                 model.m_sceneKey.id = this->im_nextId++;
                 model.m_sceneKey.index = idx;
+                model.SetFlag(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP);
+                model.SetFlag(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL);
 
                 model.m_collision.radius = desc.desc.radius;
                 model.m_collision.sliceCount = desc.desc.sliceCount;
@@ -305,13 +307,13 @@ void app::LoadAssets()
             });
         });
 
-        assert(ctx.barrierBatch.get().Execute(NSBarrier::kApp_beginModelLoad, cmdList));
+        ASSERT(ctx.barrierBatch.get().Execute(NSBarrier::kApp_beginModelLoad, cmdList));
 
         for (size_t itr = 1u; itr < m_scene.m_models.size(); itr++)
         {
             Model& model = m_scene.m_models[itr];
 
-            assert(model.m_sceneKey.index == itr);
+            ASSERT(model.m_sceneKey.index == itr);
 
             model.UploadGPU(ctx, cmdList, false);
             NSRenderer::Model& regModel = ctx.registerModel(model.m_name, model.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_NONE);
@@ -324,7 +326,7 @@ void app::LoadAssets()
             ));
         }
 
-        assert(ctx.barrierBatch.get().Execute(NSBarrier::kApp_endModelLoad, cmdList));
+        ASSERT(ctx.barrierBatch.get().Execute(NSBarrier::kApp_endModelLoad, cmdList));
     });
 }
 void app::OnInit()

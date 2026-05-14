@@ -112,8 +112,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
 
     m_barrierBatch = std::make_unique<BarrierBatch>();
 
-    constexpr size_t oneMb = 1u * 1024u * 1024u;
-    m_constantAllocator = ConstantAllocator(device, oneMb, IApp::ic_framesInFlight);
+    constexpr size_t twoMb = 2u * 1024u * 1024u;
+    m_constantAllocator = ConstantAllocator(device, twoMb, IApp::ic_framesInFlight);
 
     // Command Queue
     {
@@ -307,6 +307,10 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
 
     Execute([this, &device](NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
     {
+        AddPass<NSRenderPass::ZPrePass>(device, m_blackboard, GetCtx())
+            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .SetIsEnabled(true);
+
         AddPass<NSRenderPass::AtmospherePass>(device, m_blackboard, GetCtx())
             .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
             .SetIsEnabled(true);
@@ -470,6 +474,14 @@ void Renderer::BeginFrame()
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
 
     m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    UINT width = IApp::GetInstance()->im_width;
+    UINT height = IApp::GetInstance()->im_height;
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
+    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
+
+    m_commandList->RSSetViewports(1, &viewport);
+    m_commandList->RSSetScissorRects(1, &scissor);
 }
 void Renderer::DrawScene(NSScene::IScene& scene)
 {
@@ -517,7 +529,7 @@ void Renderer::EndFrame()
 NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag)
 {
     std::vector<NSRenderer::Model>* models = m_blackboard.GetMut<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    assert(models);
+    ASSERT(models);
 
     NSRenderer::Model& rendererModel = models->emplace_back();
     rendererModel.registerKey = { sceneKey.id, models->size() - 1u };
@@ -679,11 +691,11 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
 void Renderer::UnloadModel(NSModel::RegisterModelKey key)
 {
     auto modelsOpt = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    assert(modelsOpt.has_value() and "Blackboard key is has no value");
+    ASSERT(modelsOpt.has_value() and "Blackboard key is has no value");
 
     auto& models = modelsOpt.value().get();
 
-    assert(models.size() > key.index and models[key.index].sceneKey.id == key.id and "Renderer::UnloadModel::Invalid Register model key");
+    ASSERT(models.size() > key.index and models[key.index].sceneKey.id == key.id and "Renderer::UnloadModel::Invalid Register model key");
 
     NSRenderer::Model& model = models[key.index];
 
@@ -762,7 +774,7 @@ void Renderer::Resize(UINT width, UINT height)
 }
 void Renderer::CreateSwapChain(HWND hwnd, UINT width, UINT height)
 {
-    assert(not m_swapChain and "CreateSwapChain() Supposed to use once");
+    ASSERT(not m_swapChain and "CreateSwapChain() Supposed to use once");
 
     DXGI_SWAP_CHAIN_DESC1 desc{};
     desc.BufferCount = IApp::ic_framesInFlight;

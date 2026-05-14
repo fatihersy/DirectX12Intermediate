@@ -142,7 +142,6 @@ namespace NSRenderPass
         static constexpr UINT IDX_CBV_TERRAIN = 1u;
     };
 
-
     class DebugPass : public IRenderPass
     {
     public:
@@ -172,4 +171,25 @@ namespace NSRenderPass
         uint32_t m_height = 240;
     };
 
-}
+    class ZPrePass : public IRenderPass
+    {
+    public:
+        ZPrePass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
+        ~ZPrePass() override;
+
+        ZPrePass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        void OnDestroy(NSRenderer::Ctx rendererCtx) override;
+
+        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
+    private:
+        GraphicsPipeline m_modelDepthpipeline;
+
+        static constexpr UINT IDX_ROOT_CBV_FRAME = 0u;
+        static constexpr UINT IDX_ROOT_CBV_MESH = 1u;
+
+        static constexpr UINT IDX_CBV_FRAME = 0u;
+        static constexpr UINT IDX_CBV_MESH = 1u;
+    };
+
+} // NSRenderPass

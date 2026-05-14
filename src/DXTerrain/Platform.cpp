@@ -24,7 +24,7 @@ enum class FConsoleColor : WORD {
 
 Platform::Platform(SWindow wnd)
 {
-    assert(wnd.pApp);
+    ASSERT(wnd.pApp);
 
     int consolePid = std::stoul(g_CmdArguments[ARG_CONSOLE_PID].value);
     FreeConsole();
@@ -69,6 +69,17 @@ Platform::Platform(SWindow wnd)
         m_wnd.hInstance,
         m_wnd.pApp
     );
+
+    auto libAssertOutput = [](const libassert::assertion_info& inf)
+    {
+        std::string msg = inf.to_string(inf.message->size());
+
+        g_PlatformConsoleWrite(FlogLevel::FLOG_ERROR, msg);
+
+        std::abort();
+    };
+
+    libassert::set_failure_handler(libAssertOutput);
 }
 Platform::~Platform()
 {}

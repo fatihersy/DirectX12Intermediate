@@ -185,7 +185,7 @@ void Terrain::Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
         g_FWarn("Terrain::Upload::Calling Upload function twice without Unload first");
         return;
     };
-    assert(m_heightmapTextureDefault and m_heightmapTextureUpload and "Heightmap should be generated first");
+    ASSERT(m_heightmapTextureDefault and m_heightmapTextureUpload and "Heightmap should be generated first");
 
     D3D12_SUBRESOURCE_DATA data{};
     data.pData = m_heightR16.data();
@@ -474,34 +474,34 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
             const uint32_t expectedTriIndexCount = expectedQuadCount * 2 * 3;
             const uint32_t expectedPatchIndexCount = expectedQuadCount * 4;
 
-            assert(vertices.size() == expectedVertexCount);
-            assert(triIndices.size() == expectedTriIndexCount);
-            assert(patchIndices.size() == expectedPatchIndexCount);
-            assert(aabbMin.x <= aabbMax.x);
-            assert(aabbMin.y <= aabbMax.y);
-            assert(aabbMin.z <= aabbMax.z);
+            ASSERT(vertices.size() == expectedVertexCount);
+            ASSERT(triIndices.size() == expectedTriIndexCount);
+            ASSERT(patchIndices.size() == expectedPatchIndexCount);
+            ASSERT(aabbMin.x <= aabbMax.x);
+            ASSERT(aabbMin.y <= aabbMax.y);
+            ASSERT(aabbMin.z <= aabbMax.z);
 
             m_chunks.push_back(std::move(chunk));
         }
     }
 
-    assert(m_chunks.size() == static_cast<size_t>(m_desc.chunkCountX) * m_desc.chunkCountZ);
+    ASSERT(m_chunks.size() == static_cast<size_t>(m_desc.chunkCountX) * m_desc.chunkCountZ);
 
     TerrainChunk& fstchunk = m_chunks[0];
     DirectX::XMFLOAT3& fstAabbMin = fstchunk.bounds.aabb.min;
     DirectX::XMFLOAT3& fstAabbMax = fstchunk.bounds.aabb.max;
-    assert(NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight));
-    assert(NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y));
+    ASSERT(NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight));
+    ASSERT(NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y));
 
     TerrainChunk& lstchunk = m_chunks[m_chunks.size() - 1u];
     DirectX::XMFLOAT3& lstAabbMin = lstchunk.bounds.aabb.min;
     DirectX::XMFLOAT3& lstAabbMax = lstchunk.bounds.aabb.max;
-    assert(NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight));
-    assert(NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y));
+    ASSERT(NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight));
+    ASSERT(NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y));
 }
 float Terrain::SampleHeight(float u, float v) const
 {
-    assert(not m_heightR16.empty());
+    ASSERT(not m_heightR16.empty());
     if (m_hmWidth == 0 || m_hmHeight == 0) return 0.0f;
 
     u = NSMath::Saturate(u);
