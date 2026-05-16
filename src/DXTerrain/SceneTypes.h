@@ -62,5 +62,8 @@ namespace NSScene
 
         virtual std::vector<NSModel::SceneModelKey> CullModels(const NSScene::Camera& camera, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey()) = 0;
         virtual std::vector<NSTerrain::ChunkKey> CullTerrain(const NSScene::Camera& camera) = 0;
+
+        static constexpr float FAR_CLIP = 20000.f;
+        static constexpr float NEAR_CLIP = 0.1f;
     };
 }

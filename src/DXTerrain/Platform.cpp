@@ -24,7 +24,10 @@ enum class FConsoleColor : WORD {
 
 Platform::Platform(SWindow wnd)
 {
-    ASSERT(wnd.pApp);
+    if (not wnd.pApp)
+    {
+        std::runtime_error("Invalid app handle");
+    }
 
     int consolePid = std::stoul(g_CmdArguments[ARG_CONSOLE_PID].value);
     FreeConsole();

@@ -90,7 +90,4 @@ public:
 
     DirectX::XMVECTOR m_lightDir{};
     DirectX::XMVECTOR m_lightColor{};
-
-    static constexpr float FAR_CLIP = 20000.f;
-    static constexpr float NEAR_CLIP = 0.1f;
 };

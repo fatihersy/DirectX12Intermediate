@@ -116,6 +116,98 @@ namespace NSTexture
         UINT height{};
         UINT RowPitch{};
     };
+
+    inline const char* TextureTypeToString(NSTexture::EType tType)
+    {
+        switch (tType)
+        {
+        case NSTexture::EType::EType_DIFFUSE: return "Diffuse";
+        case NSTexture::EType::EType_SPECULAR: return "Specular";
+        case NSTexture::EType::EType_AMBIENT: return "Ambient";
+        case NSTexture::EType::EType_EMISSIVE: return "Emissive";
+        case NSTexture::EType::EType_HEIGHT: return "Height";
+        case NSTexture::EType::EType_NORMALS: return "Normals";
+        case NSTexture::EType::EType_SHININESS: return "Shininess";
+        case NSTexture::EType::EType_OPACITY: return "Opacity";
+        case NSTexture::EType::EType_DISPLACEMENT: return "Displacement";
+        case NSTexture::EType::EType_LIGHTMAP: return "Lightmap";
+        case NSTexture::EType::EType_REFLECTION: return "Reflection";
+        case NSTexture::EType::EType_BASE_COLOR: return "Base Color";
+        case NSTexture::EType::EType_NORMAL_CAMERA: return "Normal Camera";
+        case NSTexture::EType::EType_EMISSION_COLOR: return "Emission Color";
+        case NSTexture::EType::EType_METALNESS: return "Metalness";
+        case NSTexture::EType::EType_DIFFUSE_ROUGHNESS: return "Diffuse Roughness";
+        case NSTexture::EType::EType_AMBIENT_OCCLUSION: return "Ambient Occlusion";
+        case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS: return "GLTF Metallic Roughness";
+        default: return "Unknown";
+        }
+    }
+    inline const wchar_t* TextureTypeToWString(NSTexture::EType tType)
+    {
+        switch (tType)
+        {
+        case NSTexture::EType::EType_DIFFUSE: return L"Diffuse";
+        case NSTexture::EType::EType_SPECULAR: return L"Specular";
+        case NSTexture::EType::EType_AMBIENT: return L"Ambient";
+        case NSTexture::EType::EType_EMISSIVE: return L"Emissive";
+        case NSTexture::EType::EType_HEIGHT: return L"Height";
+        case NSTexture::EType::EType_NORMALS: return L"Normals";
+        case NSTexture::EType::EType_SHININESS: return L"Shininess";
+        case NSTexture::EType::EType_OPACITY: return L"Opacity";
+        case NSTexture::EType::EType_DISPLACEMENT: return L"Displacement";
+        case NSTexture::EType::EType_LIGHTMAP: return L"Lightmap";
+        case NSTexture::EType::EType_REFLECTION: return L"Reflection";
+        case NSTexture::EType::EType_BASE_COLOR: return L"Base Color";
+        case NSTexture::EType::EType_NORMAL_CAMERA: return L"Normal Camera";
+        case NSTexture::EType::EType_EMISSION_COLOR: return L"Emission Color";
+        case NSTexture::EType::EType_METALNESS: return L"Metalness";
+        case NSTexture::EType::EType_DIFFUSE_ROUGHNESS: return L"Diffuse Roughness";
+        case NSTexture::EType::EType_AMBIENT_OCCLUSION: return L"Ambient Occlusion";
+        case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS: return L"GLTF Metallic Roughness";
+        default: return L"Unknown";
+        }
+    }
+    inline DXGI_FORMAT TypeToFormat(NSTexture::EType tType)
+    {
+        switch (tType)
+        {
+        case NSTexture::EType::EType_DIFFUSE:
+        case NSTexture::EType::EType_BASE_COLOR:
+        case NSTexture::EType::EType_SPECULAR:
+        case NSTexture::EType::EType_AMBIENT:
+        case NSTexture::EType::EType_EMISSIVE:
+        case NSTexture::EType::EType_EMISSION_COLOR:
+        case NSTexture::EType::EType_MAYA_BASE:
+        case NSTexture::EType::EType_MAYA_SPECULAR_COLOR:
+            return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+
+        case NSTexture::EType::EType_NORMALS:
+        case NSTexture::EType::EType_NORMAL_CAMERA:
+        case NSTexture::EType::EType_HEIGHT:
+        case NSTexture::EType::EType_DISPLACEMENT:
+        case NSTexture::EType::EType_METALNESS:
+        case NSTexture::EType::EType_DIFFUSE_ROUGHNESS:
+        case NSTexture::EType::EType_AMBIENT_OCCLUSION:
+        case NSTexture::EType::EType_SHININESS:
+        case NSTexture::EType::EType_OPACITY:
+        case NSTexture::EType::EType_LIGHTMAP:
+        case NSTexture::EType::EType_REFLECTION:
+        case NSTexture::EType::EType_SHEEN:
+        case NSTexture::EType::EType_CLEARCOAT:
+        case NSTexture::EType::EType_TRANSMISSION:
+        case NSTexture::EType::EType_MAYA_SPECULAR:
+        case NSTexture::EType::EType_MAYA_SPECULAR_ROUGHNESS:
+        case NSTexture::EType::EType_ANISOTROPY:
+        case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS:
+            return DXGI_FORMAT_R8G8B8A8_UNORM;
+
+        case NSTexture::EType::EType_UNKNOWN:
+        case NSTexture::EType::EType_NONE:
+
+        default:
+            return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        }
+    }
 }
 
 struct FrameConstants
@@ -153,6 +245,25 @@ static_assert(offsetof(MeshConstants, metallic) % 4 == 0);
 static_assert(offsetof(MeshConstants, roughness) % 4 == 0);
 static_assert(offsetof(MeshConstants, opacity) % 4 == 0);
 static_assert(offsetof(MeshConstants, textureFlags) % 4 == 0);
+
+struct FrameConstantsZPrepass
+{
+    DirectX::XMFLOAT4X4 view{};
+    DirectX::XMFLOAT4X4 proj{};
+    DirectX::XMFLOAT3 eye{};
+    uint32_t PADDING_0{};
+};
+static_assert(sizeof(FrameConstantsZPrepass) % 16 == 0);
+static_assert(offsetof(FrameConstantsZPrepass, view) % 4 == 0);
+static_assert(offsetof(FrameConstantsZPrepass, proj) % 4 == 0);
+static_assert(offsetof(FrameConstantsZPrepass, PADDING_0) % 4 == 0);
+
+struct MeshConstantsZPrepass
+{
+    DirectX::XMFLOAT4X4 worldMatrix{};
+};
+static_assert(sizeof(MeshConstantsZPrepass) % 16 == 0);
+static_assert(offsetof(MeshConstantsZPrepass, worldMatrix) % 4 == 0);
 
 struct AtmosphereConstants
 {
@@ -227,9 +338,9 @@ struct TerrainConstants
     float textureTilingFactor{};
     DirectX::XMFLOAT2 chunkUVOffset{};
     DirectX::XMFLOAT2 chunkUVScale{};
-    uint32_t heightmapIndex{};
-    uint32_t splatIndices[4]{};
+    uint32_t heightmapSrvIndex{};
     uint32_t PADDING_0[3]{};
+    uint32_t splatSrvIndices[4]{};
 };
 static_assert(sizeof(TerrainConstants) % 16 == 0);
 static_assert(offsetof(TerrainConstants, worldMatrix) % 4 == 0);
@@ -239,9 +350,9 @@ static_assert(offsetof(TerrainConstants, tessFactorScale) % 4 == 0);
 static_assert(offsetof(TerrainConstants, textureTilingFactor) % 4 == 0);
 static_assert(offsetof(TerrainConstants, chunkUVOffset) % 4 == 0);
 static_assert(offsetof(TerrainConstants, chunkUVScale) % 4 == 0);
-static_assert(offsetof(TerrainConstants, heightmapIndex) % 4 == 0);
-static_assert(offsetof(TerrainConstants, splatIndices) % 4 == 0);
+static_assert(offsetof(TerrainConstants, heightmapSrvIndex) % 4 == 0);
 static_assert(offsetof(TerrainConstants, PADDING_0) % 4 == 0);
+static_assert(offsetof(TerrainConstants, splatSrvIndices) % 4 == 0);
 
 namespace NSRenderer {
     class GraphicsCommandList
@@ -741,9 +852,21 @@ namespace NSScene
     class IScene;
 }
 
-class Scene;
+
 namespace NSRenderPass
 {
+    enum class RenderPassID : uint32_t
+    {
+        PASSID_Z = 0u,
+        PASSID_ATMOSPHERE,
+        PASSID_ENVIRONMENTCUBEMAP,
+        PASSID_GEOMETRY,
+        PASSID_TERRAIN,
+        PASSID_DEBUG,
+        PASSID_MAX,
+        PASSID_Force32Bit = UINT32_MAX
+    };
+
     struct DebugUtils {
         std::function<void(D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_desc_handle)> ImGuiSrvDescriptorAllocFn;
         std::function<void(D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_handle)> ImGuiSrvDescriptorFreeFn;
@@ -769,5 +892,18 @@ namespace NSRenderPass
         void SetIsEnabled(bool val) { im_isEnabled = val; };
     protected:
         bool im_isEnabled{};
+    };
+
+    template<RenderPassID Id>
+    class RenderPass : public IRenderPass
+    {
+    public:
+        static constexpr RenderPassID ID = Id;
+    };
+
+    template<typename T>
+    concept IsRenderPass = std::derived_from<T, IRenderPass> && requires
+    {
+        { T::ID } -> std::convertible_to<RenderPassID>;
     };
 }

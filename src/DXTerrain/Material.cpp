@@ -13,7 +13,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
     NSTexture::Texture& tex = m_textures.emplace_back(NSTexture::Texture{});
 
     tex.textureType = tType;
-    tex.format = FormatTOtype(tex.textureType);
+    tex.format = TypeToFormat(tex.textureType);
 
     ComPtr<IWICBitmapFrameDecode> frame;
     if (FAILED(decoder->GetFrame(0, &frame)))
@@ -148,22 +148,12 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     }
 
-    m_srvHandle = rendererCtx.allocSRVStatic(static_cast<INT>(NSTexture::EType::EType_MAX));
+    m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(NSTexture::EType::EType_MAX));
 
-    auto handles = []<size_t... N>(std::index_sequence<N...>, NSRenderer::Ctx rendererCtx, NSDescriptor::Handle srv)
-    {
-        return std::array<D3D12_CPU_DESCRIPTOR_HANDLE, sizeof...(N)> {
-            rendererCtx.offsetSRV(srv, static_cast<uint32_t>(N)).cpuAddr...
-        };
-    }(std::make_index_sequence<static_cast<size_t>(NSTexture::EType::EType_MAX)>{}, rendererCtx, m_srvHandle);
-
-    device->CopyDescriptors(
-        static_cast<INT>(NSTexture::EType::EType_MAX),
-        handles.data(),
-        nullptr,
-        1u,
-        &rendererCtx.fallbackSRV.get().cpuAddr,
-        nullptr,
+    device->CopyDescriptorsSimple(
+        static_cast<UINT>(NSTexture::EType::EType_MAX),
+        m_srvHandle.cpuAddr,
+        rendererCtx.fallbackSRV.get().cpuAddr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
     );
 
@@ -215,96 +205,4 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
     }
 
     m_isOnGPU = true;
-}
-
-const char* Material::TextureTypeToString(NSTexture::EType tType)
-{
-    switch (tType)
-    {
-    case NSTexture::EType::EType_DIFFUSE: return "Diffuse";
-    case NSTexture::EType::EType_SPECULAR: return "Specular";
-    case NSTexture::EType::EType_AMBIENT: return "Ambient";
-    case NSTexture::EType::EType_EMISSIVE: return "Emissive";
-    case NSTexture::EType::EType_HEIGHT: return "Height";
-    case NSTexture::EType::EType_NORMALS: return "Normals";
-    case NSTexture::EType::EType_SHININESS: return "Shininess";
-    case NSTexture::EType::EType_OPACITY: return "Opacity";
-    case NSTexture::EType::EType_DISPLACEMENT: return "Displacement";
-    case NSTexture::EType::EType_LIGHTMAP: return "Lightmap";
-    case NSTexture::EType::EType_REFLECTION: return "Reflection";
-    case NSTexture::EType::EType_BASE_COLOR: return "Base Color";
-    case NSTexture::EType::EType_NORMAL_CAMERA: return "Normal Camera";
-    case NSTexture::EType::EType_EMISSION_COLOR: return "Emission Color";
-    case NSTexture::EType::EType_METALNESS: return "Metalness";
-    case NSTexture::EType::EType_DIFFUSE_ROUGHNESS: return "Diffuse Roughness";
-    case NSTexture::EType::EType_AMBIENT_OCCLUSION: return "Ambient Occlusion";
-    case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS: return "GLTF Metallic Roughness";
-    default: return "Unknown";
-    }
-}
-const wchar_t* Material::TextureTypeToWString(NSTexture::EType tType)
-{
-    switch (tType)
-    {
-    case NSTexture::EType::EType_DIFFUSE: return L"Diffuse";
-    case NSTexture::EType::EType_SPECULAR: return L"Specular";
-    case NSTexture::EType::EType_AMBIENT: return L"Ambient";
-    case NSTexture::EType::EType_EMISSIVE: return L"Emissive";
-    case NSTexture::EType::EType_HEIGHT: return L"Height";
-    case NSTexture::EType::EType_NORMALS: return L"Normals";
-    case NSTexture::EType::EType_SHININESS: return L"Shininess";
-    case NSTexture::EType::EType_OPACITY: return L"Opacity";
-    case NSTexture::EType::EType_DISPLACEMENT: return L"Displacement";
-    case NSTexture::EType::EType_LIGHTMAP: return L"Lightmap";
-    case NSTexture::EType::EType_REFLECTION: return L"Reflection";
-    case NSTexture::EType::EType_BASE_COLOR: return L"Base Color";
-    case NSTexture::EType::EType_NORMAL_CAMERA: return L"Normal Camera";
-    case NSTexture::EType::EType_EMISSION_COLOR: return L"Emission Color";
-    case NSTexture::EType::EType_METALNESS: return L"Metalness";
-    case NSTexture::EType::EType_DIFFUSE_ROUGHNESS: return L"Diffuse Roughness";
-    case NSTexture::EType::EType_AMBIENT_OCCLUSION: return L"Ambient Occlusion";
-    case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS: return L"GLTF Metallic Roughness";
-    default: return L"Unknown";
-    }
-}
-DXGI_FORMAT Material::FormatTOtype(NSTexture::EType tType)
-{
-    switch (tType)
-    {
-    case NSTexture::EType::EType_DIFFUSE:
-    case NSTexture::EType::EType_BASE_COLOR:
-    case NSTexture::EType::EType_SPECULAR:
-    case NSTexture::EType::EType_AMBIENT:
-    case NSTexture::EType::EType_EMISSIVE:
-    case NSTexture::EType::EType_EMISSION_COLOR:
-    case NSTexture::EType::EType_MAYA_BASE:
-    case NSTexture::EType::EType_MAYA_SPECULAR_COLOR:
-        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-
-    case NSTexture::EType::EType_NORMALS:
-    case NSTexture::EType::EType_NORMAL_CAMERA:
-    case NSTexture::EType::EType_HEIGHT:
-    case NSTexture::EType::EType_DISPLACEMENT:
-    case NSTexture::EType::EType_METALNESS:
-    case NSTexture::EType::EType_DIFFUSE_ROUGHNESS:
-    case NSTexture::EType::EType_AMBIENT_OCCLUSION:
-    case NSTexture::EType::EType_SHININESS:
-    case NSTexture::EType::EType_OPACITY:
-    case NSTexture::EType::EType_LIGHTMAP:
-    case NSTexture::EType::EType_REFLECTION:
-    case NSTexture::EType::EType_SHEEN:
-    case NSTexture::EType::EType_CLEARCOAT:
-    case NSTexture::EType::EType_TRANSMISSION:
-    case NSTexture::EType::EType_MAYA_SPECULAR:
-    case NSTexture::EType::EType_MAYA_SPECULAR_ROUGHNESS:
-    case NSTexture::EType::EType_ANISOTROPY:
-    case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS:
-        return DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    case NSTexture::EType::EType_UNKNOWN:
-    case NSTexture::EType::EType_NONE:
-
-    default:
-        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-    }
 }

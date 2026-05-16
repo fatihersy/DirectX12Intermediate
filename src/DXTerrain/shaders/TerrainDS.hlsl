@@ -1,12 +1,22 @@
-struct FrameConstants
-{
-    float4x4 viewMatrix;
-    float4x4 projectionMatrix;
-    float4 lightDir;
-    float4 lightColor;
-    float3 camPos;
-    uint _padding0;
-};
+#ifndef DEPTH_PREPASS
+    struct FrameConstants
+    {
+        float4x4 viewMatrix;
+        float4x4 projectionMatrix;
+        float4 lightDir;
+        float4 lightColor;
+        float3 camPos;
+        uint PADDING_0;
+    };
+#else
+    struct FrameConstants
+    {
+        float4x4 viewMatrix;
+        float4x4 projectionMatrix;
+        float3 camPos;
+        uint _padding0;
+    };
+#endif
 
 struct TerrainConstants
 {
@@ -17,14 +27,17 @@ struct TerrainConstants
     float textureTilingFactor;
     float2 chunkUVOffset;
     float2 chunkUVScale;
-    uint4 textureIndices0;
-    uint4 textureIndices1;
+    uint heightmapSrvIndex;
+    uint3 PADDING_0;
+    uint4 splatSrvIndices;
 };
 
 ConstantBuffer<FrameConstants> frameCB : register(b0);
 ConstantBuffer<TerrainConstants> terrainCB : register(b1);
 
-SamplerState linearWrapSampler : register(s0);
+#ifndef DEPTH_PREPASS
+    SamplerState linearWrapSampler : register(s0);
+#endif
 SamplerState linearClampSampler : register(s1);
 
 struct HSOutput
@@ -42,10 +55,13 @@ struct HSPatchConstants
 struct DSOutput
 {
     float4 position : SV_POSITION;
-    float3 worldPos : WORLD_POSITION;
-    float3 normal : NORMAL;
-    float2 uv : TEXCOORD0;
-    float2 hmUV : TEXCOORD1;
+
+    #ifndef DEPTH_PREPASS
+        float3 worldPos : WORLD_POSITION;
+        float3 normal : NORMAL;
+        float2 uv : TEXCOORD0;
+        float2 hmUV : TEXCOORD1;
+    #endif
 };
 
 float SampleHeight(Texture2D<float> heightmap, float2 uv)
@@ -54,11 +70,7 @@ float SampleHeight(Texture2D<float> heightmap, float2 uv)
 }
 
 [domain("quad")]
-DSOutput DS_Terrain(
-    HSPatchConstants patchConstants,
-    float2 domainUV : SV_DomainLocation,
-    const OutputPatch<HSOutput, 4> patch
-)
+DSOutput DS_Terrain(HSPatchConstants patchConstants, float2 domainUV : SV_DomainLocation, const OutputPatch<HSOutput, 4> patch)
 {
     DSOutput output;
 
@@ -70,35 +82,40 @@ DSOutput DS_Terrain(
     float2 uvTop    = lerp(patch[3].uv, patch[2].uv, domainUV.x);
     float2 uv       = lerp(uvBottom, uvTop, domainUV.y);
 
-    Texture2D<float> heightmap = ResourceDescriptorHeap[terrainCB.textureIndices0.x];
+    Texture2D<float> heightmap = ResourceDescriptorHeap[terrainCB.heightmapSrvIndex];
 
-    float2 hmUV = uv; // Vertex UV is already full heightmap UV.
+    float2 hmUV = uv;
     worldPos.y = SampleHeight(heightmap, hmUV);
 
-    uint hmWidth;
-    uint hmHeight;
-    heightmap.GetDimensions(hmWidth, hmHeight);
+    #ifndef DEPTH_PREPASS
+        uint hmWidth;
+        uint hmHeight;
+        heightmap.GetDimensions(hmWidth, hmHeight);
 
-    float2 texelUV = 1.0f / float2(max(hmWidth - 1u, 1u), max(hmHeight - 1u, 1u));
+        float2 texelUV = 1.0f / float2(max(hmWidth - 1u, 1u), max(hmHeight - 1u, 1u));
 
-    float hL = SampleHeight(heightmap, hmUV + float2(-texelUV.x, 0.0f));
-    float hR = SampleHeight(heightmap, hmUV + float2( texelUV.x, 0.0f));
-    float hD = SampleHeight(heightmap, hmUV + float2(0.0f, -texelUV.y));
-    float hU = SampleHeight(heightmap, hmUV + float2(0.0f,  texelUV.y));
+        float hL = SampleHeight(heightmap, hmUV + float2(-texelUV.x, 0.0f));
+        float hR = SampleHeight(heightmap, hmUV + float2( texelUV.x, 0.0f));
+        float hD = SampleHeight(heightmap, hmUV + float2(0.0f, -texelUV.y));
+        float hU = SampleHeight(heightmap, hmUV + float2(0.0f,  texelUV.y));
 
-    float3 normal = normalize(float3(
-        hL - hR,
-        2.0f * terrainCB.worldTexelSpacing,
-        hD - hU
-    ));
+        float3 normal = normalize(float3(
+            hL - hR,
+            2.0f * terrainCB.worldTexelSpacing,
+            hD - hU
+        ));
+    #endif
 
     float4 viewPos = mul(frameCB.viewMatrix, float4(worldPos, 1.0f));
 
     output.position = mul(frameCB.projectionMatrix, viewPos);
-    output.worldPos = worldPos;
-    output.normal = normal;
-    output.uv = uv;
-    output.hmUV = hmUV;
+
+    #ifndef DEPTH_PREPASS
+        output.worldPos = worldPos;
+        output.normal = normal;
+        output.uv = uv;
+        output.hmUV = hmUV;
+    #endif
 
     return output;
 }

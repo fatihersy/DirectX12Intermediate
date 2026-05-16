@@ -1,12 +1,22 @@
-struct FrameConstants
-{
-    float4x4 viewMatrix;
-    float4x4 projectionMatrix;
-    float4 lightDir;
-    float4 lightColor;
-    float3 camPos;
-    uint _padding0;
-};
+#ifndef DEPTH_PREPASS
+    struct FrameConstants
+    {
+        float4x4 viewMatrix;
+        float4x4 projectionMatrix;
+        float4 lightDir;
+        float4 lightColor;
+        float3 camPos;
+        uint PADDING_0;
+    };
+#else
+    struct FrameConstants
+    {
+        float4x4 viewMatrix;
+        float4x4 projectionMatrix;
+        float3 camPos;
+        uint _padding0;
+    };
+#endif
 
 struct TerrainConstants
 {
@@ -17,12 +27,9 @@ struct TerrainConstants
     float textureTilingFactor;
     float2 chunkUVOffset;
     float2 chunkUVScale;
-
-    // Matches C++ packing:
-    // x = heightmapIndex, yzw = splatIndices[0..2]
-    uint4 textureIndices0;
-    // x = splatIndices[3], yzw = padding
-    uint4 textureIndices1;
+    uint heightmapSrvIndex;
+    uint3 PADDING_0;
+    uint4 splatSrvIndices;
 };
 
 ConstantBuffer<FrameConstants> frameCB : register(b0);

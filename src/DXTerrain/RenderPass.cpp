@@ -145,6 +145,15 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
     Scene& scene = static_cast<Scene&>(_scene);
 
     m_pipeline.Bind(cmdList);
+    cmdList.IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    UINT width = IApp::GetInstance()->im_width;
+    UINT height = IApp::GetInstance()->im_height;
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
+    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
+
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
 
     NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
     {
@@ -159,14 +168,6 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
         XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
-
-    UINT width = IApp::GetInstance()->im_width;
-    UINT height = IApp::GetInstance()->im_height;
-    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
-    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
-
-    cmdList.RSSetViewports(1, &viewport);
-    cmdList.RSSetScissorRects(1, &scissor);
 
     auto brdfLUTsrv = blackboard.GetOpt<NSDescriptor::Handle>(NSRenderer::kEnvCubemap_brdfLUTsrv);
     ASSERT(brdfLUTsrv.has_value());
@@ -299,7 +300,7 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
 
         CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
         dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL; // DepthFunc LESS_EQUAL to GREATER_EQUAL
+        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
 
         CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
 
@@ -509,6 +510,7 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
     }
 
     m_graphics.Bind(cmdList);
+    cmdList.IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY::D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_ATMOSPHERE, atmosCBAC.gpuAddr);
     cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_TABLE_SRV, rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE).gpuAddr);
@@ -916,8 +918,10 @@ void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackb
     }
 }
 void EnvironmentCubemapPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx){}
-void EnvironmentCubemapPass::Capture(Model& inModel, Scene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
+    Scene& scene = static_cast<Scene&>(_scene);
+
     auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     std::vector<NSRenderer::Model>& regModels = optRegModels->get();
     NSRenderer::Model& regInModel = regModels[inModel.m_registerKey.index];
@@ -1171,7 +1175,7 @@ void EnvironmentCubemapPass::GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSRend
     }
 }
 
-TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx)
+TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx) : m_device(device)
 {
     MakeRootSignature(device, L"TerrainPass::m_rootSignature", m_rootSignature, [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
     {
@@ -1228,8 +1232,8 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
 
     CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
     dsDesc.DepthEnable = TRUE;
-    dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL; // DepthFunc LESS_EQUAL to GREATER_EQUAL
+    dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
 
     CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
 
@@ -1293,14 +1297,182 @@ TerrainPass::~TerrainPass()
 
 };
 
-TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory)
 {
+    auto LoadTexture = [this, &wicFactory](ETexture texId, std::wstring_view name, std::wstring_view filename, NSTexture::EType type)
+    {
+        ASSERT(static_cast<size_t>(texId) < static_cast<size_t>(ETexture::MAX));
+
+        NSTexture::Texture& tex = m_textures[static_cast<size_t>(texId)];
+        tex.textureType = type;
+        tex.format = NSTexture::TypeToFormat(tex.textureType);
+
+        ComPtr<IWICBitmapDecoder> decoder;
+        std::wstring filepath(IApp::GetInstance()->im_assetsPath.generic_wstring().append(L"/").append(filename));
+        ThrowIfFailed(wicFactory->CreateDecoderFromFilename(filepath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder));
+
+        ComPtr<IWICBitmapFrameDecode> frame;
+        ThrowIfFailed(decoder->GetFrame(0, &frame));
+        ThrowIfFailed(frame->GetSize(&tex.width, &tex.height));
+
+        const UINT bpp = 4;
+        const UINT alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
+        const UINT rowPitch = (static_cast<UINT64>(tex.width) * bpp + alignment - 1) & ~(alignment - 1);
+        UINT uploadSize = rowPitch * tex.height;
+        tex.RowPitch = rowPitch;
+
+        ComPtr<IWICFormatConverter> converter;
+        ThrowIfFailed(wicFactory->CreateFormatConverter(&converter));
+
+        ThrowIfFailed(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.f, WICBitmapPaletteTypeCustom));
+
+        D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
+        D3D12_HEAP_PROPERTIES uploadHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &uploadHeapProp,
+            D3D12_HEAP_FLAG_NONE,
+            &uploadBufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&tex.uploadBuffer)
+        ));
+
+        void* pMappedData = nullptr;
+        ThrowIfFailed(tex.uploadBuffer->Map(0, nullptr, &pMappedData));
+
+        ThrowIfFailed(converter->CopyPixels(nullptr, rowPitch, uploadSize, reinterpret_cast<BYTE*>(pMappedData)));
+
+        tex.uploadBuffer->Unmap(0, nullptr);
+
+        if (tex.uploadBuffer and tex.width > 0 and tex.height > 0)
+        {
+            D3D12_RESOURCE_DESC texDesc{};
+            texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            texDesc.Width = tex.width;
+            texDesc.Height = tex.height;
+            texDesc.DepthOrArraySize = 1;
+            texDesc.MipLevels = 1;
+            texDesc.Format = tex.format;
+            texDesc.SampleDesc.Count = 1;
+            texDesc.SampleDesc.Quality = 0;
+            texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            D3D12_HEAP_PROPERTIES defaultHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &defaultHeapProp,
+                D3D12_HEAP_FLAG_NONE,
+                &texDesc,
+                D3D12_RESOURCE_STATE_COMMON,
+                nullptr,
+                IID_PPV_ARGS(&tex.defaultBuffer)
+            ));
+
+            std::wstring_view texTypeStr(TextureTypeToWString(tex.textureType));
+
+            std::wstring defbufname(NSTool::wformat(L"%s::%s::%s::defaultBuffer", L"TerrainPass", name, texTypeStr));
+            tex.defaultBuffer->SetName(defbufname.c_str());
+
+            std::wstring uplbufname(NSTool::wformat(L"%s::%s::%s::uploadBuffer", L"TerrainPass", name, texTypeStr));
+            tex.uploadBuffer->SetName(uplbufname.c_str());
+        }
+    };
+
+    LoadTexture(ETexture::GRASS, L"GrassTex", L"grass.jpg", NSTexture::EType::EType_DIFFUSE);
+    LoadTexture(ETexture::ROCK, L"RockTex", L"rock.jpg", NSTexture::EType::EType_DIFFUSE);
+    LoadTexture(ETexture::SNOW, L"SnowTex", L"snow.jpg", NSTexture::EType::EType_DIFFUSE);
+    LoadTexture(ETexture::DIRT, L"DirtTex", L"dirt.jpg", NSTexture::EType::EType_DIFFUSE);
+
+    {
+        std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
+        {
+            ASSERT(tex.defaultBuffer and tex.uploadBuffer);
+        });
+
+        {
+            std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
+            barriers.reserve(4);
+
+            for (NSTexture::Texture& tex : m_textures)
+            {
+                barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                    tex.defaultBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COMMON,
+                    D3D12_RESOURCE_STATE_COPY_DEST
+                ));
+            }
+
+            cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        }
+
+        m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(ETexture::MAX));
+
+        uint32_t texIndex{};
+        for (NSTexture::Texture& tex : m_textures)
+        {
+            m_textures[texIndex].srvOffset = rendererCtx.offsetSRV(m_srvHandle, texIndex);
+
+            D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+            srcLoc.pResource = tex.uploadBuffer.Get();
+            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            srcLoc.PlacedFootprint.Offset = 0;
+            srcLoc.PlacedFootprint.Footprint.Format = tex.format;
+            srcLoc.PlacedFootprint.Footprint.Width = tex.width;
+            srcLoc.PlacedFootprint.Footprint.Height = tex.height;
+            srcLoc.PlacedFootprint.Footprint.Depth = 1;
+            srcLoc.PlacedFootprint.Footprint.RowPitch = tex.RowPitch;
+
+            D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+            dstLoc.pResource = tex.defaultBuffer.Get();
+            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex = 0;
+
+            cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MipLevels = 1;
+            srvDesc.Format = tex.format;
+
+            m_device->CreateShaderResourceView(tex.defaultBuffer.Get(), &srvDesc, tex.srvOffset.cpuAddr);
+            texIndex++;
+        }
+
+        {
+            std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
+            barriers.reserve(m_textures.size());
+
+            for (NSTexture::Texture& tex : m_textures)
+            {
+                barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+                    tex.defaultBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+                ));
+            }
+
+            cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+        }
+    }
 
     return *this;
 };
 void TerrainPass::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
+    rendererCtx.freeSRVStatic(m_srvHandle);
+    m_srvHandle = {};
 
+    std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
+    {
+        tex = {};
+    });
+
+    m_rootSignature.Reset();
+    m_solidPipeline.Reset();
+    m_wireframePipeline.Reset();
 };
 
 void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
@@ -1378,11 +1550,11 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
             cbuffer.textureTilingFactor = 64.f;
             cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
             cbuffer.chunkUVScale = regChunk.chunkUVScale;
-            cbuffer.heightmapIndex = heightmapSrvIndex;
-            cbuffer.splatIndices[0] = rendererCtx.fallbackSRV.get().index;
-            cbuffer.splatIndices[1] = rendererCtx.fallbackSRV.get().index;
-            cbuffer.splatIndices[2] = rendererCtx.fallbackSRV.get().index;
-            cbuffer.splatIndices[3] = rendererCtx.fallbackSRV.get().index;
+            cbuffer.heightmapSrvIndex = heightmapSrvIndex;
+            cbuffer.splatSrvIndices[0] = m_textures[0].srvOffset.index;
+            cbuffer.splatSrvIndices[1] = m_textures[1].srvOffset.index;
+            cbuffer.splatSrvIndices[2] = m_textures[2].srvOffset.index;
+            cbuffer.splatSrvIndices[3] = m_textures[3].srvOffset.index;
         };
 
         cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
@@ -1813,14 +1985,40 @@ void DebugPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx render
 }
 
 ZPrePass::ZPrePass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx)
-    : m_modelDepthpipeline(GraphicsPipeline(device, L"ZPrePass::m_modelDepthpipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+    : m_modelDepthPipeline(GraphicsPipeline(device, L"ZPrePass::m_modelDepthpipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
     {
         CD3DX12_ROOT_PARAMETER1 rp[2]{};
-        rp[IDX_ROOT_CBV_FRAME].InitAsConstantBufferView(IDX_CBV_FRAME, 0u);
-        rp[IDX_ROOT_CBV_MESH].InitAsConstantBufferView(IDX_CBV_MESH, 0u);
+        rp[IDX_MODEL_ROOT_CBV_FRAME].InitAsConstantBufferView(IDX_MODEL_CBV_FRAME, 0u);
+        rp[IDX_MODEL_ROOT_CBV_MESH].InitAsConstantBufferView(IDX_MODEL_CBV_MESH, 0u);
 
         CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC desc{};
         desc.Init_1_1(_countof(rp), rp, 0u, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        return D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
+    })),
+    m_terrDepthPipeline(TessellationPipeline(device, L"ZPrePass::m_terrDepthPipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+    {
+        CD3DX12_ROOT_PARAMETER1 rp[2]{};
+        rp[IDX_TERRAIN_ROOT_CBV_FRAME].InitAsConstantBufferView(IDX_TERRAIN_CBV_FRAME, 0u);
+        rp[IDX_TERRAIN_ROOT_CBV_TERRAIN].InitAsConstantBufferView(IDX_TERRAIN_CBV_TERRAIN, 0u);
+
+        D3D12_STATIC_SAMPLER_DESC sampler{};
+        sampler.ShaderRegister = 1u;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.MipLODBias = 0.f;
+        sampler.MaxAnisotropy = 0;
+        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+        sampler.MinLOD = 0.f;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        sampler.RegisterSpace = 0;
+
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC desc{};
+        desc.Init_1_1(_countof(rp), rp, 1u, &sampler, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED);
 
         return D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
     }))
@@ -1830,15 +2028,11 @@ ZPrePass::~ZPrePass()
 
 ZPrePass& ZPrePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
-    // Pipeline
+    // Model Pipeline
     {
         D3D12_INPUT_ELEMENT_DESC inputElements[] =
         {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, position), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, normal),   D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TANGENT",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, tangent),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"BITANGENT",0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, bitangent),D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(NSModel::Vertex, texCoord), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSModel::Vertex, position), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
         };
 
         CD3DX12_RASTERIZER_DESC rasterDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
@@ -1858,20 +2052,81 @@ ZPrePass& ZPrePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, 
         desc.SampleDesc.Count = 1;
         desc.SampleMask = UINT_MAX;
 
-        m_modelDepthpipeline.Init(
+        m_modelDepthPipeline.Init(
             desc,
             rasterDesc,
             dsDesc,
             blendDesc,
             {
-                L"ZPrePass.hlsl",
+                L"GeometryPassVS.hlsl",
                 {
                     L"-E", L"mainVS",
                     L"-T", L"vs_6_0",
                     L"-Zi",
-                    L"-Od"
+                    L"-Od",
+                    L"-D", L"DEPTH_PREPASS=1"
                 }
             }
+        );
+    }
+
+    // Terrain Pipeline
+    {
+        D3D12_INPUT_ELEMENT_DESC inputElements[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSTerrain::Vertex, position),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(NSTerrain::Vertex, texCoord),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+        };
+
+        CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
+        rasterDesc.FillMode = D3D12_FILL_MODE_SOLID;
+        rasterDesc.CullMode = D3D12_CULL_MODE_BACK;
+
+        CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
+        dsDesc.DepthEnable = TRUE;
+        dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+
+        CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
+
+        TESSELLATION_PIPELINE_STATE_DESC desc{};
+        desc.SampleMask = UINT_MAX;
+        desc.InputLayout = { inputElements, _countof(inputElements) };
+        desc.NumRenderTargets = 0;
+        desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        desc.SampleDesc.Count = 1;
+
+        ShaderMetadata vertexMetadata = { L"TerrainVS.hlsl",
+            {
+                L"-E", L"VS_Terrain",
+                L"-T", L"vs_6_6",
+                L"-Zi",
+                L"-Od",
+                L"-D", L"DEPTH_PREPASS=1"
+            },
+        };
+        ShaderMetadata hullMetadata = { L"TerrainHS.hlsl",
+            {
+                L"-E", L"HS_Terrain",
+                L"-T", L"hs_6_6",
+                L"-Zi",
+                L"-Od",
+                L"-D", L"DEPTH_PREPASS=1"
+            },
+        };
+        ShaderMetadata domainMetadata = { L"TerrainDS.hlsl",
+            {
+                L"-E", L"DS_Terrain",
+                L"-T", L"ds_6_6",
+                L"-Zi",
+                L"-Od",
+                L"-D", L"DEPTH_PREPASS=1"
+            },
+        };
+        this->m_terrDepthPipeline.Init(
+            desc,
+            rasterDesc, dsDesc, blendDesc,
+            vertexMetadata, hullMetadata, domainMetadata
         );
     }
 
@@ -1879,37 +2134,13 @@ ZPrePass& ZPrePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, 
 }
 void ZPrePass::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
-    this->m_modelDepthpipeline.Reset();
+    this->m_modelDepthPipeline.Reset();
+    this->m_terrDepthPipeline.Reset();
 }
 
 void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
-
-    Scene& scene = static_cast<Scene&>(_scene);
-
-    m_modelDepthpipeline.Bind(cmdList);
-
-    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
-    {
-        using namespace DirectX;
-
-        FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
-
-        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
-        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
-        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
-        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
-        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
-    }
-    cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
-
-    auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    ASSERT(optRegModels.has_value());
-
-    std::vector<NSRenderer::Model>& regModels = optRegModels->get();
-
-    std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(scene.GetMainCamera(), {});
 
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
@@ -1919,39 +2150,116 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
     cmdList.RSSetViewports(1, &viewport);
     cmdList.RSSetScissorRects(1, &scissor);
 
-    for (NSModel::SceneModelKey& key : modelsCulled)
+    Scene& scene = static_cast<Scene&>(_scene);
+
+    NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstantsZPrepass));
     {
-        ASSERT(key.index < scene.m_models.size());
-        Model& sceneModel = scene.m_models[key.index];
+        using namespace DirectX;
 
-        ASSERT(sceneModel.m_registerKey.index < regModels.size());
+        FrameConstantsZPrepass& frameCB = frameCBAC.As<FrameConstantsZPrepass>();
 
-        NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
+        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
+        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
+        frameCB.PADDING_0 = 0u;
+    }
 
-        ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
+    // Terrain Pass
+    {
+        m_terrDepthPipeline.Bind(cmdList);
+        cmdList.IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY::D3D_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST);
+        cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
-        sceneModel.Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+        auto optTerrainRef = blackboard.GetOpt
+            <std::reference_wrapper
+            <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
+        );
+        ASSERT(optTerrainRef.has_value() and "TerrainPass must have terrain access through blackboard");
+
+        std::vector<NSTerrain::ChunkKey> visibleChunkkeys = scene.CullTerrain(scene.m_camera);
+        const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
+        const std::vector<NSTerrain::TerrainChunk>& regChunks = terrain.GetChunks();
+        const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
+
+        const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
+        const float worldTexelSpacing = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
+        const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
+
+        for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
         {
-            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
-            MeshConstants& meshCB = allocCtx.As<MeshConstants>();
+            ASSERT(sceChunks.size() > chunkKey.index);
+            const NSScene::TerrainChunk& sceChunk = sceChunks[chunkKey.index];
 
-            DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
-            DirectX::XMVECTOR det;
-            DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
-            DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
+            ASSERT(regChunks.size() > sceChunk.key.index);
+            const NSTerrain::TerrainChunk& regChunk = regChunks[sceChunk.key.index];
 
-            meshCB.baseColor = mesh.material.m_baseColor;
-            meshCB.metallic = mesh.material.m_metallic;
-            meshCB.roughness = mesh.material.m_roughness;
-            meshCB.opacity = mesh.material.m_opacity;
-            meshCB.textureFlags = mesh.material.GetFlags();
+            ASSERT(regChunk.key.gridX == sceChunk.key.gridX and regChunk.key.gridZ == sceChunk.key.gridZ);
 
-            cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
+            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
+            {
+                TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
+                DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
+                cbuffer.maxHeight = desc.maxHeight;
+                cbuffer.worldTexelSpacing = worldTexelSpacing;
+                cbuffer.tessFactorScale = 1.f;
+                cbuffer.textureTilingFactor = 64.f;
+                cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
+                cbuffer.chunkUVScale = regChunk.chunkUVScale;
+                cbuffer.heightmapSrvIndex = heightmapSrvIndex;
+                cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.get().index;
+                cbuffer.splatSrvIndices[1] = rendererCtx.fallbackSRV.get().index;
+                cbuffer.splatSrvIndices[2] = rendererCtx.fallbackSRV.get().index;
+                cbuffer.splatSrvIndices[3] = rendererCtx.fallbackSRV.get().index;
+            };
 
-            cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-            cmdList.IASetIndexBuffer(&mesh.indexBufferView);
-            cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
-        });
+            cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
+
+            cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
+            cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
+            cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
+        }
+    }
+
+    // Model Pass
+    {
+        m_modelDepthPipeline.Bind(cmdList);
+        cmdList.IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmdList.SetGraphicsRootConstantBufferView(IDX_MODEL_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
+
+        auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        ASSERT(optRegModels.has_value());
+
+        std::vector<NSRenderer::Model>& regModels = optRegModels->get();
+
+        std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(scene.GetMainCamera(), {});
+
+        for (NSModel::SceneModelKey& key : modelsCulled)
+        {
+            ASSERT(key.index < scene.m_models.size());
+            Model& sceneModel = scene.m_models[key.index];
+
+            if (not sceneModel.TestFlag(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
+
+            ASSERT(sceneModel.m_registerKey.index < regModels.size());
+
+            NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
+
+            ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
+
+            sceneModel.Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+            {
+                NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstantsZPrepass));
+                MeshConstantsZPrepass& meshCB = allocCtx.As<MeshConstantsZPrepass>();
+
+                DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
+
+                cmdList.SetGraphicsRootConstantBufferView(IDX_MODEL_ROOT_CBV_MESH, allocCtx.gpuAddr);
+
+                cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+                cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+                cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+            });
+        }
     }
 }
 void ZPrePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)

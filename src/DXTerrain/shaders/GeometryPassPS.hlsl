@@ -2,7 +2,7 @@
 // Supports normal mapping, texture flags for conditional sampling,
 // and a single directional light. Outputs color with alpha for blending.
 
-struct PSInput
+struct VSOutput
 {
     float4 position : SV_POSITION; // Clip-space position (post-projection).
     float3 worldPos : WORLD_POSITION; // World-space position for view/light calcs.
@@ -139,7 +139,7 @@ float3 SampleNormalMap(float2 uv, float3x3 TBN)
 // ===========================
 // MAIN PIXEL SHADER
 // ===========================
-float4 mainPS(PSInput input) : SV_TARGET
+float4 mainPS(VSOutput input) : SV_TARGET
 {
     // === BASE COLOR (ALBEDO) ===
     float4 albedo = meshCB.baseColor; // Default to constant color.

@@ -17,8 +17,9 @@ struct TerrainConstants
     float textureTilingFactor;
     float2 chunkUVOffset;
     float2 chunkUVScale;
-    uint4 textureIndices0;
-    uint4 textureIndices1;
+    uint heightmapSrvIndex;
+    uint3 PADDING_0;
+    uint4 splatSrvIndices;
 };
 
 ConstantBuffer<FrameConstants> frameCB : register(b0);
@@ -35,14 +36,6 @@ struct PSInput
     float2 uv : TEXCOORD0;
     float2 hmUV : TEXCOORD1;
 };
-
-uint GetSplatIndex(uint i)
-{
-    if (i == 0) return terrainCB.textureIndices0.y;
-    if (i == 1) return terrainCB.textureIndices0.z;
-    if (i == 2) return terrainCB.textureIndices0.w;
-    return terrainCB.textureIndices1.x;
-}
 
 float Hash21(float2 p)
 {
@@ -64,13 +57,13 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
     float midland = smoothstep(0.22f, 0.38f, height01) * (1.0f - smoothstep(0.52f, 0.74f, height01));
     float highland = smoothstep(0.56f, 0.82f, height01);
 
-    float wSand  = lowland * flatness;
+    float wDirt  = lowland * flatness;
     float wGrass = midland * flatness;
     float wRock  = steepness * (1.0f - highland * 0.45f);
     float wSnow  = highland * (1.0f - smoothstep(0.35f, 0.72f, slope));
 
-    float weightSum = max(wSand + wGrass + wRock + wSnow, 0.001f);
-    wSand /= weightSum;
+    float weightSum = max(wDirt + wGrass + wRock + wSnow, 0.001f);
+    wDirt /= weightSum;
     wGrass /= weightSum;
     wRock /= weightSum;
     wSnow /= weightSum;
@@ -79,25 +72,25 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
     float2 tiledUV = input.uv * tiling;
     float2 macroUV = input.uv * 18.0f;
 
-    Texture2D<float4> splat0 = ResourceDescriptorHeap[GetSplatIndex(0)];
-    Texture2D<float4> splat1 = ResourceDescriptorHeap[GetSplatIndex(1)];
-    Texture2D<float4> splat2 = ResourceDescriptorHeap[GetSplatIndex(2)];
-    Texture2D<float4> splat3 = ResourceDescriptorHeap[GetSplatIndex(3)];
+    Texture2D<float4> grassMap = ResourceDescriptorHeap[terrainCB.splatSrvIndices.x];
+    Texture2D<float4> rockMap  = ResourceDescriptorHeap[terrainCB.splatSrvIndices.y];
+    Texture2D<float4> snowMap  = ResourceDescriptorHeap[terrainCB.splatSrvIndices.z];
+    Texture2D<float4> dirtMap  = ResourceDescriptorHeap[terrainCB.splatSrvIndices.w];
 
-    float3 sandTex  = splat3.Sample(linearWrapSampler, tiledUV * 0.65f).rgb;
-    float3 grassTex = splat0.Sample(linearWrapSampler, tiledUV).rgb;
-    float3 rockTex  = splat1.Sample(linearWrapSampler, tiledUV * 0.85f).rgb;
-    float3 snowTex  = splat2.Sample(linearWrapSampler, tiledUV * 0.55f).rgb;
+    float3 grassTex = grassMap.Sample(linearWrapSampler, tiledUV).rgb;
+    float3 rockTex  = rockMap.Sample(linearWrapSampler, tiledUV * 0.85f).rgb;
+    float3 snowTex  = snowMap.Sample(linearWrapSampler, tiledUV * 0.55f).rgb;
+    float3 dirtTex  = dirtMap.Sample(linearWrapSampler, tiledUV * 0.65f).rgb;
 
     float macro = lerp(0.82f, 1.16f, Hash21(floor(macroUV)));
 
-    float3 sandTint  = float3(0.68f, 0.58f, 0.38f);
     float3 grassTint = float3(0.18f, 0.40f, 0.15f);
     float3 rockTint  = float3(0.38f, 0.37f, 0.35f);
     float3 snowTint  = float3(0.82f, 0.87f, 0.90f);
+    float3 dirtTint  = float3(0.68f, 0.58f, 0.38f);
 
     float3 albedo =
-        wSand  * sandTex  * sandTint +
+        wDirt  * dirtTex  * dirtTint +
         wGrass * grassTex * grassTint +
         wRock  * rockTex  * rockTint +
         wSnow  * snowTex  * snowTint;

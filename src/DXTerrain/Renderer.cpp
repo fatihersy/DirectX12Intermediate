@@ -80,12 +80,13 @@ public:
 private:
     std::map<std::string, std::vector<D3D12_RESOURCE_BARRIER>> m_entries;
 };
-void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height)
+void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, HWND wnd, UINT width, UINT height)
 {
     m_factory = factory;
     m_device = device;
     m_width = width;
     m_height = height;
+    m_wicFactory = wicFactory;
 
     if (FAILED(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue1)))) return;
 
@@ -324,7 +325,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UI
             .SetIsEnabled(true);
 
         AddPass<NSRenderPass::TerrainPass>(device, m_blackboard, GetCtx())
-            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList), m_wicFactory)
             .SetIsEnabled(true);
 
         AddPass<NSRenderPass::DebugPass>(device, m_blackboard, GetCtx())
@@ -347,8 +348,11 @@ void Renderer::OnDestroy()
     m_fallbackTexture.defaultBuffer.Reset();
     m_fallbackTexture.uploadBuffer.Reset();
 
-    for (auto& pass : m_passes) pass->OnDestroy(rendererCtx);
-    m_passes.clear();
+    for (auto& pass : m_passes)
+    {
+        pass->OnDestroy(rendererCtx);
+        pass = {};
+    }
 
     for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
     {
@@ -472,8 +476,6 @@ void Renderer::BeginFrame()
         const_cast<ID3D12DescriptorHeap*>(m_srvHeap.Raw())
     };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-
-    m_commandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;

@@ -30,7 +30,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
         .title = title
     });
 
-    im_assetsPath = std::filesystem::current_path().generic_wstring().append(L"\\");
+    im_assetsPath = std::filesystem::current_path();
 
     WCHAR executablePath[512];
     GetExecutablePath(executablePath, _countof(executablePath));
@@ -148,7 +148,7 @@ void app::LoadPipeline()
         throw std::runtime_error("");
     }
 
-    m_renderer.Init(m_factory.Get(), m_device.Get(), plat.GetWindow(), im_width, im_height);
+    m_renderer.Init(m_factory.Get(), m_device.Get(), m_wicFactory.Get(), plat.GetWindow(), im_width, im_height);
 }
 void app::LoadAssets()
 {
@@ -456,6 +456,12 @@ void app::UpdateKeyBindings()
             move = DirectX::XMVector3Normalize(move);
             move = DirectX::XMVectorScale(move, m_scene.m_camera.camSpeed * static_cast<FLOAT>(m_timer.GetElapsedSeconds()));
             m_scene.m_camera.camEye = DirectX::XMVectorAdd(m_scene.m_camera.camEye, move);
+        }
+
+        if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::NumPad1))
+        {
+            NSRenderPass::IRenderPass& zPrepass = m_renderer.GetPass(NSRenderPass::RenderPassID::PASSID_Z);
+            zPrepass.SetIsEnabled(not zPrepass.IsEnabled());
         }
     }
 }

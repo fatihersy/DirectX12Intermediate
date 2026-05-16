@@ -16,7 +16,7 @@ public:
     Renderer() {}
     ~Renderer();
 
-    void Init(IDXGIFactory7* factory, ID3D12Device14* device, HWND wnd, UINT width, UINT height);
+    void Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, HWND wnd, UINT width, UINT height);
 
     void BeginFrame();
     void DrawScene(NSScene::IScene& scene);
@@ -30,9 +30,19 @@ public:
 
     void Execute(FnRendererExecutionBody Record);
 
-    template<typename T, typename... Args> requires std::derived_from<T, NSRenderPass::IRenderPass>
-    T& AddPass(Args&&... args) {
-        return static_cast<T&>(*m_passes.emplace_back(std::make_unique<T>(std::forward<Args>(args)...)));
+    template<typename T, typename... Args> requires NSRenderPass::IsRenderPass<T> and (T::ID < NSRenderPass::RenderPassID::PASSID_MAX)
+    T& AddPass(Args&&... args)
+    {
+        ASSERT(not m_passes[static_cast<size_t>(T::ID)] && "Render pass already exists");
+
+        m_passes[static_cast<size_t>(T::ID)] = std::move(std::make_unique<T>(std::forward<Args>(args)...));
+
+        return static_cast<T&>(*m_passes[static_cast<size_t>(T::ID)]);
+    }
+
+    NSRenderPass::IRenderPass& GetPass(NSRenderPass::RenderPassID id)
+    {
+        return *m_passes[static_cast<size_t>(id)];
     }
 
     NSRenderer::Model& GetRegisteredModel(NSModel::RegisterModelKey& key)
@@ -151,6 +161,7 @@ public:
 private:
     IDXGIFactory7* m_factory = nullptr;
     ID3D12Device14* m_device = nullptr;
+    IWICImagingFactory2* m_wicFactory = nullptr;
 
     ComPtr<IDXGISwapChain4> m_swapChain;
 
@@ -181,7 +192,10 @@ private:
 
     std::unique_ptr<NSBarrier::IBarrierBatch> m_barrierBatch;
 
-    std::vector<std::unique_ptr<NSRenderPass::IRenderPass>> m_passes;
+    std::array<
+        std::unique_ptr<NSRenderPass::IRenderPass>,
+        static_cast<size_t>(NSRenderPass::RenderPassID::PASSID_MAX)
+    > m_passes;
 
     std::unique_ptr<ShaderCompiler> m_shaderCompiler;
 

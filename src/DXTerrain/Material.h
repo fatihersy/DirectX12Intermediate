@@ -75,10 +75,6 @@ public:
     uint32_t GetFlags() const {
         return static_cast<uint32_t>(m_flags.to_ullong());
     }
-
-    static const char* TextureTypeToString(NSTexture::EType tType);
-    const wchar_t* TextureTypeToWString(NSTexture::EType tType);
-    static DXGI_FORMAT FormatTOtype(NSTexture::EType tType);
 private:
     IWICImagingFactory2* m_wicFactory = nullptr;
     std::bitset<32> m_flags{};

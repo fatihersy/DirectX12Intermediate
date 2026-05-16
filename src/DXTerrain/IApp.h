@@ -29,8 +29,8 @@ public:
 
     uint32_t im_nextId{};
     float im_aspectRatio{};
-    std::wstring im_executablePath;
-    std::wstring im_assetsPath;
+    std::filesystem::path im_executablePath;
+    std::filesystem::path im_assetsPath;
     StepTimer m_timer;
 
     bool isQuitting{};

@@ -59,7 +59,7 @@ inline void GetExecutablePath(_Out_writes_(pathSize) WCHAR* path, UINT pathSize)
     WCHAR* lastSlash = wcsrchr(path, L'\\');
     if (lastSlash)
     {
-        *(lastSlash + 1) = L'\0';
+        *(lastSlash) = L'\0';
     }
 }
 
