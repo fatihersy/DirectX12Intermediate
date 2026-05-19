@@ -150,7 +150,7 @@ TessellationPipeline&& TessellationPipeline::Init(
     ShaderMetadata pixelMetadata
 )
 {
-    ASSERT(vertexMetadata.fileName and hullMetadata.fileName and domainMetadata.fileName and "Missing required shaders");
+    ASSERT(vertexMetadata.fileName and hullMetadata.fileName and domainMetadata.fileName, "Missing required shaders");
 
     ComPtr<IDxcBlob> vertexShader;
     ComPtr<IDxcBlob> hullShader;

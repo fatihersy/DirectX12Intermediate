@@ -4,7 +4,7 @@
 Scene::Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, float timeOfDay) : m_device(device), m_wicFactory(wicFactory)
 {
     m_timeOfDay = timeOfDay;
-    m_lightDir = DirectX::XMVectorSet(0.f, -1.f, 0.f, 0.f);
+    m_lightDir = DirectX::XMVector3Normalize(DirectX::XMVectorSet(-0.45f, -0.78f, 0.44f, 0.f));
     m_lightColor = DirectX::XMVectorSet(0.9f, 0.9f, 0.9f, 1.0f);
     m_camera = NSScene::Camera({}, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
 }

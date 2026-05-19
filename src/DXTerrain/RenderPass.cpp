@@ -1370,7 +1370,7 @@ TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendere
                 IID_PPV_ARGS(&tex.defaultBuffer)
             ));
 
-            std::wstring_view texTypeStr(TextureTypeToWString(tex.textureType));
+            std::wstring_view texTypeStr(NSTexture::TextureTypeToWString(tex.textureType));
 
             std::wstring defbufname(NSTool::wformat(L"%s::%s::%s::defaultBuffer", L"TerrainPass", name, texTypeStr));
             tex.defaultBuffer->SetName(defbufname.c_str());
@@ -1384,6 +1384,7 @@ TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendere
     LoadTexture(ETexture::ROCK, L"RockTex", L"rock.jpg", NSTexture::EType::EType_DIFFUSE);
     LoadTexture(ETexture::SNOW, L"SnowTex", L"snow.jpg", NSTexture::EType::EType_DIFFUSE);
     LoadTexture(ETexture::DIRT, L"DirtTex", L"dirt.jpg", NSTexture::EType::EType_DIFFUSE);
+    LoadTexture(ETexture::TERRAIN_DIFFUSE, L"TerrainDiffuseTex", L"terrain_diffuse.png", NSTexture::EType::EType_DIFFUSE);
 
     {
         std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
@@ -1393,7 +1394,7 @@ TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendere
 
         {
             std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
-            barriers.reserve(4);
+            barriers.reserve(m_textures.size());
 
             for (NSTexture::Texture& tex : m_textures)
             {
@@ -1408,6 +1409,23 @@ TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendere
         }
 
         m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(ETexture::MAX));
+
+        std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> srcRange(static_cast<size_t>(ETexture::MAX), rendererCtx.fallbackSRV.get().cpuAddr);
+
+        auto destRange = ArraySequence<static_cast<size_t>(ETexture::MAX)>([&](auto I)
+        {
+            return rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(I)).cpuAddr;
+        });
+
+        m_device->CopyDescriptors(
+            destRange.size(),
+            destRange.data(),
+            nullptr,
+            srcRange.size(),
+            srcRange.data(),
+            nullptr,
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
+        );
 
         uint32_t texIndex{};
         for (NSTexture::Texture& tex : m_textures)
@@ -1481,12 +1499,14 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
     Scene& scene = static_cast<Scene&>(_scene);
 
+    if (not scene.m_terrain.isInitialized) return;
+
     auto optTerrainRef = blackboard.GetOpt
         <std::reference_wrapper
         <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
     );
 
-    ASSERT(optTerrainRef.has_value() and "TerrainPass must have terrain access through blackboard");
+    ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
 
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
@@ -1527,7 +1547,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
     const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
-    const float worldTexelSpacing = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
+    const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
+    const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.heightMapResolution - 1u);
     const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
     for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
@@ -1545,16 +1566,18 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
             TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
             DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
             cbuffer.maxHeight = desc.maxHeight;
-            cbuffer.worldTexelSpacing = worldTexelSpacing;
+            cbuffer.worldTexelSpacingX = worldTexelSpacingX;
+            cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
             cbuffer.tessFactorScale = 1.f;
             cbuffer.textureTilingFactor = 64.f;
             cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
             cbuffer.chunkUVScale = regChunk.chunkUVScale;
             cbuffer.heightmapSrvIndex = heightmapSrvIndex;
-            cbuffer.splatSrvIndices[0] = m_textures[0].srvOffset.index;
-            cbuffer.splatSrvIndices[1] = m_textures[1].srvOffset.index;
-            cbuffer.splatSrvIndices[2] = m_textures[2].srvOffset.index;
-            cbuffer.splatSrvIndices[3] = m_textures[3].srvOffset.index;
+            cbuffer.terrainDiffuseSrvIndex = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset.index;
+            cbuffer.splatSrvIndices[0] = m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset.index;
+            cbuffer.splatSrvIndices[1] = m_textures[static_cast<size_t>(ETexture::ROCK)].srvOffset.index;
+            cbuffer.splatSrvIndices[2] = m_textures[static_cast<size_t>(ETexture::SNOW)].srvOffset.index;
+            cbuffer.splatSrvIndices[3] = m_textures[static_cast<size_t>(ETexture::DIRT)].srvOffset.index;
         };
 
         cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
@@ -2174,7 +2197,7 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
             <std::reference_wrapper
             <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
         );
-        ASSERT(optTerrainRef.has_value() and "TerrainPass must have terrain access through blackboard");
+        ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
 
         std::vector<NSTerrain::ChunkKey> visibleChunkkeys = scene.CullTerrain(scene.m_camera);
         const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
@@ -2182,7 +2205,8 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
 
         const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
-        const float worldTexelSpacing = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
+        const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
+        const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.heightMapResolution - 1u);
         const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
         for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
@@ -2200,12 +2224,14 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                 TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
                 DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
                 cbuffer.maxHeight = desc.maxHeight;
-                cbuffer.worldTexelSpacing = worldTexelSpacing;
+                cbuffer.worldTexelSpacingX = worldTexelSpacingX;
+                cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
                 cbuffer.tessFactorScale = 1.f;
                 cbuffer.textureTilingFactor = 64.f;
                 cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
                 cbuffer.chunkUVScale = regChunk.chunkUVScale;
                 cbuffer.heightmapSrvIndex = heightmapSrvIndex;
+                cbuffer.terrainDiffuseSrvIndex = rendererCtx.fallbackSRV.get().index;
                 cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.get().index;
                 cbuffer.splatSrvIndices[1] = rendererCtx.fallbackSRV.get().index;
                 cbuffer.splatSrvIndices[2] = rendererCtx.fallbackSRV.get().index;

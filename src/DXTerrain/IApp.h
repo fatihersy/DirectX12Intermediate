@@ -33,6 +33,9 @@ public:
     std::filesystem::path im_assetsPath;
     StepTimer m_timer;
 
+    ComPtr<ID3D12Device14> im_device;
+    ComPtr<IWICImagingFactory2> im_wicFactory;
+
     bool isQuitting{};
 protected:
     static IApp* s_instance;

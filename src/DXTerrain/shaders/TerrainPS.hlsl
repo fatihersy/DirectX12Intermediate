@@ -12,13 +12,16 @@ struct TerrainConstants
 {
     float4x4 worldMatrix;
     float maxHeight;
-    float worldTexelSpacing;
+    float worldTexelSpacingX;
+    float worldTexelSpacingZ;
     float tessFactorScale;
     float textureTilingFactor;
+    uint3 PADDING_0;
     float2 chunkUVOffset;
     float2 chunkUVScale;
     uint heightmapSrvIndex;
-    uint3 PADDING_0;
+    uint terrainDiffuseSrvIndex;
+    uint2 PADDING_1;
     uint4 splatSrvIndices;
 };
 
@@ -37,11 +40,27 @@ struct PSInput
     float2 hmUV : TEXCOORD1;
 };
 
-float Hash21(float2 p)
+float3 ApplyBasicTerrainGrade(float3 color)
 {
-    p = frac(p * float2(123.34f, 456.21f));
-    p += dot(p, p + 45.32f);
-    return frac(p.x * p.y);
+    const float exposure = 0.72f;
+    const float contrast = 1.35f;
+    const float saturation = 1.08f;
+    const float3 contrastPivot = float3(0.18f, 0.18f, 0.18f);
+
+    color *= exposure;
+    color = max((color - contrastPivot) * contrast + contrastPivot, 0.0f);
+
+    float luminance = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+    return max(lerp(float3(luminance, luminance, luminance), color, saturation), 0.0f);
+}
+float3 GreenCorrection(float3 color)
+{
+    float greenMask = saturate((color.g - max(color.r, color.b)) * 4.0f);
+    greenMask = smoothstep(0.00f, 0.12f, greenMask);
+
+    float3 correctedGreen = color * float3(0.62f, 0.66f, 0.50f);
+
+    return lerp(color, correctedGreen, greenMask);
 }
 
 float4 PS_Terrain(PSInput input) : SV_TARGET
@@ -70,19 +89,20 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
 
     float tiling = max(terrainCB.textureTilingFactor, 1.0f);
     float2 tiledUV = input.uv * tiling;
-    float2 macroUV = input.uv * 18.0f;
 
     Texture2D<float4> grassMap = ResourceDescriptorHeap[terrainCB.splatSrvIndices.x];
     Texture2D<float4> rockMap  = ResourceDescriptorHeap[terrainCB.splatSrvIndices.y];
     Texture2D<float4> snowMap  = ResourceDescriptorHeap[terrainCB.splatSrvIndices.z];
     Texture2D<float4> dirtMap  = ResourceDescriptorHeap[terrainCB.splatSrvIndices.w];
+    Texture2D<float4> terrainDiffuseMap = ResourceDescriptorHeap[terrainCB.terrainDiffuseSrvIndex];
 
     float3 grassTex = grassMap.Sample(linearWrapSampler, tiledUV).rgb;
     float3 rockTex  = rockMap.Sample(linearWrapSampler, tiledUV * 0.85f).rgb;
     float3 snowTex  = snowMap.Sample(linearWrapSampler, tiledUV * 0.55f).rgb;
     float3 dirtTex  = dirtMap.Sample(linearWrapSampler, tiledUV * 0.65f).rgb;
-
-    float macro = lerp(0.82f, 1.16f, Hash21(floor(macroUV)));
+    float3 terrainDiffuseTex = terrainDiffuseMap.Sample(linearClampSampler, input.hmUV).rgb;
+    terrainDiffuseTex = GreenCorrection(terrainDiffuseTex);
+    terrainDiffuseTex = ApplyBasicTerrainGrade(terrainDiffuseTex);
 
     float3 grassTint = float3(0.18f, 0.40f, 0.15f);
     float3 rockTint  = float3(0.38f, 0.37f, 0.35f);
@@ -90,12 +110,10 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
     float3 dirtTint  = float3(0.68f, 0.58f, 0.38f);
 
     float3 albedo =
-        wDirt  * dirtTex  * dirtTint +
-        wGrass * grassTex * grassTint +
-        wRock  * rockTex  * rockTint +
-        wSnow  * snowTex  * snowTint;
-
-    albedo *= macro;
+        wDirt  * lerp(terrainDiffuseTex, dirtTex  * dirtTint,  0.00f) +
+        wGrass * lerp(terrainDiffuseTex, grassTex * grassTint, 0.00f) +
+        wRock  * lerp(terrainDiffuseTex, rockTex  * rockTint,  0.00f) +
+        wSnow  * lerp(terrainDiffuseTex, snowTex  * snowTint,  0.00f);
 
     float3 L = normalize(-frameCB.lightDir.xyz);
     float3 V = normalize(frameCB.camPos - input.worldPos);
@@ -110,7 +128,7 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
     float3 ambient = albedo * lerp(groundAmbient, skyAmbient, hemi);
 
     float3 diffuse = ndotl * albedo * frameCB.lightColor.rgb * max(frameCB.lightColor.a, 1.0f);
-    float specMask = saturate(wRock * 0.35f + wSnow * 0.18f);
+    float specMask = saturate(wRock * 0.05f + wSnow * 0.18f);
     float3 specular = pow(ndoth, 32.0f) * specMask * frameCB.lightColor.rgb;
 
     float3 color = ambient + diffuse + specular;

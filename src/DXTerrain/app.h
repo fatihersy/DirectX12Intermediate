@@ -25,8 +25,6 @@ public:
 
 private:
     ComPtr<IDXGIFactory7> m_factory;
-    ComPtr<ID3D12Device14> m_device;
-    ComPtr<IWICImagingFactory2> m_wicFactory;
 
     void LoadPipeline();
     void LoadAssets();

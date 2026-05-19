@@ -37,7 +37,7 @@ app::app(UINT width, UINT height, std::wstring title, HINSTANCE hInstance, int n
     im_executablePath = executablePath;
 
     ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
-    ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wicFactory)));
+    ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&im_wicFactory)));
 
     m_keyboard = std::make_unique<DirectX::Keyboard>();
     m_mouse = std::make_unique<DirectX::Mouse>();
@@ -57,9 +57,9 @@ void app::OnDestroy()
     if(m_keyboard.release()) {}
     m_keyboard.reset();
 
-    m_wicFactory.Reset();
+    im_wicFactory.Reset();
     m_factory.Reset();
-    m_device.Reset();
+    im_device.Reset();
 
     ComPtr<IDXGIDebug1> dxgiDebug;
     if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
@@ -134,13 +134,13 @@ void app::LoadPipeline()
             }
         }
 
-        ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&m_device)));
+        ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&im_device)));
     }
 
     D3D12_FEATURE_DATA_SHADER_MODEL shaderModel{};
     shaderModel.HighestShaderModel = D3D_SHADER_MODEL_6_7;
 
-    ThrowIfFailed(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+    ThrowIfFailed(im_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
 
     if (shaderModel.HighestShaderModel < D3D_SHADER_MODEL_6_6)
     {
@@ -148,13 +148,13 @@ void app::LoadPipeline()
         throw std::runtime_error("");
     }
 
-    m_renderer.Init(m_factory.Get(), m_device.Get(), m_wicFactory.Get(), plat.GetWindow(), im_width, im_height);
+    m_renderer.Init(m_factory.Get(), im_device.Get(), im_wicFactory.Get(), plat.GetWindow(), im_width, im_height);
 }
 void app::LoadAssets()
 {
     m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
     {
-        m_scene = Scene(m_device.Get(), m_wicFactory.Get(), 12.f);
+        m_scene = Scene(im_device.Get(), im_wicFactory.Get(), 12.f);
         m_scene.SetupCameraInfiniteProjection(
             DirectX::XM_PIDIV4,
             im_aspectRatio,
@@ -163,29 +163,35 @@ void app::LoadAssets()
 
         m_scene.m_terrain.desc = NSTerrain::TerrainDesc
         {
-            .worldWidth = 4096.f,
-            .worldDepth = 4096.f,
-            .maxHeight = 512.f,
-            .chunkCountX = 8,
-            .chunkCountZ = 8,
+            .worldWidth = 16388.f,
+            .worldDepth = 16388.f,
+            .maxHeight = 8194.f,
+            .chunkCountX = 16,
+            .chunkCountZ = 16,
             .vertsPerChunkEdge = 33,
-            .heightMapResolution = 1024
+            .heightMapResolution = 2048
         };
-        this->m_renderer.CreateTerrain(cmdList, m_scene.m_terrain.desc);
 
-        DirectX::XMFLOAT3 camEye = {
-            0.f,
-            m_scene.m_terrain.desc.maxHeight * .5f,
-            0.f
-        };
-        m_scene.m_camera.SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
+        DirectX::XMFLOAT3 camEye{};
 
-        for (const NSTerrain::TerrainChunk& chunk : this->m_renderer.GetTerrain().GetChunks())
+        if (this->m_renderer.CreateTerrain(cmdList, L"heightmap.png", m_scene.m_terrain.desc))
         {
-            m_scene.m_terrain.chunks.push_back({
-                .key = chunk.key,
-                .bound = chunk.bounds
-            });
+            camEye = {
+                0.f,
+                m_scene.m_terrain.desc.maxHeight * .5f,
+                0.f
+            };
+            m_scene.m_camera.SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
+
+            for (const NSTerrain::TerrainChunk& chunk : this->m_renderer.GetTerrain().GetChunks())
+            {
+                m_scene.m_terrain.chunks.push_back({
+                    .key = chunk.key,
+                    .bound = chunk.bounds
+                });
+            }
+
+            m_scene.m_terrain.isInitialized = true;
         }
 
         NSModel::SceneModelKey sDomeKey{};

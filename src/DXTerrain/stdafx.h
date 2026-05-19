@@ -33,6 +33,8 @@
 #include <optional>
 #include <bitset>
 #include <typeinfo>
+#include <cstddef>
+#include <cstring>
 
 template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
@@ -72,6 +74,29 @@ inline std::array<SCmdArg, static_cast<size_t>(ARG_MAX)> g_CmdArguments =
     }
 };
 
+template<size_t Count, class Fn, class... Args>
+decltype(auto) IndexSequence(Fn&& fn, Args&&... args)
+{
+    return [&]<size_t... N>(std::index_sequence<N...>) -> decltype(auto)
+    {
+        return std::forward<Fn>(fn)(
+            std::index_sequence<N...>{},
+            std::forward<Args>(args)...
+        );
+    }(std::make_index_sequence<Count>{});
+};
+
+template<size_t Count, class Fn>
+auto ArraySequence(Fn&& fn)
+{
+    return [&]<size_t... N>(std::index_sequence<N...>)
+    {
+        return std::array{
+            std::forward<Fn>(fn)(std::integral_constant<size_t, N>{})...
+        };
+    }(std::make_index_sequence<Count>{});
+};
+
 #include "core/Math.h"
 #include "StepTimer.h"
 #include "Logger.h"
@@ -80,4 +105,5 @@ inline std::array<SCmdArg, static_cast<size_t>(ARG_MAX)> g_CmdArguments =
 #include "ModelTypes.h"
 #include "AllocatorTypes.h"
 #include "RendererTypes.h"
+#include "Texture.h"
 #include "SceneTypes.h"

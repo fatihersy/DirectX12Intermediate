@@ -136,7 +136,7 @@ namespace NSRenderPass
         TessellationPipeline m_solidPipeline;
         TessellationPipeline m_wireframePipeline;
 
-        enum class ETexture : uint32_t { GRASS = 0, ROCK, SNOW, DIRT, MAX };
+        enum class ETexture : uint32_t { GRASS = 0, ROCK, SNOW, DIRT, TERRAIN_DIFFUSE, MAX };
 
         NSDescriptor::Handle m_srvHandle{};
         std::array<NSTexture::Texture, static_cast<size_t>(ETexture::MAX)> m_textures{};

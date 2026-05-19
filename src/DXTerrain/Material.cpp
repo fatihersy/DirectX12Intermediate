@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Material.h"
+#include "DXSampleHelper.h"
 
 Material::Material(IWICImagingFactory2* wicFactory) : m_wicFactory(wicFactory)
 {}
@@ -10,112 +11,28 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
 
     ASSERT(device and decoder and tType > NSTexture::EType::EType_NONE and tType < NSTexture::EType::EType_MAX);
 
-    NSTexture::Texture& tex = m_textures.emplace_back(NSTexture::Texture{});
+    const std::wstring_view textureName = m_name.empty()
+        ? std::wstring_view(L"Material")
+        : std::wstring_view(m_name.data(), m_name.size());
 
-    tex.textureType = tType;
-    tex.format = TypeToFormat(tex.textureType);
-
-    ComPtr<IWICBitmapFrameDecode> frame;
-    if (FAILED(decoder->GetFrame(0, &frame)))
+    try
     {
-        g_FError("Failed to get frame from decoder\n");
-        return E_FAIL;
+        m_textures.emplace_back(NSTexture::LoadTexture(textureName, decoder, tType));
     }
-    if (FAILED(frame->GetSize(&tex.width, &tex.height)))
+    catch (const HrException& e)
     {
-        g_FError("Failed to get texture dimensions\n");
-        return E_FAIL;
+        g_FError("Failed to load material texture\n");
+        return e.Error();
     }
-
-    const UINT bpp = 4;
-    const UINT alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
-    const UINT rowPitch = (static_cast<UINT64>(tex.width) * bpp + alignment - 1) & ~(alignment - 1);
-    UINT uploadSize = rowPitch * tex.height;
-    tex.RowPitch = rowPitch;
-
-    ComPtr<IWICFormatConverter> converter;
-    if (FAILED(m_wicFactory->CreateFormatConverter(&converter)))
+    catch (...)
     {
-        g_FError("Failed to create format converter\n");
+        g_FError("Failed to load material texture\n");
         return E_FAIL;
-    }
-
-    if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.f, WICBitmapPaletteTypeCustom)))
-    {
-        g_FError("Failed to initialize format converter\n");
-        return E_FAIL;
-    }
-
-    D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
-    D3D12_HEAP_PROPERTIES uploadHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-
-    if (FAILED(device->CreateCommittedResource(
-        &uploadHeapProp,
-        D3D12_HEAP_FLAG_NONE,
-        &uploadBufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&tex.uploadBuffer)
-    )))
-    {
-        g_FError("Failed to create upload buffer\n");
-        return E_FAIL;
-    }
-
-    void* pMappedData = nullptr;
-    if (FAILED(tex.uploadBuffer->Map(0, nullptr, &pMappedData)))
-    {
-        g_FError("Failed to map upload buffer\n");
-        return E_FAIL;
-    }
-
-    if (FAILED(converter->CopyPixels(nullptr, rowPitch, uploadSize, reinterpret_cast<BYTE*>(pMappedData))))
-    {
-        tex.uploadBuffer->Unmap(0, nullptr);
-        g_FError("Failed to copy pixels\n");
-        return E_FAIL;
-    }
-
-    tex.uploadBuffer->Unmap(0, nullptr);
-
-    if (tex.uploadBuffer and tex.width > 0 and tex.height > 0)
-    {
-        D3D12_RESOURCE_DESC texDesc{};
-        texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        texDesc.Width = tex.width;
-        texDesc.Height = tex.height;
-        texDesc.DepthOrArraySize = 1;
-        texDesc.MipLevels = 1;
-        texDesc.Format = tex.format;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.SampleDesc.Quality = 1;
-        texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-        D3D12_HEAP_PROPERTIES defaultHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
-        if (FAILED(device->CreateCommittedResource(
-            &defaultHeapProp,
-            D3D12_HEAP_FLAG_NONE,
-            &texDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&tex.defaultBuffer)
-        )))
-        {
-            g_FError("Failed to create default resource heap\n");
-            return E_FAIL;
-        }
-
-        std::wstring wstrName = std::wstring(m_name.begin(), m_name.end());
-
-        tex.defaultBuffer->SetName(NSTool::wformat(L"%s::%s::defaultBuffer", wstrName.c_str(), TextureTypeToWString(tex.textureType)).c_str());
-        tex.uploadBuffer->SetName(NSTool::wformat(L"%s::%s::uploadBuffer", wstrName.c_str(), TextureTypeToWString(tex.textureType)).c_str());
     }
 
     m_isOnCPU = true;
 
-    SetTextureFlag(tex.textureType);
+    SetTextureFlag(tType);
 
     return S_OK;
 }
@@ -150,10 +67,20 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
 
     m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(NSTexture::EType::EType_MAX));
 
-    device->CopyDescriptorsSimple(
-        static_cast<UINT>(NSTexture::EType::EType_MAX),
-        m_srvHandle.cpuAddr,
-        rendererCtx.fallbackSRV.get().cpuAddr,
+    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> srcRange(static_cast<size_t>(NSTexture::EType::EType_MAX), rendererCtx.fallbackSRV.get().cpuAddr);
+
+    auto destRange = ArraySequence<static_cast<size_t>(NSTexture::EType::EType_MAX)>([&](auto I)
+    {
+        return rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(I)).cpuAddr;
+    });
+
+    device->CopyDescriptors(
+        destRange.size(),
+        destRange.data(),
+        nullptr,
+        srcRange.size(),
+        srcRange.data(),
+        nullptr,
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
     );
 

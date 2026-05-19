@@ -113,8 +113,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
 
     m_barrierBatch = std::make_unique<BarrierBatch>();
 
-    constexpr size_t twoMb = 2u * 1024u * 1024u;
-    m_constantAllocator = ConstantAllocator(device, twoMb, IApp::ic_framesInFlight);
+    constexpr size_t twoGb = 2u * 1024u * 1024u * 1024u;
+    m_constantAllocator = ConstantAllocator(device, twoGb, IApp::ic_framesInFlight);
 
     // Command Queue
     {
@@ -127,16 +127,17 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
 
     CreateSwapChain(wnd, m_width, m_height);
 
-    m_rtvHeap = NSDescriptor::StaticHeap(device, L"", D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1024u, false);
-    m_dsvHeap = NSDescriptor::StaticHeap(device, L"", D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1024u, false);
+    m_rtvHeap = NSDescriptor::StaticHeap(device, L"Renderer::m_rtvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1024u, false);
+    m_dsvHeap = NSDescriptor::StaticHeap(device, L"Renderer::m_dsvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1024u, false);
     m_srvHeap = NSDescriptor::RingHeap(
         device,
-        L"",
+        L"Renderer::m_srvHeap",
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         1024u,
         IApp::ic_framesInFlight,
         1024u
     );
+    m_fallbackSrvHeap = NSDescriptor::StaticHeap(device, L"Renderer::m_fallbackSrvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1u, false);
 
     // Frame resources
     {
@@ -344,7 +345,7 @@ void Renderer::OnDestroy()
 
     m_terrain.OnDestroy(rendererCtx);
 
-    FreeSRVStatic(m_fallbackTextureSRVhandle);
+    m_fallbackSrvHeap.Free(m_fallbackTextureSRVhandle);
     m_fallbackTexture.defaultBuffer.Reset();
     m_fallbackTexture.uploadBuffer.Reset();
 
@@ -383,6 +384,7 @@ void Renderer::OnDestroy()
     m_srvHeap = NSDescriptor::RingHeap{};
     m_rtvHeap = NSDescriptor::StaticHeap{};
     m_dsvHeap = NSDescriptor::StaticHeap{};
+    m_fallbackSrvHeap = NSDescriptor::StaticHeap{};
     m_constantAllocator = ConstantAllocator{};
     m_barrierBatch.reset();
 
@@ -693,11 +695,11 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
 void Renderer::UnloadModel(NSModel::RegisterModelKey key)
 {
     auto modelsOpt = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    ASSERT(modelsOpt.has_value() and "Blackboard key is has no value");
+    ASSERT(modelsOpt.has_value(), "Blackboard key is has no value");
 
     auto& models = modelsOpt.value().get();
 
-    ASSERT(models.size() > key.index and models[key.index].sceneKey.id == key.id and "Renderer::UnloadModel::Invalid Register model key");
+    ASSERT(models.size() > key.index and models[key.index].sceneKey.id == key.id, "Renderer::UnloadModel::Invalid Register model key");
 
     NSRenderer::Model& model = models[key.index];
 
@@ -776,7 +778,7 @@ void Renderer::Resize(UINT width, UINT height)
 }
 void Renderer::CreateSwapChain(HWND hwnd, UINT width, UINT height)
 {
-    ASSERT(not m_swapChain and "CreateSwapChain() Supposed to use once");
+    ASSERT(not m_swapChain, "CreateSwapChain() Supposed to use once");
 
     DXGI_SWAP_CHAIN_DESC1 desc{};
     desc.BufferCount = IApp::ic_framesInFlight;
@@ -815,115 +817,114 @@ void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDe
 }
 void Renderer::CreateFallbackTexture()
 {
+    m_fallbackTextureSRVhandle = m_fallbackSrvHeap.Allocate(1u);
+
     NSTexture::Texture& fbTex = m_fallbackTexture;
     NSDescriptor::Handle& fbHandle = m_fallbackTextureSRVhandle;
     ID3D12Device14* device = m_device;
 
     Execute([&fbTex, &fbHandle, &device](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
+    {
+        fbTex.textureType = NSTexture::EType::EType_DIFFUSE;
+        fbTex.width = 64;
+        fbTex.height = 64;
+        fbTex.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        const UINT squareSize = fbTex.width / 8u;
+
+        D3D12_RESOURCE_DESC dstDesc{};
+        dstDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        dstDesc.Width = fbTex.width;
+        dstDesc.Height = fbTex.height;
+        dstDesc.DepthOrArraySize = 1;
+        dstDesc.MipLevels = 1;
+        dstDesc.Format = fbTex.format;
+        dstDesc.SampleDesc.Count = 1;
+        dstDesc.SampleDesc.Quality = 0;
+        dstDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        dstDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeapProp(D3D12_HEAP_TYPE_DEFAULT);
+        ThrowIfFailed(device->CreateCommittedResource(
+            &defaultHeapProp,
+            D3D12_HEAP_FLAG_NONE,
+            &dstDesc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&fbTex.defaultBuffer)
+        ));
+        fbTex.defaultBuffer->SetName(L"Renderer::m_fallbackTexture.defaultBuffer");
+
         {
-            fbTex.textureType = NSTexture::EType::EType_DIFFUSE;
-            fbTex.width = 64;
-            fbTex.height = 64;
-            fbTex.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-            const UINT squareSize = fbTex.width / 8u;
-
-            D3D12_RESOURCE_DESC dstDesc{};
-            dstDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            dstDesc.Width = fbTex.width;
-            dstDesc.Height = fbTex.height;
-            dstDesc.DepthOrArraySize = 1;
-            dstDesc.MipLevels = 1;
-            dstDesc.Format = fbTex.format;
-            dstDesc.SampleDesc.Count = 1;
-            dstDesc.SampleDesc.Quality = 0;
-            dstDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            dstDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-            CD3DX12_HEAP_PROPERTIES defaultHeapProp(D3D12_HEAP_TYPE_DEFAULT);
-            ThrowIfFailed(device->CreateCommittedResource(
-                &defaultHeapProp,
-                D3D12_HEAP_FLAG_NONE,
-                &dstDesc,
+            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                fbTex.defaultBuffer.Get(),
                 D3D12_RESOURCE_STATE_COMMON,
-                nullptr,
-                IID_PPV_ARGS(&fbTex.defaultBuffer)
-            ));
-            fbTex.defaultBuffer->SetName(L"Renderer::m_fallbackTexture.defaultBuffer");
+                D3D12_RESOURCE_STATE_COPY_DEST
+            );
+            cmdList.ResourceBarrier(1, &barrier);
+        }
 
+        fbTex.RowPitch = fbTex.width * 4;
+        const UINT dataSize = fbTex.RowPitch * fbTex.height;
+
+        CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC srcDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+        ThrowIfFailed(device->CreateCommittedResource(
+            &uploadHeapProp,
+            D3D12_HEAP_FLAG_NONE,
+            &srcDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&fbTex.uploadBuffer)
+        ));
+        fbTex.uploadBuffer->SetName(L"Renderer::m_fallbackTexture.uploadBuffer");
+
+        uint8_t* mappedData = nullptr;
+        ThrowIfFailed(fbTex.uploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
+
+        for (UINT y = 0; y < fbTex.height; y++)
+        {
+            uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * fbTex.RowPitch);
+
+            for (UINT x = 0; x < fbTex.width; x++)
             {
-                CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                    fbTex.defaultBuffer.Get(),
-                    D3D12_RESOURCE_STATE_COMMON,
-                    D3D12_RESOURCE_STATE_COPY_DEST
-                );
-                cmdList.ResourceBarrier(1, &barrier);
+                bool isBlack = ((x / squareSize) + (y / squareSize)) % 2 == 0;
+                row[x] = isBlack ? 0xFF000000 : 0xFFFF00FF;
             }
+        }
+        fbTex.uploadBuffer->Unmap(0, nullptr);
 
-            fbTex.RowPitch = fbTex.width * 4;
-            const UINT dataSize = fbTex.RowPitch * fbTex.height;
+        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+        srcLoc.pResource = fbTex.uploadBuffer.Get();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint.Footprint.Width = fbTex.width;
+        srcLoc.PlacedFootprint.Footprint.Height = fbTex.height;
+        srcLoc.PlacedFootprint.Footprint.Depth = 1;
+        srcLoc.PlacedFootprint.Footprint.Format = fbTex.format;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = fbTex.RowPitch;
 
-            CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
-            CD3DX12_RESOURCE_DESC srcDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
-            ThrowIfFailed(device->CreateCommittedResource(
-                &uploadHeapProp,
-                D3D12_HEAP_FLAG_NONE,
-                &srcDesc,
-                D3D12_RESOURCE_STATE_GENERIC_READ,
-                nullptr,
-                IID_PPV_ARGS(&fbTex.uploadBuffer)
-            ));
-            fbTex.uploadBuffer->SetName(L"Renderer::m_fallbackTexture.uploadBuffer");
+        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+        dstLoc.pResource = fbTex.defaultBuffer.Get();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
 
-            uint8_t* mappedData = nullptr;
-            ThrowIfFailed(fbTex.uploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
+        cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 
-            for (UINT y = 0; y < fbTex.height; y++)
-            {
-                uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * fbTex.RowPitch);
+        {
+            CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+                fbTex.defaultBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+            );
+            cmdList.ResourceBarrier(1, &barrier);
+        }
 
-                for (UINT x = 0; x < fbTex.width; x++)
-                {
-                    bool isBlack = ((x / squareSize) + (y / squareSize)) % 2 == 0;
-                    row[x] = isBlack ? 0xFF000000 : 0xFFFF00FF;
-                }
-            }
-            fbTex.uploadBuffer->Unmap(0, nullptr);
-
-            D3D12_TEXTURE_COPY_LOCATION srcLoc{};
-            srcLoc.pResource = fbTex.uploadBuffer.Get();
-            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-            srcLoc.PlacedFootprint.Footprint.Width = fbTex.width;
-            srcLoc.PlacedFootprint.Footprint.Height = fbTex.height;
-            srcLoc.PlacedFootprint.Footprint.Depth = 1;
-            srcLoc.PlacedFootprint.Footprint.Format = fbTex.format;
-            srcLoc.PlacedFootprint.Footprint.RowPitch = fbTex.RowPitch;
-
-            D3D12_TEXTURE_COPY_LOCATION dstLoc{};
-            dstLoc.pResource = fbTex.defaultBuffer.Get();
-            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-            dstLoc.SubresourceIndex = 0;
-
-            cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-
-            {
-                CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                    fbTex.defaultBuffer.Get(),
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-                );
-                cmdList.ResourceBarrier(1, &barrier);
-            }
-
-            fbHandle = ctx.allocSRVStatic(1u);
-            fbTex.srvOffset = ctx.offsetSRV(fbHandle, 0u);
-
-            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            srvDesc.Texture2D.MipLevels = 1;
-            srvDesc.Format = fbTex.format;
-            device->CreateShaderResourceView(fbTex.defaultBuffer.Get(), &srvDesc, fbHandle.cpuAddr);
-        });
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.Format = fbTex.format;
+        device->CreateShaderResourceView(fbTex.defaultBuffer.Get(), &srvDesc, fbHandle.cpuAddr);
+    });
 }
 
 void Renderer::DrawDebugImage(NSScene::IScene& scene)

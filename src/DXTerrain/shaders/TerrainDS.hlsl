@@ -22,13 +22,16 @@ struct TerrainConstants
 {
     float4x4 worldMatrix;
     float maxHeight;
-    float worldTexelSpacing;
+    float worldTexelSpacingX;
+    float worldTexelSpacingZ;
     float tessFactorScale;
     float textureTilingFactor;
+    uint3 PADDING_0;
     float2 chunkUVOffset;
     float2 chunkUVScale;
     uint heightmapSrvIndex;
-    uint3 PADDING_0;
+    uint terrainDiffuseSrvIndex;
+    uint2 PADDING_1;
     uint4 splatSrvIndices;
 };
 
@@ -99,10 +102,13 @@ DSOutput DS_Terrain(HSPatchConstants patchConstants, float2 domainUV : SV_Domain
         float hD = SampleHeight(heightmap, hmUV + float2(0.0f, -texelUV.y));
         float hU = SampleHeight(heightmap, hmUV + float2(0.0f,  texelUV.y));
 
+        float spacingX = max(terrainCB.worldTexelSpacingX, 0.0001f);
+        float spacingZ = max(terrainCB.worldTexelSpacingZ, 0.0001f);
+
         float3 normal = normalize(float3(
-            hL - hR,
-            2.0f * terrainCB.worldTexelSpacing,
-            hD - hU
+            (hL - hR) / (2.0f * spacingX),
+            1.0f,
+            (hD - hU) / (2.0f * spacingZ)
         ));
     #endif
 

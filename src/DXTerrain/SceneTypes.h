@@ -12,6 +12,7 @@ namespace NSScene
     {
         NSTerrain::TerrainDesc desc;
         std::vector<TerrainChunk> chunks;
+        bool isInitialized{};
     };
 
     struct Camera

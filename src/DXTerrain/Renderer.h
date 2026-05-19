@@ -33,7 +33,7 @@ public:
     template<typename T, typename... Args> requires NSRenderPass::IsRenderPass<T> and (T::ID < NSRenderPass::RenderPassID::PASSID_MAX)
     T& AddPass(Args&&... args)
     {
-        ASSERT(not m_passes[static_cast<size_t>(T::ID)] && "Render pass already exists");
+        ASSERT(not m_passes[static_cast<size_t>(T::ID)], "Render pass already exists");
 
         m_passes[static_cast<size_t>(T::ID)] = std::move(std::make_unique<T>(std::forward<Args>(args)...));
 
@@ -92,10 +92,19 @@ public:
         return std::ref(*m_barrierBatch);
     }
 
-    void CreateTerrain(NSRenderer::GraphicsCommandList cmdList, NSTerrain::TerrainDesc desc)
+    void CreateTerrain(NSRenderer::GraphicsCommandList cmdList, uint32_t seed, NSTerrain::TerrainDesc desc)
     {
-        m_terrain.OnInit(cmdList, GetCtx(), desc);
+        m_terrain.OnInit(cmdList, GetCtx(), seed, desc);
     }
+    bool CreateTerrain(NSRenderer::GraphicsCommandList cmdList, const std::wstring_view path)
+    {
+        return m_terrain.OnInit(cmdList, GetCtx(), path);
+    }
+    bool CreateTerrain(NSRenderer::GraphicsCommandList cmdList, const std::wstring_view path, NSTerrain::TerrainDesc desc)
+    {
+        return m_terrain.OnInit(cmdList, GetCtx(), path, desc);
+    }
+
     const NSTerrain::Terrain& GetTerrain() const {
         return m_terrain;
     }
@@ -186,6 +195,7 @@ private:
     NSDescriptor::RingHeap m_srvHeap;
 
     NSTexture::Texture m_fallbackTexture;
+    NSDescriptor::StaticHeap m_fallbackSrvHeap;
     NSDescriptor::Handle m_fallbackTextureSRVhandle;
 
     Blackboard m_blackboard;

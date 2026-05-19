@@ -189,7 +189,7 @@ void Model::ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach)
 
 void Model::ProcessNode(NSRenderer::Ctx rendererCtx, aiNode* node, const aiScene* scene)
 {
-    ASSERT(node and scene and m_wicFactory and "Invalid Parameter");
+    ASSERT(node and scene and m_wicFactory, "Invalid Parameter");
 
     if (m_meshes.size() >= IApp::ic_maxObjects)
     {
@@ -245,7 +245,7 @@ void Model::ProcessMesh(aiMesh* pAiMesh, const aiScene* scene, aiNode* node, Mes
     DirectX::XMVECTOR outRotQ = DirectX::XMVectorZero();
     DirectX::XMVECTOR outScale = DirectX::XMVectorZero();
 
-    ASSERT(DirectX::XMMatrixDecompose(&outScale, &outRotQ, &outPos, globalMatrix) and "Cannot decompose mesh matrix");
+    ASSERT(DirectX::XMMatrixDecompose(&outScale, &outRotQ, &outPos, globalMatrix), "Cannot decompose mesh matrix");
 
     DirectX::XMStoreFloat3(&outMesh.m_position, outPos);
     DirectX::XMStoreFloat4(&outMesh.m_rotationQ, outRotQ);

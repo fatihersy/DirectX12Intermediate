@@ -80,7 +80,7 @@ StaticHeap::~StaticHeap(){}
 
 Handle StaticHeap::Allocate(uint32_t amount)
 {
-    ASSERT(m_freeList.size() >= amount and "Insufficient free index");
+    ASSERT(m_freeList.size() >= amount, "Insufficient free index");
 
     SsearchBlockResult result = GetFirstContiguousBlock(m_freeList, amount);
     ASSERT(result.success);
@@ -100,11 +100,11 @@ Handle StaticHeap::Allocate(uint32_t amount)
 
 void StaticHeap::Free(Handle handle)
 {
-    ASSERT(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }) and "Invalid handle");
+    ASSERT(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }), "Invalid handle");
 
     std::vector<uint32_t>::const_iterator pItr = std::lower_bound(m_freeList.begin(), m_freeList.end(), handle.index);
 
-    ASSERT(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount and "Double free");
+    ASSERT(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount, "Double free");
 
     for (uint32_t itr{}; itr < handle.amount; itr++)
     {
@@ -126,7 +126,7 @@ RingHeap::~RingHeap(){}
 
 Handle RingHeap::AllocateRing(uint32_t amount)
 {
-    ASSERT(m_heapFrameIndexOffset + amount <= m_heapFrameEnd and "Out of slots");
+    ASSERT(m_heapFrameIndexOffset + amount <= m_heapFrameEnd, "Out of slots");
 
     Handle handle = Handle {
         .cpuAddr = CD3DX12_CPU_DESCRIPTOR_HANDLE(im_cpuStart, m_heapFrameIndexOffset, im_descriptorSize),
@@ -142,7 +142,7 @@ Handle RingHeap::AllocateRing(uint32_t amount)
 
 Handle RingHeap::AllocateStatic(uint32_t amount)
 {
-    ASSERT(m_freeList.size() >= amount and "Insufficient free index");
+    ASSERT(m_freeList.size() >= amount, "Insufficient free index");
 
     SsearchBlockResult result = GetFirstContiguousBlock(m_freeList, amount);
     ASSERT(result.success);
@@ -162,11 +162,11 @@ Handle RingHeap::AllocateStatic(uint32_t amount)
 
 void RingHeap::FreeStatic(Handle handle)
 {
-    ASSERT(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }) and "Invalid handle");
+    ASSERT(Validate(Offset{ .cpuAddr = handle.cpuAddr, .index = handle.index }), "Invalid handle");
 
     std::vector<uint32_t>::const_iterator pItr = std::lower_bound(m_freeList.begin(), m_freeList.end(), handle.index);
 
-    ASSERT(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount and "Double free");
+    ASSERT(pItr == m_freeList.end() or (*pItr) >= handle.index + handle.amount, "Double free");
 
     for (uint32_t itr{}; itr < handle.amount; itr++)
     {

@@ -22,13 +22,16 @@ struct TerrainConstants
 {
     float4x4 worldMatrix;
     float maxHeight;
-    float worldTexelSpacing;
+    float worldTexelSpacingX;
+    float worldTexelSpacingZ;
     float tessFactorScale;
     float textureTilingFactor;
+    uint3 PADDING_0;
     float2 chunkUVOffset;
     float2 chunkUVScale;
     uint heightmapSrvIndex;
-    uint3 PADDING_0;
+    uint terrainDiffuseSrvIndex;
+    uint2 PADDING_1;
     uint4 splatSrvIndices;
 };
 

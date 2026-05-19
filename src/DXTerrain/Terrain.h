@@ -38,7 +38,9 @@ namespace NSTerrain
 
         virtual const TerrainDesc& GetDesc() const = 0;
         virtual const std::vector<TerrainChunk>& GetChunks() const = 0;
-        virtual const NSDescriptor::Handle& GetHeightmapSRV() const = 0;
+        virtual NSDescriptor::Offset GetHeightmapSRV() const = 0;
+        virtual bool IsOnCPU() const = 0;
+        virtual bool IsOnGPU() const = 0;
     };
 
     class Terrain : public ITerrainView
@@ -52,14 +54,19 @@ namespace NSTerrain
         Terrain(Terrain&& other) noexcept;
         Terrain& operator=(Terrain&& other) noexcept;
 
-        void OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc);
+        void OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, uint32_t seed, NSTerrain::TerrainDesc desc);
+        bool OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, const std::wstring_view path);
+        bool OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, const std::wstring_view path, NSTerrain::TerrainDesc desc);
         void OnDestroy(NSRenderer::Ctx rendererCtx);
 
-        void Generate(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, NSTerrain::TerrainDesc desc);
-        void Destroy(NSRenderer::Ctx rendererCtx);
+        void Generate(uint32_t seed, NSTerrain::TerrainDesc desc);
+        bool Load(const std::wstring_view path);
+        void Free(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 
         void Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
         void Unload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+
+        void ReleaseUploadBuffers();
 
         const TerrainDesc& GetDesc() const override {
             return m_desc;
@@ -67,28 +74,33 @@ namespace NSTerrain
         const std::vector<TerrainChunk>& GetChunks() const override {
             return m_chunks;
         }
-        const NSDescriptor::Handle& GetHeightmapSRV() const override {
-            return m_heightmapSRV;
+        NSDescriptor::Offset GetHeightmapSRV() const override {
+            return m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)].srvOffset;
         }
+        bool IsOnCPU() const override {
+            return m_isOnCPU;
+        };
+        bool IsOnGPU() const override {
+            return m_isOnGPU;
+        };
 
     private:
         ID3D12Device14* m_device = nullptr;
-        TerrainDesc m_desc;
+        TerrainDesc m_desc{};
         std::vector<TerrainChunk> m_chunks;
 
         std::vector<uint16_t> m_heightR16;
-        uint32_t m_hmWidth{};
-        uint32_t m_hmHeight{};
 
-        ComPtr<ID3D12Resource> m_heightmapTextureDefault;
-        ComPtr<ID3D12Resource> m_heightmapTextureUpload;
-        NSDescriptor::Handle m_heightmapSRV;
+        enum class TextureIDs : uint32_t { HEIGHTMAP = 0, DIFFUSE, MAX };
+        NSDescriptor::Handle m_texSrvHandle{};
+        std::array<NSTexture::Texture, static_cast<size_t>(TextureIDs::MAX)> m_textures;
 
-        void InitAndGenerateHeightmap(uint32_t seed = 0);
+        void OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
         void BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
         float SampleHeight(float u, float v) const;
 
         bool m_isOnGPU{};
-        bool m_initialized{};
+        bool m_isOnCPU{};
+        bool m_isInitialized{};
     };
 }
