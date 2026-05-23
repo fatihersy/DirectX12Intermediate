@@ -9,6 +9,7 @@ class MoxPPRecipe(ConanFile):
         self.requires("assimp/6.0.2")
         self.requires("imgui/1.92.5")
         self.requires("libassert/2.2.1")
+        self.requires("openexr/3.4.11")
 
         # self.requires("gtest/1.16.0")
 

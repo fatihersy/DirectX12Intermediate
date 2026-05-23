@@ -77,8 +77,6 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
 
     if (not Load(path)) return false;
 
-    m_isOnCPU = true;
-
     BuildChunks(cmdList, rendererCtx);
 
     Upload(cmdList, rendererCtx);
@@ -140,21 +138,19 @@ void Terrain::Generate(uint32_t seed, NSTerrain::TerrainDesc desc)
 {
     this->m_desc = desc;
 
-    ASSERT(m_desc.heightMapResolution > 1u);
-
-    const uint32_t resolution = m_desc.heightMapResolution;
+    ASSERT(m_desc.dimention > 1u);
 
     m_heightR16.clear();
-    m_heightR16.resize(size_t(resolution) * size_t(resolution));
+    m_heightR16.resize(size_t(m_desc.dimention) * size_t(m_desc.dimention));
 
     constexpr float baseFrequency = 8.0f;
 
-    for (uint32_t z = 0; z < resolution; ++z)
+    for (uint32_t z = 0; z < m_desc.dimention; ++z)
     {
-        for (uint32_t x = 0; x < resolution; ++x)
+        for (uint32_t x = 0; x < m_desc.dimention; ++x)
         {
-            const float u = float(x) / float(resolution - 1);
-            const float v = float(z) / float(resolution - 1);
+            const float u = float(x) / float(m_desc.dimention - 1);
+            const float v = float(z) / float(m_desc.dimention - 1);
 
             float h = NSMath::FBm(u * baseFrequency, v * baseFrequency, seed);
 
@@ -165,101 +161,106 @@ void Terrain::Generate(uint32_t seed, NSTerrain::TerrainDesc desc)
 
             const uint16_t hInt = static_cast<uint16_t>(std::round(hScaled));
 
-            m_heightR16[size_t(z) * size_t(resolution) + size_t(x)] = hInt;
+            m_heightR16[size_t(z) * size_t(m_desc.dimention) + size_t(x)] = hInt;
         }
     }
 
     NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
     heightmap = {};
-    heightmap.desc = NSTexture::GetTextureDesc(NSTexture::EType::EType_HEIGHT);
-    heightmap.textureType = NSTexture::EType::EType_HEIGHT;
-    heightmap.format = heightmap.desc.format;
-    heightmap.width = resolution;
-    heightmap.height = resolution;
+    heightmap.desc.textureType = NSTexture::EType::EType_HEIGHT;
+    heightmap.desc.format = DXGI_FORMAT_R16_UNORM;
+    heightmap.width = m_desc.dimention;
+    heightmap.height = m_desc.dimention;
+    heightmap.desc.bytesPerPixel = NSTexture::BytesPerPixel(heightmap.desc.format);
 
     const UINT alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
-    const UINT64 unalignedRowPitch = static_cast<UINT64>(resolution) * sizeof(uint16_t);
+    const UINT64 unalignedRowPitch = static_cast<UINT64>(m_desc.dimention) * sizeof(uint16_t);
     const UINT64 alignedRowPitch = (unalignedRowPitch + alignment - 1u) & ~(static_cast<UINT64>(alignment) - 1u);
-    const UINT64 uploadSize = alignedRowPitch * resolution;
+    const UINT64 uploadSize = alignedRowPitch * m_desc.dimention;
 
     ASSERT(alignedRowPitch <= UINT_MAX);
     ASSERT(uploadSize <= UINT_MAX);
 
     heightmap.RowPitch = static_cast<UINT>(alignedRowPitch);
-    heightmap.cpuData.resize(static_cast<size_t>(uploadSize));
+    heightmap.chunks.clear();
 
-    for (uint32_t y = 0; y < resolution; ++y)
+    constexpr UINT rowsPerChunk = NSTexture::ROWS_AT_A_TIME;
+
+    const UINT totalChunkCount = (m_desc.dimention + rowsPerChunk - 1u) / rowsPerChunk;
+    heightmap.chunks.reserve(totalChunkCount);
+
+    for (UINT chunkIndex{}; chunkIndex < totalChunkCount; ++chunkIndex)
     {
-        std::byte* dst = heightmap.cpuData.data() + static_cast<size_t>(y) * heightmap.RowPitch;
-        const std::byte* src = reinterpret_cast<const std::byte*>(m_heightR16.data() + static_cast<size_t>(y) * resolution);
-        memcpy(dst, src, static_cast<size_t>(unalignedRowPitch));
+        NSTexture::TextureChunk chunk{};
+        chunk.firstRow = chunkIndex * rowsPerChunk;
+        chunk.rowCount = std::min(rowsPerChunk, m_desc.dimention - chunk.firstRow);
+        chunk.bytes.resize(static_cast<size_t>(chunk.rowCount) * heightmap.RowPitch);
+
+        for (UINT row{}; row < chunk.rowCount; ++row)
+        {
+            const UINT srcY = chunk.firstRow + row;
+
+            const std::byte* src = reinterpret_cast<const std::byte*>(
+                m_heightR16.data() + static_cast<size_t>(srcY) * m_desc.dimention
+            );
+
+            std::byte* dst = chunk.bytes.data() + static_cast<size_t>(row) * heightmap.RowPitch;
+
+            memcpy(dst, src, static_cast<size_t>(unalignedRowPitch));
+        }
+
+        heightmap.chunks.push_back(std::move(chunk));
     }
 
-    D3D12_HEAP_PROPERTIES uploadHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
-    ThrowIfFailed(m_device->CreateCommittedResource(
-        &uploadHeapProp,
-        D3D12_HEAP_FLAG_NONE,
-        &uploadBufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&heightmap.uploadBuffer)
-    ));
-
-    void* mapped = nullptr;
-    ThrowIfFailed(heightmap.uploadBuffer->Map(0, nullptr, &mapped));
-    memcpy(mapped, heightmap.cpuData.data(), static_cast<size_t>(uploadSize));
-    heightmap.uploadBuffer->Unmap(0, nullptr);
-
-    D3D12_HEAP_PROPERTIES defaultHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    D3D12_RESOURCE_DESC textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        heightmap.format,
-        heightmap.width,
-        heightmap.height,
-        1,
-        heightmap.desc.mipLevels
-    );
-    ThrowIfFailed(m_device->CreateCommittedResource(
-        &defaultHeapProp,
-        D3D12_HEAP_FLAG_NONE,
-        &textureDesc,
-        heightmap.desc.initialState,
-        nullptr,
-        IID_PPV_ARGS(&heightmap.defaultBuffer)
-    ));
-
-    heightmap.defaultBuffer->SetName(L"NSTerrain::Terrain::GeneratedHeightmap::defaultBuffer");
-    heightmap.uploadBuffer->SetName(L"NSTerrain::Terrain::GeneratedHeightmap::uploadBuffer");
-    heightmap.m_isOnCPU = true;
+    heightmap.PopulateCPU(true);
     m_isOnCPU = true;
 }
-bool Terrain::Load(const std::wstring_view path)
+bool Terrain::Load(const std::wstring_view _path)
 {
     ASSERT(m_desc.worldWidth > 0.f and m_desc.worldDepth > 0.f and m_desc.maxHeight > 0.f and m_desc.chunkCountX > 0u and m_desc.chunkCountZ > 0u and m_desc.vertsPerChunkEdge > 1u);
 
     NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
-    heightmap = NSTexture::LoadTexture(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EType::EType_HEIGHT);
 
-    ASSERT(heightmap.defaultBuffer and heightmap.uploadBuffer and not heightmap.cpuData.empty(), "Failed to load heightmap texture data");
-    ASSERT(heightmap.format == DXGI_FORMAT_R16_UNORM);
-    ASSERT(heightmap.desc.bytesPerPixel == sizeof(uint16_t));
+    std::wstring path(_path);
+    size_t dotPos = path.find_last_of('.');
+    ASSERT(dotPos != path.npos, "Extension extraction failed from the file");
+
+    if (_wcsicmp(path.c_str() + dotPos, L".exr") == 0)
+    {
+        heightmap = NSTexture::LoadTextureEXR(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EXRLoadDesc {
+            .texDesc {
+                .textureType = NSTexture::EType::EType_HEIGHT,
+                .format = DXGI_FORMAT_R16_UNORM
+            },
+            .channels = {"Y"},
+        });
+    }
+    else {
+        heightmap = NSTexture::LoadTexture(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EType::EType_HEIGHT);
+    }
+
+    ASSERT(heightmap.desc.format == DXGI_FORMAT_R16_UNORM);
+    ASSERT(heightmap.width == 16384u);
+    ASSERT(heightmap.height == 16384u);
+
+    ASSERT(heightmap.RowPitch >= heightmap.width * heightmap.desc.bytesPerPixel);
+    ASSERT(heightmap.RowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
+
+    ASSERT(!heightmap.chunks.empty());
+
     ASSERT(heightmap.width == heightmap.height, "Terrain currently expects a square heightmap");
 
-    m_desc.heightMapResolution = heightmap.width;
+    m_desc.dimention = heightmap.width;
 
     m_heightR16.resize(size_t(heightmap.width) * size_t(heightmap.height));
 
     const size_t srcRowBytes = static_cast<size_t>(heightmap.RowPitch);
     const size_t dstRowBytes = static_cast<size_t>(heightmap.width) * sizeof(uint16_t);
 
-    for (uint32_t y = 0; y < heightmap.height; ++y)
-    {
-        const std::byte* src = heightmap.cpuData.data() + size_t(y) * srcRowBytes;
-        std::byte* dst = reinterpret_cast<std::byte*>(m_heightR16.data() + size_t(y) * heightmap.width);
-        memcpy(dst, src, dstRowBytes);
-    }
-
+    heightmap.CopyPixels(reinterpret_cast<std::byte*>(m_heightR16.data()), dstRowBytes, dstRowBytes);
+    heightmap.PopulateCPU(true);
     m_isOnCPU = true;
+
     return true;
 }
 
@@ -268,17 +269,12 @@ void Terrain::Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
     ASSERT(m_isOnCPU, "No CPU data to upload");
 
     NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
-    ASSERT(heightmap.defaultBuffer and heightmap.uploadBuffer, "m_isOnCPU set but heightmap buffers are not valid.");
+    ASSERT(heightmap.uploadBuffer, "m_isOnCPU set but upload buffer is not valid.");
 
     m_texSrvHandle = rendererCtx.allocSRVStatic(1u);
     heightmap.srvOffset = rendererCtx.offsetSRV(m_texSrvHandle, 0u);
-
-    NSTexture::UploadGPU(
-        rendererCtx,
-        cmdList,
-        heightmap,
-        true,
-        true,
+    heightmap.PopulateGPU(
+        cmdList, true,
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
     );
 
@@ -316,8 +312,8 @@ void Terrain::ReleaseUploadBuffers()
     for (NSTexture::Texture& tex : m_textures)
     {
         tex.uploadBuffer.Reset();
-        tex.cpuData.clear();
-        tex.cpuData.shrink_to_fit();
+        tex.chunks.clear();
+        tex.chunks.shrink_to_fit();
     }
 
     for (auto& chunk : m_chunks)
@@ -588,13 +584,13 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
 float Terrain::SampleHeight(float u, float v) const
 {
     ASSERT(not m_heightR16.empty());
-    if (m_desc.heightMapResolution == 0) return 0.0f;
+    if (m_desc.dimention == 0) return 0.0f;
 
     u = NSMath::Saturate(u);
     v = NSMath::Saturate(v);
 
-    float width = static_cast<float>(m_desc.heightMapResolution);
-    float depth = static_cast<float>(m_desc.heightMapResolution);
+    float width = static_cast<float>(m_desc.dimention);
+    float depth = static_cast<float>(m_desc.dimention);
 
     const float x = u * (width - 1.f);
     const float z = v * (depth - 1.f);

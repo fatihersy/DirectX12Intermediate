@@ -2,6 +2,27 @@
 
 namespace NSTexture
 {
+    struct SHADER_RESOURCE_VIEW_DESC
+    {
+        D3D12_SRV_DIMENSION ViewDimension;
+        UINT Shader4ComponentMapping;
+        union
+        {
+            D3D12_BUFFER_SRV Buffer;
+            D3D12_TEX1D_SRV Texture1D;
+            D3D12_TEX1D_ARRAY_SRV Texture1DArray;
+            D3D12_TEX2D_SRV Texture2D;
+            D3D12_TEX2D_ARRAY_SRV Texture2DArray;
+            D3D12_TEX2DMS_SRV Texture2DMS;
+            D3D12_TEX2DMS_ARRAY_SRV Texture2DMSArray;
+            D3D12_TEX3D_SRV Texture3D;
+            D3D12_TEXCUBE_SRV TextureCube;
+            D3D12_TEXCUBE_ARRAY_SRV TextureCubeArray;
+            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_SRV RaytracingAccelerationStructure;
+            D3D12_BUFFER_SRV_BYTE_OFFSET BufferByteOffset;
+        };
+    };
+
     enum class EType : UINT {
         EType_NONE = 0,
         EType_DIFFUSE = 1,
@@ -35,36 +56,136 @@ namespace NSTexture
         EType_Force32Bit = UINT_MAX
     };
 
-    struct LoadTextureDesc
+    inline UINT BytesPerPixel (DXGI_FORMAT format)
+    {
+        switch (format)
+        {
+            case DXGI_FORMAT::DXGI_FORMAT_R8_UNORM:
+            return 1u;
+
+            case DXGI_FORMAT::DXGI_FORMAT_R16_UNORM:
+            case DXGI_FORMAT::DXGI_FORMAT_R16_FLOAT:
+            return 2u;
+
+            case DXGI_FORMAT::DXGI_FORMAT_R32_FLOAT:
+            case DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM:
+            case DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+            case DXGI_FORMAT::DXGI_FORMAT_R16G16_FLOAT:
+            return 4u;
+
+            case DXGI_FORMAT::DXGI_FORMAT_R32G32_FLOAT:
+            case DXGI_FORMAT::DXGI_FORMAT_R16G16B16A16_FLOAT:
+            return 8u;
+
+            case DXGI_FORMAT::DXGI_FORMAT_R32G32B32A32_FLOAT:
+            return 16u;
+
+            default: {
+                ASSERT(false, "Unsupported format");
+                return std::numeric_limits<UINT>::max();
+            };
+        }
+    };
+
+    inline UINT ComponentCount(DXGI_FORMAT format)
+    {
+        switch (format)
+        {
+            case DXGI_FORMAT::DXGI_FORMAT_R8_UNORM:
+            case DXGI_FORMAT::DXGI_FORMAT_R32_FLOAT:
+            case DXGI_FORMAT::DXGI_FORMAT_R16_UNORM:
+            case DXGI_FORMAT::DXGI_FORMAT_R16_FLOAT:
+            return 1u;
+
+            case DXGI_FORMAT::DXGI_FORMAT_R16G16_FLOAT:
+            case DXGI_FORMAT::DXGI_FORMAT_R32G32_FLOAT:
+            return 2u;
+
+            case DXGI_FORMAT::DXGI_FORMAT_R16G16B16A16_FLOAT:
+            case DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM:
+            case DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+            case DXGI_FORMAT::DXGI_FORMAT_R32G32B32A32_FLOAT:
+            return 4u;
+
+            default: {
+                ASSERT(false, "Unsupported format");
+                return std::numeric_limits<UINT>::max();
+            };
+        }
+    };
+
+    struct TextureDesc
     {
         EType textureType = EType::EType_UNKNOWN;
-        DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        WICPixelFormatGUID wicPixelFormat = GUID_WICPixelFormat32bppRGBA;
-        UINT bytesPerPixel = 4u;
-        WICBitmapDitherType dither = WICBitmapDitherTypeNone;
-        IWICPalette* palette = nullptr;
+        DXGI_FORMAT format = DXGI_FORMAT::DXGI_FORMAT_UNKNOWN;
+        UINT bytesPerPixel = 0u;
         double alphaThresholdPercent = 0.f;
-        WICBitmapPaletteType paletteTranslate = WICBitmapPaletteTypeCustom;
         D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_FLAGS resourceFlags = D3D12_RESOURCE_FLAG_NONE;
         UINT16 mipLevels = 1u;
-        bool keepCpuData = false;
     };
+
+    struct WICLoadDesc
+    {
+        TextureDesc texDesc;
+        WICPixelFormatGUID wicPixelFormat = GUID_WICPixelFormat32bppRGBA;
+        WICBitmapDitherType dither = WICBitmapDitherTypeNone;
+        IWICPalette* palette = nullptr;
+        WICBitmapPaletteType paletteTranslate = WICBitmapPaletteTypeCustom;
+    };
+
+    struct EXRLoadDesc
+    {
+        TextureDesc texDesc;
+        std::array<std::string, 4> channels = { "R", "G", "B", "A" };
+        std::array<float, 4> defaultValues = { 0.f, 0.f, 0.f, 1.f };
+    };
+
+    constexpr UINT ROWS_AT_A_TIME = 1000;
+
+    struct TextureChunk
+    {
+        UINT firstRow;
+        UINT rowCount;
+        std::vector<std::byte> bytes;
+    };
+    using TextureData = std::vector<TextureChunk>;
 
     struct Texture
     {
-        LoadTextureDesc desc;
-        EType textureType = EType::EType_NONE;
+        std::wstring name;
+        TextureDesc desc;
         ComPtr<ID3D12Resource2> defaultBuffer;
         ComPtr<ID3D12Resource2> uploadBuffer;
         NSDescriptor::Offset srvOffset;
-        DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
         UINT width{};
         UINT height{};
         UINT RowPitch{};
-        std::vector<std::byte> cpuData;
+        TextureData chunks;
         bool m_isOnGPU{};
         bool m_isOnCPU{};
+
+        void CopyPixels(std::byte* dst, size_t dstRowPitch, size_t bytesPerRow) const;
+
+        Texture&& PopulateCPU(bool consumeLocalData);
+        Texture&& PopulateGPU(
+            NSRenderer::GraphicsCommandList cmdList,
+            bool barrierTransition = true,
+            D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            SHADER_RESOURCE_VIEW_DESC srvDesc = SHADER_RESOURCE_VIEW_DESC
+            {
+                .ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D,
+                .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                .Texture2D = {
+                    .MostDetailedMip = 0u,
+                    .MipLevels = 1u,
+                    .PlaneSlice = 0u,
+                    .ResourceMinLODClamp = 0.f
+                }
+            }
+        );
+        void UnloadCPU();
+        void UnloadGPU();
     };
 
     inline const char* TextureTypeToString(NSTexture::EType tType)
@@ -161,33 +282,33 @@ namespace NSTexture
         }
     }
 
-    inline LoadTextureDesc GetTextureDesc(DXGI_FORMAT format)
+    inline WICLoadDesc GetWICTextureDesc(DXGI_FORMAT format)
     {
-        LoadTextureDesc desc{};
-        desc.format = format;
+        WICLoadDesc wicDesc{};
+        wicDesc.texDesc.format = format;
 
         switch (format)
         {
         case DXGI_FORMAT_R8G8B8A8_UNORM:
         case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-            desc.wicPixelFormat = GUID_WICPixelFormat32bppRGBA;
-            desc.bytesPerPixel = 4u;
+            wicDesc.wicPixelFormat = GUID_WICPixelFormat32bppRGBA;
+            wicDesc.texDesc.bytesPerPixel = 4u;
             break;
 
         case DXGI_FORMAT_B8G8R8A8_UNORM:
         case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
-            desc.wicPixelFormat = GUID_WICPixelFormat32bppBGRA;
-            desc.bytesPerPixel = 4u;
+            wicDesc.wicPixelFormat = GUID_WICPixelFormat32bppBGRA;
+            wicDesc.texDesc.bytesPerPixel = 4u;
             break;
 
         case DXGI_FORMAT_R8_UNORM:
-            desc.wicPixelFormat = GUID_WICPixelFormat8bppGray;
-            desc.bytesPerPixel = 1u;
+            wicDesc.wicPixelFormat = GUID_WICPixelFormat8bppGray;
+            wicDesc.texDesc.bytesPerPixel = 1u;
             break;
 
         case DXGI_FORMAT_R16_UNORM:
-            desc.wicPixelFormat = GUID_WICPixelFormat16bppGray;
-            desc.bytesPerPixel = 2u;
+            wicDesc.wicPixelFormat = GUID_WICPixelFormat16bppGray;
+            wicDesc.texDesc.bytesPerPixel = 2u;
             break;
 
         default:
@@ -195,30 +316,22 @@ namespace NSTexture
             break;
         }
 
-        return desc;
+        return wicDesc;
     }
 
-    inline LoadTextureDesc GetTextureDesc(EType type)
+    inline WICLoadDesc GetWICTextureDesc(EType type)
     {
-        LoadTextureDesc desc = GetTextureDesc(TypeToFormat(type));
-        desc.textureType = type;
+        WICLoadDesc wicDesc = GetWICTextureDesc(TypeToFormat(type));
+        wicDesc.texDesc.textureType = type;
 
-        if (type == EType::EType_HEIGHT or type == EType::EType_DISPLACEMENT)
-        {
-            desc.keepCpuData = true;
-        }
-
-        return desc;
+        return wicDesc;
     }
 
     Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EType type);
-    Texture LoadTexture(std::wstring_view name, std::wstring_view filename, LoadTextureDesc desc);
-    Texture LoadTexture(std::wstring_view name, IWICBitmapDecoder* decoder, EType type);
-    Texture LoadTexture(std::wstring_view name, IWICBitmapDecoder* decoder, LoadTextureDesc desc);
+    Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc);
+    Texture LoadTextureWIC(std::wstring_view name, IWICBitmapDecoder* decoder, EType type);
+    Texture LoadTextureWIC(std::wstring_view name, std::wstring_view filename, WICLoadDesc desc);
+    Texture LoadTextureWIC(std::wstring_view name, IWICBitmapDecoder* decoder, WICLoadDesc desc);
 
-    void UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, NSTexture::Texture& texture,
-        bool createSRV = false,
-        bool barrierTransition = true,
-        D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-    );
+    Texture LoadTextureEXR(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc);
 }

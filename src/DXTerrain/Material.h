@@ -48,7 +48,7 @@ public:
     {
         for (NSTexture::Texture& tex : m_textures)
         {
-            if (tex.textureType == tType) return true;
+            if (tex.desc.textureType == tType) return true;
         }
 
         return false;
@@ -57,7 +57,7 @@ public:
     {
         for (NSTexture::Texture& tex : m_textures)
         {
-            if (tex.textureType == tType) return &tex;
+            if (tex.desc.textureType == tType) return &tex;
         }
 
         return nullptr;

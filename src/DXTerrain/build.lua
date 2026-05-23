@@ -36,7 +36,13 @@ links {
     "comctl32.lib",
     "delayimp.lib",
     "assimp-vc142-mt.lib",
-    "imgui.lib"
+    "imgui.lib",
+    "OpenEXRUtil-3_4.lib",
+    "OpenEXR-3_4.lib",
+    "IlmThread-3_4.lib",
+    "OpenEXRCore-3_4.lib",
+    "Iex-3_4.lib",
+    "Imath-3_2.lib"
 }
 
 pchheader "stdafx.h"

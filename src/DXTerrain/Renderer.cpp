@@ -825,10 +825,10 @@ void Renderer::CreateFallbackTexture()
 
     Execute([&fbTex, &fbHandle, &device](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
     {
-        fbTex.textureType = NSTexture::EType::EType_DIFFUSE;
+        fbTex.desc.textureType = NSTexture::EType::EType_DIFFUSE;
         fbTex.width = 64;
         fbTex.height = 64;
-        fbTex.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        fbTex.desc.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
         const UINT squareSize = fbTex.width / 8u;
 
         D3D12_RESOURCE_DESC dstDesc{};
@@ -837,7 +837,7 @@ void Renderer::CreateFallbackTexture()
         dstDesc.Height = fbTex.height;
         dstDesc.DepthOrArraySize = 1;
         dstDesc.MipLevels = 1;
-        dstDesc.Format = fbTex.format;
+        dstDesc.Format = fbTex.desc.format;
         dstDesc.SampleDesc.Count = 1;
         dstDesc.SampleDesc.Quality = 0;
         dstDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -899,7 +899,7 @@ void Renderer::CreateFallbackTexture()
         srcLoc.PlacedFootprint.Footprint.Width = fbTex.width;
         srcLoc.PlacedFootprint.Footprint.Height = fbTex.height;
         srcLoc.PlacedFootprint.Footprint.Depth = 1;
-        srcLoc.PlacedFootprint.Footprint.Format = fbTex.format;
+        srcLoc.PlacedFootprint.Footprint.Format = fbTex.desc.format;
         srcLoc.PlacedFootprint.Footprint.RowPitch = fbTex.RowPitch;
 
         D3D12_TEXTURE_COPY_LOCATION dstLoc{};
@@ -922,7 +922,7 @@ void Renderer::CreateFallbackTexture()
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = 1;
-        srvDesc.Format = fbTex.format;
+        srvDesc.Format = fbTex.desc.format;
         device->CreateShaderResourceView(fbTex.defaultBuffer.Get(), &srvDesc, fbHandle.cpuAddr);
     });
 }

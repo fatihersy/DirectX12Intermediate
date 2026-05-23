@@ -22,6 +22,6 @@ namespace NSTerrain
         uint32_t chunkCountX{};
         uint32_t chunkCountZ{};
         uint32_t vertsPerChunkEdge{};
-        uint32_t heightMapResolution{};
+        uint32_t dimention{};
     };
 }

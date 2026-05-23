@@ -169,12 +169,12 @@ void app::LoadAssets()
             .chunkCountX = 16,
             .chunkCountZ = 16,
             .vertsPerChunkEdge = 33,
-            .heightMapResolution = 2048
+            .dimention = 2048
         };
 
         DirectX::XMFLOAT3 camEye{};
 
-        if (this->m_renderer.CreateTerrain(cmdList, L"heightmap.png", m_scene.m_terrain.desc))
+        if (this->m_renderer.CreateTerrain(cmdList, L"terrain/heightmap_terrain.exr", m_scene.m_terrain.desc))
         {
             camEye = {
                 0.f,

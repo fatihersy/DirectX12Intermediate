@@ -17,7 +17,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
 
     try
     {
-        m_textures.emplace_back(NSTexture::LoadTexture(textureName, decoder, tType));
+        m_textures.emplace_back(NSTexture::LoadTextureWIC(textureName, decoder, tType));
     }
     catch (const HrException& e)
     {
@@ -91,7 +91,7 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         srcLoc.pResource = tex.uploadBuffer.Get();
         srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
         srcLoc.PlacedFootprint.Offset = 0;
-        srcLoc.PlacedFootprint.Footprint.Format = tex.format;
+        srcLoc.PlacedFootprint.Footprint.Format = tex.desc.format;
         srcLoc.PlacedFootprint.Footprint.Width = tex.width;
         srcLoc.PlacedFootprint.Footprint.Height = tex.height;
         srcLoc.PlacedFootprint.Footprint.Depth = 1;
@@ -108,7 +108,7 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = 1;
-        srvDesc.Format = tex.format;
+        srvDesc.Format = tex.desc.format;
         device->CreateShaderResourceView(tex.defaultBuffer.Get(), &srvDesc, rendererCtx.offsetSRV(m_srvHandle, texIndex).cpuAddr);
 
         texIndex++;

@@ -6,6 +6,7 @@
 #include "Blackboard.h"
 #include "Scene.h"
 #include "Terrain.h"
+#include "Texture.h"
 
 using namespace NSRenderPass;
 
@@ -1299,182 +1300,41 @@ TerrainPass::~TerrainPass()
 
 TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory)
 {
-    auto LoadTexture = [this, &wicFactory](ETexture texId, std::wstring_view name, std::wstring_view filename, NSTexture::EType type)
-    {
-        ASSERT(static_cast<size_t>(texId) < static_cast<size_t>(ETexture::MAX));
 
-        NSTexture::Texture& tex = m_textures[static_cast<size_t>(texId)];
-        tex.textureType = type;
-        tex.format = NSTexture::TypeToFormat(tex.textureType);
-
-        ComPtr<IWICBitmapDecoder> decoder;
-        std::wstring filepath(IApp::GetInstance()->im_assetsPath.generic_wstring().append(L"/").append(filename));
-        ThrowIfFailed(wicFactory->CreateDecoderFromFilename(filepath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder));
-
-        ComPtr<IWICBitmapFrameDecode> frame;
-        ThrowIfFailed(decoder->GetFrame(0, &frame));
-        ThrowIfFailed(frame->GetSize(&tex.width, &tex.height));
-
-        const UINT bpp = 4;
-        const UINT alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
-        const UINT rowPitch = (static_cast<UINT64>(tex.width) * bpp + alignment - 1) & ~(alignment - 1);
-        UINT uploadSize = rowPitch * tex.height;
-        tex.RowPitch = rowPitch;
-
-        ComPtr<IWICFormatConverter> converter;
-        ThrowIfFailed(wicFactory->CreateFormatConverter(&converter));
-
-        ThrowIfFailed(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.f, WICBitmapPaletteTypeCustom));
-
-        D3D12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
-        D3D12_HEAP_PROPERTIES uploadHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &uploadHeapProp,
-            D3D12_HEAP_FLAG_NONE,
-            &uploadBufferDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&tex.uploadBuffer)
-        ));
-
-        void* pMappedData = nullptr;
-        ThrowIfFailed(tex.uploadBuffer->Map(0, nullptr, &pMappedData));
-
-        ThrowIfFailed(converter->CopyPixels(nullptr, rowPitch, uploadSize, reinterpret_cast<BYTE*>(pMappedData)));
-
-        tex.uploadBuffer->Unmap(0, nullptr);
-
-        if (tex.uploadBuffer and tex.width > 0 and tex.height > 0)
-        {
-            D3D12_RESOURCE_DESC texDesc{};
-            texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            texDesc.Width = tex.width;
-            texDesc.Height = tex.height;
-            texDesc.DepthOrArraySize = 1;
-            texDesc.MipLevels = 1;
-            texDesc.Format = tex.format;
-            texDesc.SampleDesc.Count = 1;
-            texDesc.SampleDesc.Quality = 0;
-            texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            texDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-            D3D12_HEAP_PROPERTIES defaultHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
-            ThrowIfFailed(m_device->CreateCommittedResource(
-                &defaultHeapProp,
-                D3D12_HEAP_FLAG_NONE,
-                &texDesc,
-                D3D12_RESOURCE_STATE_COMMON,
-                nullptr,
-                IID_PPV_ARGS(&tex.defaultBuffer)
-            ));
-
-            std::wstring_view texTypeStr(NSTexture::TextureTypeToWString(tex.textureType));
-
-            std::wstring defbufname(NSTool::wformat(L"%s::%s::%s::defaultBuffer", L"TerrainPass", name, texTypeStr));
-            tex.defaultBuffer->SetName(defbufname.c_str());
-
-            std::wstring uplbufname(NSTool::wformat(L"%s::%s::%s::uploadBuffer", L"TerrainPass", name, texTypeStr));
-            tex.uploadBuffer->SetName(uplbufname.c_str());
+    m_textures[static_cast<size_t>(ETexture::GRASS)] = LoadTexture(L"TerrainPass::GrassTex", L"terrain/grass.jpg", NSTexture::EType::EType_DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::ROCK)] = LoadTexture(L"TerrainPass::RockTex", L"terrain/rock.jpg", NSTexture::EType::EType_DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::SNOW)] = LoadTexture(L"TerrainPass::SnowTex", L"terrain/snow.jpg", NSTexture::EType::EType_DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::DIRT)] = LoadTexture(L"TerrainPass::DirtTex", L"terrain/dirt.jpg", NSTexture::EType::EType_DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)] = NSTexture::LoadTextureWIC(L"TerrainPass::TerrainDiffuseTex", L"terrain/diffuse.png", NSTexture::WICLoadDesc {
+        .texDesc = {
+            .textureType = NSTexture::EType::EType_DIFFUSE
         }
-    };
+    });
 
-    LoadTexture(ETexture::GRASS, L"GrassTex", L"grass.jpg", NSTexture::EType::EType_DIFFUSE);
-    LoadTexture(ETexture::ROCK, L"RockTex", L"rock.jpg", NSTexture::EType::EType_DIFFUSE);
-    LoadTexture(ETexture::SNOW, L"SnowTex", L"snow.jpg", NSTexture::EType::EType_DIFFUSE);
-    LoadTexture(ETexture::DIRT, L"DirtTex", L"dirt.jpg", NSTexture::EType::EType_DIFFUSE);
-    LoadTexture(ETexture::TERRAIN_DIFFUSE, L"TerrainDiffuseTex", L"terrain_diffuse.png", NSTexture::EType::EType_DIFFUSE);
+    m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(ETexture::MAX));
+    m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::GRASS));
+    m_textures[static_cast<size_t>(ETexture::ROCK)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::ROCK));
+    m_textures[static_cast<size_t>(ETexture::SNOW)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::SNOW));
+    m_textures[static_cast<size_t>(ETexture::DIRT)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::DIRT));
+    m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::TERRAIN_DIFFUSE));
 
-    {
-        std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
-        {
-            ASSERT(tex.defaultBuffer and tex.uploadBuffer);
-        });
+    m_textures[static_cast<size_t>(ETexture::GRASS)].PopulateCPU(true).PopulateGPU(cmdList);
+    m_textures[static_cast<size_t>(ETexture::ROCK)].PopulateCPU(true).PopulateGPU(cmdList);
+    m_textures[static_cast<size_t>(ETexture::SNOW)].PopulateCPU(true).PopulateGPU(cmdList);
+    m_textures[static_cast<size_t>(ETexture::DIRT)].PopulateCPU(true).PopulateGPU(cmdList);
+    m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].PopulateCPU(true).PopulateGPU(cmdList);
 
-        {
-            std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
-            barriers.reserve(m_textures.size());
+    NSTexture::Texture& diffuse = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)];
+    ASSERT(diffuse.defaultBuffer);
+    ASSERT(diffuse.uploadBuffer);
+    ASSERT(diffuse.m_isOnCPU);
+    ASSERT(diffuse.desc.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
 
-            for (NSTexture::Texture& tex : m_textures)
-            {
-                barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-                    tex.defaultBuffer.Get(),
-                    D3D12_RESOURCE_STATE_COMMON,
-                    D3D12_RESOURCE_STATE_COPY_DEST
-                ));
-            }
+    ASSERT(diffuse.width == 4097u);
+    ASSERT(diffuse.height == 4097u);
 
-            cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
-        }
-
-        m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(ETexture::MAX));
-
-        std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> srcRange(static_cast<size_t>(ETexture::MAX), rendererCtx.fallbackSRV.get().cpuAddr);
-
-        auto destRange = ArraySequence<static_cast<size_t>(ETexture::MAX)>([&](auto I)
-        {
-            return rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(I)).cpuAddr;
-        });
-
-        m_device->CopyDescriptors(
-            destRange.size(),
-            destRange.data(),
-            nullptr,
-            srcRange.size(),
-            srcRange.data(),
-            nullptr,
-            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-        );
-
-        uint32_t texIndex{};
-        for (NSTexture::Texture& tex : m_textures)
-        {
-            m_textures[texIndex].srvOffset = rendererCtx.offsetSRV(m_srvHandle, texIndex);
-
-            D3D12_TEXTURE_COPY_LOCATION srcLoc{};
-            srcLoc.pResource = tex.uploadBuffer.Get();
-            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-            srcLoc.PlacedFootprint.Offset = 0;
-            srcLoc.PlacedFootprint.Footprint.Format = tex.format;
-            srcLoc.PlacedFootprint.Footprint.Width = tex.width;
-            srcLoc.PlacedFootprint.Footprint.Height = tex.height;
-            srcLoc.PlacedFootprint.Footprint.Depth = 1;
-            srcLoc.PlacedFootprint.Footprint.RowPitch = tex.RowPitch;
-
-            D3D12_TEXTURE_COPY_LOCATION dstLoc{};
-            dstLoc.pResource = tex.defaultBuffer.Get();
-            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-            dstLoc.SubresourceIndex = 0;
-
-            cmdList.CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-
-            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            srvDesc.Texture2D.MipLevels = 1;
-            srvDesc.Format = tex.format;
-
-            m_device->CreateShaderResourceView(tex.defaultBuffer.Get(), &srvDesc, tex.srvOffset.cpuAddr);
-            texIndex++;
-        }
-
-        {
-            std::vector<CD3DX12_RESOURCE_BARRIER> barriers;
-            barriers.reserve(m_textures.size());
-
-            for (NSTexture::Texture& tex : m_textures)
-            {
-                barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-                    tex.defaultBuffer.Get(),
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-                ));
-            }
-
-            cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
-        }
-    }
+    ASSERT(diffuse.RowPitch >= diffuse.width * diffuse.desc.bytesPerPixel);
+    ASSERT(diffuse.RowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
 
     return *this;
 };
@@ -1547,8 +1407,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
     const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
-    const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
-    const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.heightMapResolution - 1u);
+    const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.dimention - 1u);
+    const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.dimention - 1u);
     const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
     for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
@@ -2205,8 +2065,8 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
 
         const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
-        const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.heightMapResolution - 1u);
-        const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.heightMapResolution - 1u);
+        const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.dimention - 1u);
+        const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.dimention - 1u);
         const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
         for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
