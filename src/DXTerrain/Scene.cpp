@@ -71,18 +71,39 @@ std::vector<NSModel::SceneModelKey> Scene::CullModels(const NSScene::Camera& cam
     return m_modelsCulled;
 }
 
-std::vector<NSTerrain::ChunkKey> Scene::CullTerrain(const NSScene::Camera& camera)
+NSScene::CullTerrainResult Scene::CullTerrain(const NSScene::Camera& camera)
 {
-    std::vector<NSTerrain::ChunkKey> chunksCulled;
+    NSScene::CullTerrainResult result{};
 
     NSMath::SFrustum frustum(camera.viewMatrix * camera.projMatrix);
 
-    for (NSScene::TerrainChunk& chunk : m_terrain.chunks)
+    for (NSScene::TerrainPage& page : m_terrain.pages)
     {
-        if (frustum.TestAABB(chunk.bound.aabb)) chunksCulled.push_back(chunk.key);
+        NSScene::CullTerrainResult::CulledPage culledPage{};
+
+        if (frustum.TestAABB(page.bound.aabb))
+        {
+            culledPage.bound = page.bound;
+            culledPage.key = page.key;
+
+            NSScene::CullTerrainResult::CulledChunk culledChunk{};
+
+            for (NSScene::TerrainChunk& chunk : page.chunks)
+            {
+                if (frustum.TestAABB(chunk.bound.aabb))
+                {
+                    culledChunk.bound = chunk.bound;
+                    culledChunk.key = chunk.key;
+
+                    culledPage.chunks.push_back(culledChunk);
+                }
+            }
+
+            result.pages.push_back(culledPage);
+        }
     }
 
-    return chunksCulled;
+    return result;
 }
 
 void Scene::ForEachModel(std::function<void(Model& model)> ForEach)

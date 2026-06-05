@@ -1307,7 +1307,9 @@ TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendere
     m_textures[static_cast<size_t>(ETexture::DIRT)] = LoadTexture(L"TerrainPass::DirtTex", L"terrain/dirt.jpg", NSTexture::EType::EType_DIFFUSE);
     m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)] = NSTexture::LoadTextureWIC(L"TerrainPass::TerrainDiffuseTex", L"terrain/diffuse.png", NSTexture::WICLoadDesc {
         .texDesc = {
-            .textureType = NSTexture::EType::EType_DIFFUSE
+            .textureType = NSTexture::EType::EType_DIFFUSE,
+            .localRowPitchMode = NSTexture::ERowPitchMode::TIGHT,
+            .uploadRowPitchMode = NSTexture::ERowPitchMode::DX_ALIGN,
         }
     });
 
@@ -1333,8 +1335,8 @@ TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendere
     ASSERT(diffuse.width == 4097u);
     ASSERT(diffuse.height == 4097u);
 
-    ASSERT(diffuse.RowPitch >= diffuse.width * diffuse.desc.bytesPerPixel);
-    ASSERT(diffuse.RowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
+    ASSERT(diffuse.localRowPitch >= diffuse.width * diffuse.desc.bytesPerPixel);
+    ASSERT(diffuse.uploadRowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
 
     return *this;
 };
@@ -1376,10 +1378,10 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.RSSetViewports(1, &viewport);
     cmdList.RSSetScissorRects(1, &scissor);
 
-    std::vector<NSTerrain::ChunkKey> visibleChunkkeys = scene.CullTerrain(scene.m_camera);
+    NSScene::CullTerrainResult cullTerrainResult = scene.CullTerrain(scene.m_camera);
     const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
-    const std::vector<NSTerrain::TerrainChunk>& regChunks = terrain.GetChunks();
-    const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
+    const std::vector<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
+    const std::vector<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
 
     if (rendererCtx.rendererTestFlag(NSRenderer::ERendererFlag::MODE_WIREFRAME))
     {
@@ -1411,40 +1413,46 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.dimention - 1u);
     const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
-    for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
+    for (const NSScene::CullTerrainResult::CulledPage& culledPage : cullTerrainResult.pages)
     {
-        ASSERT(sceChunks.size() > chunkKey.index);
-        const NSScene::TerrainChunk& sceChunk = sceChunks[chunkKey.index];
+        ASSERT(scePages.size() == regPages.size(), "Scene and Reg vectors both must have their equavalent elements");
+        ASSERT(regPages.size() > culledPage.key.index, "Every Page keys must meet with an element");
 
-        ASSERT(regChunks.size() > sceChunk.key.index);
-        const NSTerrain::TerrainChunk& regChunk = regChunks[sceChunk.key.index];
+        const NSTerrain::TerrainPage& regPage = regPages[culledPage.key.index];
 
-        ASSERT(regChunk.key.gridX == sceChunk.key.gridX and regChunk.key.gridZ == sceChunk.key.gridZ);
-
-        NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
+        for (const NSScene::CullTerrainResult::CulledChunk& culledChunk : culledPage.chunks)
         {
-            TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
-            DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
-            cbuffer.maxHeight = desc.maxHeight;
-            cbuffer.worldTexelSpacingX = worldTexelSpacingX;
-            cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
-            cbuffer.tessFactorScale = 1.f;
-            cbuffer.textureTilingFactor = 64.f;
-            cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
-            cbuffer.chunkUVScale = regChunk.chunkUVScale;
-            cbuffer.heightmapSrvIndex = heightmapSrvIndex;
-            cbuffer.terrainDiffuseSrvIndex = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset.index;
-            cbuffer.splatSrvIndices[0] = m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset.index;
-            cbuffer.splatSrvIndices[1] = m_textures[static_cast<size_t>(ETexture::ROCK)].srvOffset.index;
-            cbuffer.splatSrvIndices[2] = m_textures[static_cast<size_t>(ETexture::SNOW)].srvOffset.index;
-            cbuffer.splatSrvIndices[3] = m_textures[static_cast<size_t>(ETexture::DIRT)].srvOffset.index;
-        };
+            ASSERT(regPage.chunks.size() > culledChunk.key.index, "Chunk doesn't meet with an element");
 
-        cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
+            const NSTerrain::TerrainChunk& regChunk = regPage.chunks[culledChunk.key.index];
 
-        cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
-        cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
-        cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
+            ASSERT(regChunk.key.gridX == culledChunk.key.gridX and regChunk.key.gridZ == culledChunk.key.gridZ, "Chunk doesn't meet with an element");
+
+            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
+            {
+                TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
+                DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
+                cbuffer.maxHeight = desc.maxHeight;
+                cbuffer.worldTexelSpacingX = worldTexelSpacingX;
+                cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
+                cbuffer.tessFactorScale = 1.f;
+                cbuffer.textureTilingFactor = 64.f;
+                cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
+                cbuffer.chunkUVScale = regChunk.chunkUVScale;
+                cbuffer.heightmapSrvIndex = heightmapSrvIndex;
+                cbuffer.terrainDiffuseSrvIndex = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset.index;
+                cbuffer.splatSrvIndices[0] = m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset.index;
+                cbuffer.splatSrvIndices[1] = m_textures[static_cast<size_t>(ETexture::ROCK)].srvOffset.index;
+                cbuffer.splatSrvIndices[2] = m_textures[static_cast<size_t>(ETexture::SNOW)].srvOffset.index;
+                cbuffer.splatSrvIndices[3] = m_textures[static_cast<size_t>(ETexture::DIRT)].srvOffset.index;
+            };
+
+            cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
+
+            cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
+            cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
+            cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
+        }
     }
 
 };
@@ -1671,21 +1679,33 @@ void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRender
             AddLine(p3, p0, color);
         };
 
-        const std::vector<NSTerrain::ChunkKey> visibleKeys = scene.CullTerrain(mainCam);
-        std::vector<bool> visibleChunks(terrain.chunks.size(), false);
-        for (const NSTerrain::ChunkKey& key : visibleKeys)
+        const NSScene::CullTerrainResult visibleKeys = scene.CullTerrain(mainCam);
+        struct SPageVisibility {
+            bool isVisible{};
+            std::vector<bool> chunks{};
+        };
+        std::vector<SPageVisibility> visiblePages(terrain.pages.size());
+
+        for (const NSScene::CullTerrainResult::CulledPage& culledPage : visibleKeys.pages)
         {
-            if (key.index < visibleChunks.size()) visibleChunks[key.index] = true;
+            if (visiblePages.size() < culledPage.key.index) continue;
+
+            SPageVisibility& pageVisibility = visiblePages[culledPage.key.index];
+            pageVisibility.isVisible = true;
+
+            for (const NSScene::CullTerrainResult::CulledChunk& culledChunk : culledPage.chunks)
+            {
+                if (pageVisibility.chunks.size() > culledChunk.key.index) pageVisibility.chunks[culledChunk.key.index] = true;
+            }
         }
 
         const XMFLOAT4 hiddenChunkColor{ 0.65f, 0.12f, 0.10f, 1.0f };
         const XMFLOAT4 visibleChunkColor{ 0.10f, 0.85f, 0.25f, 1.0f };
         utils.m_debugLines.clear();
 
-        for (const NSScene::TerrainChunk& chunk : terrain.chunks)
+        for (const NSScene::TerrainPage& page : terrain.pages)
         {
-            const bool isVisible = chunk.key.index < visibleChunks.size() && visibleChunks[chunk.key.index];
-            AddAabbTop(chunk.bound.aabb, isVisible ? visibleChunkColor : hiddenChunkColor);
+            AddAabbTop(page.bound.aabb, visiblePages[page.key.index].isVisible ? visibleChunkColor : hiddenChunkColor);
         }
 
         const XMVECTOR frustumEye = mainCam.camEye;
@@ -1781,19 +1801,19 @@ void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRender
     float minZ = -terrainDepth * 0.5f;
     float maxZ = terrainDepth * 0.5f;
 
-    if (not terrain.chunks.empty())
+    if (not terrain.pages.empty())
     {
-        minX = terrain.chunks.front().bound.aabb.min.x;
-        maxX = terrain.chunks.front().bound.aabb.max.x;
-        minZ = terrain.chunks.front().bound.aabb.min.z;
-        maxZ = terrain.chunks.front().bound.aabb.max.z;
+        minX = terrain.pages.front().bound.aabb.min.x;
+        maxX = terrain.pages.front().bound.aabb.max.x;
+        minZ = terrain.pages.front().bound.aabb.min.z;
+        maxZ = terrain.pages.front().bound.aabb.max.z;
 
-        for (const NSScene::TerrainChunk& chunk : terrain.chunks)
+        for (const NSScene::TerrainPage& pages : terrain.pages)
         {
-            minX = std::min(minX, chunk.bound.aabb.min.x);
-            maxX = std::max(maxX, chunk.bound.aabb.max.x);
-            minZ = std::min(minZ, chunk.bound.aabb.min.z);
-            maxZ = std::max(maxZ, chunk.bound.aabb.max.z);
+            minX = std::min(minX, pages.bound.aabb.min.x);
+            maxX = std::max(maxX, pages.bound.aabb.max.x);
+            minZ = std::min(minZ, pages.bound.aabb.min.z);
+            maxZ = std::max(maxZ, pages.bound.aabb.max.z);
         }
     }
 
@@ -2059,50 +2079,56 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         );
         ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
 
-        std::vector<NSTerrain::ChunkKey> visibleChunkkeys = scene.CullTerrain(scene.m_camera);
+        NSScene::CullTerrainResult cullTerrainResult = scene.CullTerrain(scene.m_camera);
         const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
-        const std::vector<NSTerrain::TerrainChunk>& regChunks = terrain.GetChunks();
-        const std::vector<NSScene::TerrainChunk>& sceChunks = scene.m_terrain.chunks;
+        const std::vector<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
+        const std::vector<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
 
         const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
         const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.dimention - 1u);
         const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.dimention - 1u);
         const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
-        for (const NSTerrain::ChunkKey& chunkKey : visibleChunkkeys)
+        for (const NSScene::CullTerrainResult::CulledPage& culledPage : cullTerrainResult.pages)
         {
-            ASSERT(sceChunks.size() > chunkKey.index);
-            const NSScene::TerrainChunk& sceChunk = sceChunks[chunkKey.index];
+            ASSERT(scePages.size() == regPages.size(), "Scene and Reg vectors both must have their equavalent elements");
+            ASSERT(regPages.size() > culledPage.key.index, "Every Page keys must meet with an element");
 
-            ASSERT(regChunks.size() > sceChunk.key.index);
-            const NSTerrain::TerrainChunk& regChunk = regChunks[sceChunk.key.index];
+            const NSTerrain::TerrainPage& regPage = regPages[culledPage.key.index];
 
-            ASSERT(regChunk.key.gridX == sceChunk.key.gridX and regChunk.key.gridZ == sceChunk.key.gridZ);
-
-            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
+            for (const NSScene::CullTerrainResult::CulledChunk& culledChunk : culledPage.chunks)
             {
-                TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
-                DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
-                cbuffer.maxHeight = desc.maxHeight;
-                cbuffer.worldTexelSpacingX = worldTexelSpacingX;
-                cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
-                cbuffer.tessFactorScale = 1.f;
-                cbuffer.textureTilingFactor = 64.f;
-                cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
-                cbuffer.chunkUVScale = regChunk.chunkUVScale;
-                cbuffer.heightmapSrvIndex = heightmapSrvIndex;
-                cbuffer.terrainDiffuseSrvIndex = rendererCtx.fallbackSRV.get().index;
-                cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.get().index;
-                cbuffer.splatSrvIndices[1] = rendererCtx.fallbackSRV.get().index;
-                cbuffer.splatSrvIndices[2] = rendererCtx.fallbackSRV.get().index;
-                cbuffer.splatSrvIndices[3] = rendererCtx.fallbackSRV.get().index;
-            };
+                ASSERT(regPage.chunks.size() > culledChunk.key.index, "Chunk doesn't meet with an element");
 
-            cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
+                const NSTerrain::TerrainChunk& regChunk = regPage.chunks[culledChunk.key.index];
 
-            cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
-            cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
-            cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
+                ASSERT(regChunk.key.gridX == culledChunk.key.gridX and regChunk.key.gridZ == culledChunk.key.gridZ, "Chunk doesn't meet with an element");
+
+                NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
+                {
+                    TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
+                    DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
+                    cbuffer.maxHeight = desc.maxHeight;
+                    cbuffer.worldTexelSpacingX = worldTexelSpacingX;
+                    cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
+                    cbuffer.tessFactorScale = 1.f;
+                    cbuffer.textureTilingFactor = 64.f;
+                    cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
+                    cbuffer.chunkUVScale = regChunk.chunkUVScale;
+                    cbuffer.heightmapSrvIndex = heightmapSrvIndex;
+                    cbuffer.terrainDiffuseSrvIndex = rendererCtx.fallbackSRV.get().index;
+                    cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.get().index;
+                    cbuffer.splatSrvIndices[1] = rendererCtx.fallbackSRV.get().index;
+                    cbuffer.splatSrvIndices[2] = rendererCtx.fallbackSRV.get().index;
+                    cbuffer.splatSrvIndices[3] = rendererCtx.fallbackSRV.get().index;
+                };
+
+                cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
+
+                cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
+                cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
+                cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
+            }
         }
     }
 

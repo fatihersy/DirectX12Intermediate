@@ -18,6 +18,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
     try
     {
         m_textures.emplace_back(NSTexture::LoadTextureWIC(textureName, decoder, tType));
+        m_textures.back().UnloadCPU();
     }
     catch (const HrException& e)
     {
@@ -41,7 +42,7 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
 {
     ASSERT(device);
 
-    if (m_textures.empty() or not m_isOnCPU) return;
+    ASSERT(not m_textures.empty() and m_isOnCPU, "Textures are not ready to upload to GPU");
 
     std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
     {
@@ -95,7 +96,7 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         srcLoc.PlacedFootprint.Footprint.Width = tex.width;
         srcLoc.PlacedFootprint.Footprint.Height = tex.height;
         srcLoc.PlacedFootprint.Footprint.Depth = 1;
-        srcLoc.PlacedFootprint.Footprint.RowPitch = tex.RowPitch;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = tex.uploadRowPitch;
 
         D3D12_TEXTURE_COPY_LOCATION dstLoc{};
         dstLoc.pResource = tex.defaultBuffer.Get();

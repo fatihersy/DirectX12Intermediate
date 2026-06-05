@@ -16,6 +16,82 @@ T ToUNORM(float v)
 
 namespace NSTexture
 {
+    EChannel ChannelDeduction(unsigned char name)
+    {
+        for (uint32_t idx = ChFront; idx < static_cast<uint32_t>(ChEnd); idx++)
+        {
+            if (std::toupper(name) == channelNames[idx][0])
+            {
+               return static_cast<EChannel>(idx);
+            }
+        }
+        return ChUnknown;
+    };
+
+    TextureMetadata ProbeTexture(std::filesystem::path _path)
+    {
+        std::string path = _path.generic_string();
+        if (not std::filesystem::is_regular_file(_path)) return {};
+
+        size_t dotPos = path.find_last_of('.');
+        ASSERT(dotPos != path.npos, "Extension extraction failed from the file");
+
+        TextureMetadata metadata{};
+
+        if (strcmp(path.c_str() + dotPos, ".exr") == 0)
+        {
+            Imf::InputFile file(path.c_str());
+
+            const Imath::Box2i dataWindow = file.header().dataWindow();
+
+            metadata.width = dataWindow.max.x - dataWindow.min.x + 1;
+            metadata.height = dataWindow.max.y - dataWindow.min.y + 1;
+
+            Imf::ChannelList::ConstIterator itr = file.header().channels().begin();
+            const Imf::ChannelList::ConstIterator chEnd = file.header().channels().end();
+            for (; itr != chEnd ;)
+            {
+                metadata.channels.push_back(ChannelDeduction( (*itr.name()) ));
+
+                ASSERT(metadata.channels.back() != ChUnknown);
+                ASSERT(itr.channel().xSampling == 1 and itr.channel().ySampling == 1);
+
+                itr++;
+            }
+        }
+        else
+        {
+            ASSERT(false, "Feature probing textures via WIC didn't implemented yet");
+        }
+
+        metadata.success = true;
+        return metadata;
+    }
+
+    UINT CalculateRowPitch(UINT width, UINT bytesPerPixel, NSTexture::ERowPitchMode mode)
+    {
+        const UINT64 tight = static_cast<UINT64>(width) * bytesPerPixel;
+
+        switch (mode)
+        {
+            case NSTexture::ERowPitchMode::DX_ALIGN:
+            {
+                const UINT64 alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
+                const UINT64 dxAligned = (tight + alignment - 1u) & ~(alignment - 1u);
+                ASSERT(dxAligned < std::numeric_limits<UINT>::max());
+                return static_cast<UINT>(dxAligned);
+            }
+            case NSTexture::ERowPitchMode::TIGHT:
+            {
+                ASSERT(tight < std::numeric_limits<UINT>::max());
+                return static_cast<UINT>(tight);
+            }
+            default: {
+                ASSERT(false, "Undefined mode");
+                return std::numeric_limits<UINT>::max();
+            }
+        }
+    }
     Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EType type)
     {
         return LoadTextureWIC(name, filename, GetWICTextureDesc(type));
@@ -53,6 +129,7 @@ namespace NSTexture
         ASSERT(desc.texDesc.mipLevels == 1u, "LoadTexture currently uploads only the first mip");
         ASSERT(desc.texDesc.bytesPerPixel == BytesPerPixel(desc.texDesc.format));
         ASSERT(decoder);
+        ASSERT(desc.texDesc.localRowPitchMode != ERowPitchMode::UNDEFINED);
 
         IWICImagingFactory2* wicFactory = IApp::GetInstance()->im_wicFactory.Get();
         ID3D12Device14* device = IApp::GetInstance()->im_device.Get();
@@ -65,17 +142,8 @@ namespace NSTexture
         ThrowIfFailed(decoder->GetFrame(0, &frame));
         ThrowIfFailed(frame->GetSize(&tex.width, &tex.height));
 
-        const UINT alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
-        const UINT64 unalignedRowPitch = static_cast<UINT64>(tex.width) * desc.texDesc.bytesPerPixel;
-        const UINT64 alignedRowPitch = (unalignedRowPitch + alignment - 1u) & ~(static_cast<UINT64>(alignment) - 1u);
-        const UINT64 uploadSize64 = alignedRowPitch * tex.height;
-
-        ASSERT(alignedRowPitch <= UINT_MAX);
-        ASSERT(uploadSize64 <= UINT_MAX);
-
-        const UINT rowPitch = static_cast<UINT>(alignedRowPitch);
-        const UINT uploadSize = static_cast<UINT>(uploadSize64);
-        tex.RowPitch = rowPitch;
+        tex.localRowPitch = CalculateRowPitch(tex.width, desc.texDesc.bytesPerPixel, desc.texDesc.localRowPitchMode);
+        tex.uploadRowPitch = CalculateRowPitch(tex.width, desc.texDesc.bytesPerPixel, desc.texDesc.uploadRowPitchMode);
 
         ComPtr<IWICFormatConverter> converter;
         ThrowIfFailed(wicFactory->CreateFormatConverter(&converter));
@@ -90,14 +158,14 @@ namespace NSTexture
         ));
 
         const UINT totalChunkCount = (tex.height + ROWS_AT_A_TIME - 1u) / ROWS_AT_A_TIME;
-        tex.chunks.resize(totalChunkCount, {});
+        tex.chunks.assign(totalChunkCount, {});
         for (UINT idx{}; idx < totalChunkCount; idx++)
         {
             TextureChunk& chunk = tex.chunks[idx];
 
             chunk.firstRow = idx * ROWS_AT_A_TIME;
             chunk.rowCount = std::min(ROWS_AT_A_TIME, tex.height - chunk.firstRow);
-            chunk.bytes.resize(static_cast<size_t>(chunk.rowCount) * rowPitch);
+            chunk.bytes.assign(static_cast<size_t>(chunk.rowCount) * tex.localRowPitch, {});
 
             WICRect rect{
                 .X = 0,
@@ -106,7 +174,7 @@ namespace NSTexture
                 .Height = static_cast<INT>(chunk.rowCount)
             };
 
-            ThrowIfFailed(converter->CopyPixels(&rect, rowPitch, static_cast<UINT>(chunk.bytes.size()), reinterpret_cast<BYTE*>(chunk.bytes.data())));
+            ThrowIfFailed(converter->CopyPixels(&rect, tex.localRowPitch, static_cast<UINT>(chunk.bytes.size()), reinterpret_cast<BYTE*>(chunk.bytes.data())));
         }
 
         tex.desc = desc.texDesc;
@@ -116,12 +184,12 @@ namespace NSTexture
     Texture LoadTextureEXR(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc)
     {
         ASSERT(static_cast<int>(desc.texDesc.textureType) < static_cast<int>(EType::EType_MAX));
+        ASSERT(desc.texDesc.localRowPitchMode != ERowPitchMode::UNDEFINED);
 
         if (desc.texDesc.format == DXGI_FORMAT_UNKNOWN)
         {
             desc.texDesc.format = TypeToFormat(desc.texDesc.textureType);
         }
-        desc.texDesc.bytesPerPixel = BytesPerPixel(desc.texDesc.format);
 
         ASSERT(desc.texDesc.mipLevels == 1u, "LoadTextureEXR currently uploads only the first mip");
 
@@ -145,26 +213,18 @@ namespace NSTexture
         const UINT width = static_cast<UINT>(dataWindow.max.x - dataWindow.min.x + 1);
         const UINT height = static_cast<UINT>(dataWindow.max.y - dataWindow.min.y + 1);
 
-        const UINT alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
-        const UINT64 unalignedRowPitch = static_cast<UINT64>(width) * desc.texDesc.bytesPerPixel;
-        const UINT64 alignedRowPitch = (unalignedRowPitch + alignment - 1u) & ~(static_cast<UINT64>(alignment) - 1u);
-        const UINT64 fileSize64 = alignedRowPitch * height;
-
-        ASSERT(alignedRowPitch <= UINT_MAX);
-        ASSERT(fileSize64 <= UINT_MAX);
-
-        const UINT rowPitch = static_cast<UINT>(alignedRowPitch);
         const UINT totalChunkCount = (height + ROWS_AT_A_TIME - 1u) / ROWS_AT_A_TIME;
-        [[__maybe_unused__]] const UINT fileSize = static_cast<UINT>(fileSize64);
 
         Texture tex{};
         tex.desc = desc.texDesc;
         tex.width = width;
         tex.height = height;
-        tex.RowPitch = rowPitch;
-        tex.chunks.resize(totalChunkCount, {});
+        tex.chunks.assign(totalChunkCount, {});
 
-        std::unordered_map<std::string, std::pair<float, std::vector<float>>> channels{};
+        tex.localRowPitch = CalculateRowPitch(tex.width, desc.texDesc.bytesPerPixel, desc.texDesc.localRowPitchMode);
+        tex.uploadRowPitch = CalculateRowPitch(tex.width, desc.texDesc.bytesPerPixel, desc.texDesc.uploadRowPitchMode);
+
+        std::unordered_map<std::string_view, std::pair<float, std::vector<float>>> channels{};
 
         for (UINT component{}; component < componentCount; ++component)
         {
@@ -191,9 +251,9 @@ namespace NSTexture
             return desc.defaultValues[component];
         };
 
-        auto WritePixelData = [&desc, &rowPitch, &width, &ReadComponent](UINT x, size_t absoluteY, size_t relativeY, UINT absoluteRow, UINT relativeRow, TextureChunk& chunk)
+        auto WritePixelData = [&desc, &tex, &width, &ReadComponent](UINT x, size_t absoluteY, size_t relativeY, UINT absoluteRow, UINT relativeRow, TextureChunk& chunk)
         {
-            std::byte* dstRow = chunk.bytes.data() + static_cast<size_t>(relativeRow) * rowPitch;
+            std::byte* dstRow = chunk.bytes.data() + static_cast<size_t>(relativeRow) * tex.localRowPitch;
 
             switch (desc.texDesc.format)
             {
@@ -263,13 +323,13 @@ namespace NSTexture
             TextureChunk& chunk = tex.chunks[chunkIdx];
             chunk.firstRow = rowStart;
             chunk.rowCount = rowsToRead;
-            chunk.bytes.resize(rowsToRead * rowPitch);
+            chunk.bytes.assign(rowsToRead * tex.localRowPitch, {});
 
             for (auto& component : channels)
             {
                 auto& [channelName, channel] = component;
                 auto& [defaultValue, pixels] = channel;
-                pixels.resize(pixelCountToRead);
+                pixels.assign(pixelCountToRead, {});
             }
 
             Imf::FrameBuffer frameBuffer;
@@ -286,7 +346,7 @@ namespace NSTexture
                     static_cast<ptrdiff_t>(fileYBegin) * sizeof(float) * width;
 
                 frameBuffer.insert(
-                    channelName.c_str(),
+                    channelName.data(),
                     Imf::Slice(Imf::FLOAT, baseDiff, sizeof(float), sizeof(float) * width)
                 );
             }
@@ -317,8 +377,11 @@ namespace NSTexture
         ASSERT(device, "Device is not valid");
         ASSERT(not chunks.empty(), "No data to populate upload buffers");
         ASSERT(not m_isOnCPU, "Texture Upload buffer is already populated");
+        ASSERT(desc.bytesPerPixel > 0u);
+        ASSERT(localRowPitch > 0u);
+        ASSERT(uploadRowPitch > 0u);
 
-        const size_t uploadSize = RowPitch * height;
+        const size_t uploadSize = uploadRowPitch * height;
 
         CD3DX12_RESOURCE_DESC resDesc(CD3DX12_RESOURCE_DESC::Buffer(uploadSize));
         CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
@@ -343,7 +406,11 @@ namespace NSTexture
         std::byte* mappedData = nullptr;
         ThrowIfFailed(uploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
 
-        CopyPixels(mappedData, RowPitch, RowPitch);
+        CopyPixels(
+            mappedData,
+            uploadRowPitch,
+            localRowPitch
+        );
 
         if (consumeLocalData) {
             chunks.clear();
@@ -361,6 +428,7 @@ namespace NSTexture
         ASSERT(device, "Device is not valid");
         ASSERT(m_isOnCPU and uploadBuffer, "Trying to upload texture without loading first");
         ASSERT(not m_isOnGPU, "Texture is already uploaded");
+        ASSERT(uploadRowPitch != 0 and uploadRowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
 
         if(not defaultBuffer) {
             CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
@@ -412,7 +480,7 @@ namespace NSTexture
             srcLoc.PlacedFootprint.Footprint.Width = width;
             srcLoc.PlacedFootprint.Footprint.Height = height;
             srcLoc.PlacedFootprint.Footprint.Depth = 1;
-            srcLoc.PlacedFootprint.Footprint.RowPitch = RowPitch;
+            srcLoc.PlacedFootprint.Footprint.RowPitch = uploadRowPitch;
 
             D3D12_TEXTURE_COPY_LOCATION dstLoc{};
             dstLoc.pResource = defaultBuffer.Get();
@@ -458,35 +526,139 @@ namespace NSTexture
         m_isOnGPU = false;
     }
 
-    void Texture::CopyPixels(std::byte* dst, size_t dstRowPitch, size_t bytesPerRow) const
+    void Texture::CopyPixels(std::byte* dst, size_t dstRowPitch, size_t bytesPerRow, bool consumeLocalData)
     {
         ASSERT(dst);
-        ASSERT(bytesPerRow <= RowPitch);
+        ASSERT(bytesPerRow <= localRowPitch);
         ASSERT(bytesPerRow <= dstRowPitch);
 
         for (const TextureChunk& chunk : chunks)
         {
             ASSERT(chunk.firstRow + chunk.rowCount <= height);
-            ASSERT(chunk.bytes.size() >= static_cast<size_t>(chunk.rowCount) * RowPitch);
+            ASSERT(chunk.bytes.size() >= static_cast<size_t>(chunk.rowCount) * localRowPitch);
 
-            if (dstRowPitch == RowPitch and bytesPerRow == RowPitch)
+            if (dstRowPitch == localRowPitch and bytesPerRow == localRowPitch)
             {
                 memcpy(
                     dst + static_cast<size_t>(chunk.firstRow) * dstRowPitch,
                     chunk.bytes.data(),
-                    static_cast<size_t>(chunk.rowCount) * RowPitch
+                    static_cast<size_t>(chunk.rowCount) * localRowPitch
                 );
             }
             else
             {
                 for (UINT row{}; row < chunk.rowCount; ++row)
                 {
-                    const std::byte* srcRow = chunk.bytes.data() + static_cast<size_t>(row) * RowPitch;
+                    const std::byte* srcRow = chunk.bytes.data() + static_cast<size_t>(row) * localRowPitch;
                     std::byte* dstRow = dst + static_cast<size_t>(chunk.firstRow + row) * dstRowPitch;
 
                     memcpy(dstRow, srcRow, bytesPerRow);
                 }
             }
         }
+
+        if (consumeLocalData)
+        {
+            chunks.clear();
+            chunks.shrink_to_fit();
+        }
+    }
+
+    void Texture::CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 srcRect)
+    {
+        ASSERT(dst);
+        ASSERT(srcRect.x + srcRect.width <= width);
+        ASSERT(srcRect.y + srcRect.height <= height);
+
+        const size_t copyRowBytes = static_cast<size_t>(srcRect.width) * desc.bytesPerPixel;
+        ASSERT(dstRowPitch >= copyRowBytes);
+        ASSERT(copyRowBytes <= localRowPitch);
+
+        const UINT srcEndY = srcRect.y + srcRect.height;
+
+        for (const TextureChunk& chunk : chunks)
+        {
+            ASSERT(chunk.firstRow + chunk.rowCount <= height);
+            ASSERT(chunk.bytes.size() >= static_cast<size_t>(chunk.rowCount) * localRowPitch);
+
+            const UINT chunkStartY = chunk.firstRow;
+            const UINT chunkEndY = chunk.firstRow + chunk.rowCount;
+
+            const UINT copyStartY = std::max(srcRect.y, chunkStartY);
+            const UINT copyEndY = std::min(srcEndY, chunkEndY);
+
+            if (copyStartY >= copyEndY) continue;
+
+            for (UINT y = copyStartY; y < copyEndY; y++)
+            {
+                const UINT srcChunkRow = y - chunk.firstRow;
+                const UINT dstRow = y - srcRect.y;
+
+                const std::byte * src = chunk.bytes.data()
+                    + static_cast<size_t>(srcChunkRow) * localRowPitch
+                    + static_cast<size_t>(srcRect.x) * desc.bytesPerPixel;
+
+                std::byte * out = dst
+                    + static_cast<size_t>(dstRow) * dstRowPitch;
+
+                memcpy(out, src, copyRowBytes);
+            }
+        }
+    }
+
+    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc)
+    {
+        ASSERT(data, "data is invalid");
+        ASSERT(desc.width > 0u);
+        ASSERT(desc.height > 0u);
+        ASSERT(srcRowPitch > 0u);
+        ASSERT(desc.texDesc.textureType != EType::EType_UNKNOWN);
+        ASSERT(desc.texDesc.format != DXGI_FORMAT_UNKNOWN);
+        ASSERT(desc.texDesc.localRowPitchMode != ERowPitchMode::UNDEFINED);
+        ASSERT(desc.texDesc.uploadRowPitchMode != ERowPitchMode::UNDEFINED);
+        ASSERT(desc.texDesc.mipLevels == 1u, "LoadTextureMemory currently supports only the first mip");
+        ASSERT(desc.texDesc.bytesPerPixel == BytesPerPixel(desc.texDesc.format));
+
+        const UINT tightRowPitch = CalculateRowPitch(desc.width, desc.texDesc.bytesPerPixel, NSTexture::ERowPitchMode::TIGHT);
+        ASSERT(srcRowPitch >= tightRowPitch);
+
+        const size_t totalSize = static_cast<size_t>(desc.height - 1u) * srcRowPitch + tightRowPitch;
+
+        ASSERT(dataSize >= totalSize, "Texture memory buffer is too small for the supplied dimensions and row pitch");
+
+        Texture tex{};
+        tex.name = name;
+        tex.desc = desc.texDesc;
+        tex.width = desc.width;
+        tex.height = desc.height;
+        tex.localRowPitch = CalculateRowPitch(tex.width, tex.desc.bytesPerPixel, tex.desc.localRowPitchMode);
+        tex.uploadRowPitch = CalculateRowPitch(tex.width, tex.desc.bytesPerPixel, tex.desc.uploadRowPitchMode);
+
+        const UINT totalChunkCount = (tex.height + ROWS_AT_A_TIME - 1u) / ROWS_AT_A_TIME;
+        tex.chunks.assign(totalChunkCount, {});
+
+        for (UINT idx{}; idx < totalChunkCount; idx++)
+        {
+            TextureChunk& chunk = tex.chunks[idx];
+
+            chunk.firstRow = idx * ROWS_AT_A_TIME;
+            ASSERT(tex.height > chunk.firstRow);
+
+            chunk.rowCount = std::min( ROWS_AT_A_TIME, tex.height - chunk.firstRow);
+
+            chunk.bytes.assign(static_cast<size_t>(chunk.rowCount) * tex.localRowPitch, std::byte{});
+
+            for (UINT row{}; row < chunk.rowCount; ++row)
+            {
+                const UINT absoluteRow = chunk.firstRow + row;
+                const std::byte* _Src = data + static_cast<size_t>(absoluteRow) * srcRowPitch;
+
+                std::byte* _Dst = chunk.bytes.data() + static_cast<size_t>(row) * tex.localRowPitch;
+
+                memcpy(_Dst, _Src, tightRowPitch);
+            }
+        }
+
+        return tex;
     }
 }

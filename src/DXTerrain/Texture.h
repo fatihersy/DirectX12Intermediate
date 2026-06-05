@@ -2,6 +2,40 @@
 
 namespace NSTexture
 {
+    enum EChannel : uint32_t
+    {
+        ChUnknown = 0,
+        ChR,
+        ChG,
+        ChB,
+        ChA,
+        ChY,
+        ChForce32Bit = UINT32_MAX
+    };
+    constexpr size_t ChBegin = static_cast<size_t>(ChUnknown);
+    constexpr size_t ChEnd = static_cast<size_t>(ChY) + 1u;
+
+    constexpr EChannel ChFront = ChR;
+    constexpr EChannel ChBack = ChY;
+
+    constexpr std::array<std::string_view, ChEnd> channelNames =
+    {
+        "",
+        "R",
+        "G",
+        "B",
+        "A",
+        "Y"
+    };
+
+    template<EChannel name>
+    constexpr std::string_view ChName = channelNames[static_cast<size_t>(name)];
+
+    constexpr std::string_view GetChannelName(EChannel channel)
+    {
+        return channelNames[static_cast<size_t>(channel)];
+    }
+
     struct SHADER_RESOURCE_VIEW_DESC
     {
         D3D12_SRV_DIMENSION ViewDimension;
@@ -54,6 +88,13 @@ namespace NSTexture
         EType_GLTF_METALLIC_ROUGHNESS = 27,
         EType_MAX = 28,
         EType_Force32Bit = UINT_MAX
+    };
+
+    enum class ERowPitchMode
+    {
+        UNDEFINED,
+        DX_ALIGN,
+        TIGHT
     };
 
     inline UINT BytesPerPixel (DXGI_FORMAT format)
@@ -114,6 +155,14 @@ namespace NSTexture
         }
     };
 
+    struct TextureMetadata
+    {
+        uint32_t width;
+        uint32_t height;
+        std::vector<EChannel> channels;
+        bool success{};
+    };
+
     struct TextureDesc
     {
         EType textureType = EType::EType_UNKNOWN;
@@ -123,6 +172,8 @@ namespace NSTexture
         D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_FLAGS resourceFlags = D3D12_RESOURCE_FLAG_NONE;
         UINT16 mipLevels = 1u;
+        ERowPitchMode localRowPitchMode = ERowPitchMode::UNDEFINED;
+        ERowPitchMode uploadRowPitchMode = ERowPitchMode::DX_ALIGN;
     };
 
     struct WICLoadDesc
@@ -137,8 +188,19 @@ namespace NSTexture
     struct EXRLoadDesc
     {
         TextureDesc texDesc;
-        std::array<std::string, 4> channels = { "R", "G", "B", "A" };
+        std::array<std::string_view, 4> channels = {
+            NSTexture::ChName<NSTexture::ChR>,
+            NSTexture::ChName<NSTexture::ChG>,
+            NSTexture::ChName<NSTexture::ChB>,
+            NSTexture::ChName<NSTexture::ChA> };
         std::array<float, 4> defaultValues = { 0.f, 0.f, 0.f, 1.f };
+    };
+
+    struct MemoryLoadDesc
+    {
+        TextureDesc texDesc;
+        UINT width{};
+        UINT height{};
     };
 
     constexpr UINT ROWS_AT_A_TIME = 1000;
@@ -160,12 +222,14 @@ namespace NSTexture
         NSDescriptor::Offset srvOffset;
         UINT width{};
         UINT height{};
-        UINT RowPitch{};
+        UINT localRowPitch{};
+        UINT uploadRowPitch{};
         TextureData chunks;
         bool m_isOnGPU{};
         bool m_isOnCPU{};
 
-        void CopyPixels(std::byte* dst, size_t dstRowPitch, size_t bytesPerRow) const;
+        void CopyPixels(std::byte* dst, size_t dstRowPitch, size_t bytesPerRow, bool consumeLocalData = false);
+        void CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 srcRect);
 
         Texture&& PopulateCPU(bool consumeLocalData);
         Texture&& PopulateGPU(
@@ -318,14 +382,19 @@ namespace NSTexture
 
         return wicDesc;
     }
+    EChannel ChannelDeduction(unsigned char name);
+    TextureMetadata ProbeTexture(std::filesystem::path path);
 
     inline WICLoadDesc GetWICTextureDesc(EType type)
     {
         WICLoadDesc wicDesc = GetWICTextureDesc(TypeToFormat(type));
         wicDesc.texDesc.textureType = type;
+        wicDesc.texDesc.localRowPitchMode = ERowPitchMode::TIGHT;
+        wicDesc.texDesc.uploadRowPitchMode = ERowPitchMode::DX_ALIGN;
 
         return wicDesc;
     }
+    UINT CalculateRowPitch(UINT width, UINT bytesPerPixel, NSTexture::ERowPitchMode mode);
 
     Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EType type);
     Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc);
@@ -334,4 +403,6 @@ namespace NSTexture
     Texture LoadTextureWIC(std::wstring_view name, IWICBitmapDecoder* decoder, WICLoadDesc desc);
 
     Texture LoadTextureEXR(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc);
+
+    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc);
 }

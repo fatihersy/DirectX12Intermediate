@@ -109,6 +109,20 @@ namespace NSMath
         DirectX::XMFLOAT3 min{};
         DirectX::XMFLOAT3 max{};
     };
+    struct SRectU32
+    {
+        uint32_t x{};
+        uint32_t y{};
+        uint32_t width{};
+        uint32_t height{};
+    };
+    struct SRectF32
+    {
+        float x{};
+        float y{};
+        float width{};
+        float height{};
+    };
     struct SFrustum
     {
         SFrustum() {};

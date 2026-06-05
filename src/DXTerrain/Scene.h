@@ -41,7 +41,7 @@ public:
     }
 
     std::vector<NSModel::SceneModelKey> CullModels(const NSScene::Camera& camera, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey()) override;
-    std::vector<NSTerrain::ChunkKey> CullTerrain(const NSScene::Camera& camera) override;
+    NSScene::CullTerrainResult CullTerrain(const NSScene::Camera& camera) override;
 
     template<typename T> requires NSModel::IsPrimitiveMesh<T>
     Model& AddObject(NSModel::AddCtx ctx, NSModel::PrimitiveTraits<T> desc, NSRenderer::Ctx rendererCtx)

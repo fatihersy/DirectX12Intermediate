@@ -166,15 +166,36 @@ void app::LoadAssets()
             .worldWidth = 16388.f,
             .worldDepth = 16388.f,
             .maxHeight = 8194.f,
+
+            .pageCountX = 16,
+            .pageCountZ = 16,
+
             .chunkCountX = 16,
             .chunkCountZ = 16,
             .vertsPerChunkEdge = 33,
-            .dimention = 2048
+
+            .dimention = 2048,
+
+            .heightmapDesc = {
+                .file = NSTerrain::kSourceFileHeightmap,
+                .format = DXGI_FORMAT_R16_UNORM,
+                .channels = {NSTexture::ChY}
+            },
+            .diffuseDesc = {
+                .file = NSTerrain::kSourceFileDiffuse,
+                .format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+                .channels = {
+                    NSTexture::ChR,
+                    NSTexture::ChG,
+                    NSTexture::ChB,
+                    NSTexture::ChA
+                }
+            }
         };
 
         DirectX::XMFLOAT3 camEye{};
 
-        if (this->m_renderer.CreateTerrain(cmdList, L"terrain/heightmap_terrain.exr", m_scene.m_terrain.desc))
+        if (this->m_renderer.CreateTerrain(cmdList, "terrain", m_scene.m_terrain.desc))
         {
             camEye = {
                 0.f,
@@ -183,12 +204,20 @@ void app::LoadAssets()
             };
             m_scene.m_camera.SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
 
-            for (const NSTerrain::TerrainChunk& chunk : this->m_renderer.GetTerrain().GetChunks())
+            for (const NSTerrain::TerrainPage& page : this->m_renderer.GetTerrain().GetPages())
             {
-                m_scene.m_terrain.chunks.push_back({
-                    .key = chunk.key,
-                    .bound = chunk.bounds
+                m_scene.m_terrain.pages.push_back({
+                    .key = page.key,
+                    .bound = page.bounds
                 });
+
+                for (const NSTerrain::TerrainChunk& chunk : page.chunks)
+                {
+                    m_scene.m_terrain.pages.back().chunks.push_back({
+                        .key = chunk.key,
+                        .bound = chunk.bounds
+                    });
+                }
             }
 
             m_scene.m_terrain.isInitialized = true;

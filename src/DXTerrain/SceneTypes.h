@@ -7,11 +7,17 @@ namespace NSScene
         NSTerrain::ChunkKey key;
         NSTerrain::ChunkBounds bound;
     };
+    struct TerrainPage
+    {
+        NSTerrain::PageKey key;
+        NSTerrain::PageBounds bound;
+        std::vector<TerrainChunk> chunks;
+    };
 
     struct Terrain
     {
         NSTerrain::TerrainDesc desc;
-        std::vector<TerrainChunk> chunks;
+        std::vector<TerrainPage> pages;
         bool isInitialized{};
     };
 
@@ -50,6 +56,24 @@ namespace NSScene
         float lookSensitivity = .01f;
     };
 
+    struct CullTerrainResult
+    {
+        struct CulledChunk
+        {
+            NSTerrain::ChunkKey key;
+            NSTerrain::ChunkBounds bound;
+        };
+        struct CulledPage
+        {
+            NSTerrain::PageKey key;
+            NSTerrain::PageBounds bound;
+
+            std::vector<CulledChunk> chunks;
+        };
+
+        std::vector<CulledPage> pages;
+    };
+
     class IScene
     {
     public:
@@ -62,7 +86,7 @@ namespace NSScene
         virtual const NSScene::Camera& GetMainCamera() const = 0;
 
         virtual std::vector<NSModel::SceneModelKey> CullModels(const NSScene::Camera& camera, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey()) = 0;
-        virtual std::vector<NSTerrain::ChunkKey> CullTerrain(const NSScene::Camera& camera) = 0;
+        virtual CullTerrainResult CullTerrain(const NSScene::Camera& camera) = 0;
 
         static constexpr float FAR_CLIP = 20000.f;
         static constexpr float NEAR_CLIP = 0.1f;

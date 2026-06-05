@@ -92,17 +92,9 @@ public:
         return std::ref(*m_barrierBatch);
     }
 
-    void CreateTerrain(NSRenderer::GraphicsCommandList cmdList, uint32_t seed, NSTerrain::TerrainDesc desc)
+    bool CreateTerrain(NSRenderer::GraphicsCommandList cmdList, const std::string_view root, NSTerrain::TerrainDesc desc)
     {
-        m_terrain.OnInit(cmdList, GetCtx(), seed, desc);
-    }
-    bool CreateTerrain(NSRenderer::GraphicsCommandList cmdList, const std::wstring_view path)
-    {
-        return m_terrain.OnInit(cmdList, GetCtx(), path);
-    }
-    bool CreateTerrain(NSRenderer::GraphicsCommandList cmdList, const std::wstring_view path, NSTerrain::TerrainDesc desc)
-    {
-        return m_terrain.OnInit(cmdList, GetCtx(), path, desc);
+        return m_terrain.OnInit(cmdList, GetCtx(), root, desc);
     }
 
     const NSTerrain::Terrain& GetTerrain() const {

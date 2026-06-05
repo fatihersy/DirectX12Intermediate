@@ -829,6 +829,7 @@ void Renderer::CreateFallbackTexture()
         fbTex.width = 64;
         fbTex.height = 64;
         fbTex.desc.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        fbTex.desc.bytesPerPixel = NSTexture::BytesPerPixel(fbTex.desc.format);
         const UINT squareSize = fbTex.width / 8u;
 
         D3D12_RESOURCE_DESC dstDesc{};
@@ -863,8 +864,10 @@ void Renderer::CreateFallbackTexture()
             cmdList.ResourceBarrier(1, &barrier);
         }
 
-        fbTex.RowPitch = fbTex.width * 4;
-        const UINT dataSize = fbTex.RowPitch * fbTex.height;
+        fbTex.localRowPitch = NSTexture::CalculateRowPitch(fbTex.width, fbTex.desc.bytesPerPixel, NSTexture::ERowPitchMode::TIGHT);
+        fbTex.uploadRowPitch = NSTexture::CalculateRowPitch(fbTex.width, fbTex.desc.bytesPerPixel, NSTexture::ERowPitchMode::DX_ALIGN);
+
+        const UINT dataSize = fbTex.uploadRowPitch * fbTex.height;
 
         CD3DX12_HEAP_PROPERTIES uploadHeapProp(D3D12_HEAP_TYPE_UPLOAD);
         CD3DX12_RESOURCE_DESC srcDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
@@ -883,7 +886,7 @@ void Renderer::CreateFallbackTexture()
 
         for (UINT y = 0; y < fbTex.height; y++)
         {
-            uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * fbTex.RowPitch);
+            uint32_t* row = reinterpret_cast<uint32_t*>(mappedData + y * fbTex.uploadRowPitch);
 
             for (UINT x = 0; x < fbTex.width; x++)
             {
@@ -900,7 +903,7 @@ void Renderer::CreateFallbackTexture()
         srcLoc.PlacedFootprint.Footprint.Height = fbTex.height;
         srcLoc.PlacedFootprint.Footprint.Depth = 1;
         srcLoc.PlacedFootprint.Footprint.Format = fbTex.desc.format;
-        srcLoc.PlacedFootprint.Footprint.RowPitch = fbTex.RowPitch;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = fbTex.uploadRowPitch;
 
         D3D12_TEXTURE_COPY_LOCATION dstLoc{};
         dstLoc.pResource = fbTex.defaultBuffer.Get();

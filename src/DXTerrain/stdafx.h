@@ -35,6 +35,7 @@
 #include <typeinfo>
 #include <cstddef>
 #include <cstring>
+#include <fstream>
 
 template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
@@ -101,9 +102,9 @@ auto ArraySequence(Fn&& fn)
 #include "StepTimer.h"
 #include "Logger.h"
 #include "Tools.h"
-#include "TerrainTypes.h"
 #include "ModelTypes.h"
 #include "AllocatorTypes.h"
 #include "RendererTypes.h"
 #include "Texture.h"
+#include "TerrainTypes.h"
 #include "SceneTypes.h"
