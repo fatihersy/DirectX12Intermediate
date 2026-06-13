@@ -25,11 +25,11 @@ namespace NSTerrain
 
     struct TerrainSourceTextureDesc
     {
-        std::filesystem::path file;
+        std::filesystem::path relativePath;
         DXGI_FORMAT format{};
         std::vector<NSTexture::EChannel> channels;
-        uint32_t width;
-        uint32_t height;
+        uint32_t width{};
+        uint32_t height{};
     };
 
     struct TerrainDesc
@@ -44,8 +44,6 @@ namespace NSTerrain
         uint32_t chunkCountX{};
         uint32_t chunkCountZ{};
         uint32_t vertsPerChunkEdge{};
-
-        uint32_t dimention{};
 
         TerrainSourceTextureDesc heightmapDesc;
         TerrainSourceTextureDesc diffuseDesc;

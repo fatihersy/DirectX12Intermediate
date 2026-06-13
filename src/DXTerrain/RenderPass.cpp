@@ -1305,38 +1305,38 @@ TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendere
     m_textures[static_cast<size_t>(ETexture::ROCK)] = LoadTexture(L"TerrainPass::RockTex", L"terrain/rock.jpg", NSTexture::EType::EType_DIFFUSE);
     m_textures[static_cast<size_t>(ETexture::SNOW)] = LoadTexture(L"TerrainPass::SnowTex", L"terrain/snow.jpg", NSTexture::EType::EType_DIFFUSE);
     m_textures[static_cast<size_t>(ETexture::DIRT)] = LoadTexture(L"TerrainPass::DirtTex", L"terrain/dirt.jpg", NSTexture::EType::EType_DIFFUSE);
-    m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)] = NSTexture::LoadTextureWIC(L"TerrainPass::TerrainDiffuseTex", L"terrain/diffuse.png", NSTexture::WICLoadDesc {
-        .texDesc = {
-            .textureType = NSTexture::EType::EType_DIFFUSE,
-            .localRowPitchMode = NSTexture::ERowPitchMode::TIGHT,
-            .uploadRowPitchMode = NSTexture::ERowPitchMode::DX_ALIGN,
-        }
-    });
+    //m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)] = NSTexture::LoadTextureWIC(L"TerrainPass::TerrainDiffuseTex", L"terrain/diffuse.png", NSTexture::WICLoadDesc {
+    //    .texDesc = {
+    //        .textureType = NSTexture::EType::EType_DIFFUSE,
+    //        .localRowPitchMode = NSTexture::ERowPitchMode::TIGHT,
+    //        .uploadRowPitchMode = NSTexture::ERowPitchMode::DX_ALIGN,
+    //    }
+    //});
 
     m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(ETexture::MAX));
     m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::GRASS));
     m_textures[static_cast<size_t>(ETexture::ROCK)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::ROCK));
     m_textures[static_cast<size_t>(ETexture::SNOW)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::SNOW));
     m_textures[static_cast<size_t>(ETexture::DIRT)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::DIRT));
-    m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::TERRAIN_DIFFUSE));
+    //m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset = rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(ETexture::TERRAIN_DIFFUSE));
 
     m_textures[static_cast<size_t>(ETexture::GRASS)].PopulateCPU(true).PopulateGPU(cmdList);
     m_textures[static_cast<size_t>(ETexture::ROCK)].PopulateCPU(true).PopulateGPU(cmdList);
     m_textures[static_cast<size_t>(ETexture::SNOW)].PopulateCPU(true).PopulateGPU(cmdList);
     m_textures[static_cast<size_t>(ETexture::DIRT)].PopulateCPU(true).PopulateGPU(cmdList);
-    m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].PopulateCPU(true).PopulateGPU(cmdList);
+    //m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].PopulateCPU(true).PopulateGPU(cmdList);
 
-    NSTexture::Texture& diffuse = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)];
-    ASSERT(diffuse.defaultBuffer);
-    ASSERT(diffuse.uploadBuffer);
-    ASSERT(diffuse.m_isOnCPU);
-    ASSERT(diffuse.desc.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
+    //NSTexture::Texture& diffuse = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)];
+    //ASSERT(diffuse.defaultBuffer);
+    //ASSERT(diffuse.uploadBuffer);
+    //ASSERT(diffuse.m_isOnCPU);
+    //ASSERT(diffuse.desc.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
 
-    ASSERT(diffuse.width == 4097u);
-    ASSERT(diffuse.height == 4097u);
+    //ASSERT(diffuse.width == 4097u);
+    //ASSERT(diffuse.height == 4097u);
 
-    ASSERT(diffuse.localRowPitch >= diffuse.width * diffuse.desc.bytesPerPixel);
-    ASSERT(diffuse.uploadRowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
+    //ASSERT(diffuse.localRowPitch >= diffuse.width * diffuse.desc.bytesPerPixel);
+    //ASSERT(diffuse.uploadRowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
 
     return *this;
 };
@@ -1409,8 +1409,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
     const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
-    const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.dimention - 1u);
-    const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.dimention - 1u);
+    const float worldTexelSpacingX = 0.f; // TODO: Placeholder. Fix it later desc.worldWidth / static_cast<float>(desc.dimention - 1u);
+    const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
     const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
     for (const NSScene::CullTerrainResult::CulledPage& culledPage : cullTerrainResult.pages)
@@ -2085,8 +2085,8 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         const std::vector<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
 
         const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
-        const float worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.dimention - 1u);
-        const float worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.dimention - 1u);
+        const float worldTexelSpacingX = 0.f; // TODO: Placeholder. Fix it later desc.worldWidth / static_cast<float>(desc.dimention - 1u);
+        const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
         const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
         for (const NSScene::CullTerrainResult::CulledPage& culledPage : cullTerrainResult.pages)

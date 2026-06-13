@@ -41,7 +41,7 @@ namespace NSTerrain
 
     struct TextureManifest
     {
-        std::filesystem::path file;
+        std::filesystem::path relativePath;
         DXGI_FORMAT format{};
         std::vector<NSTexture::EChannel> channels;
 
@@ -155,6 +155,16 @@ namespace NSTerrain
         bool isOnCPU{};
         bool isOnGPU{};
 
+        enum class EPageResidency : uint8_t
+        {
+            Unknown = 0u,
+            Missing,
+            Present,
+            Loading,
+            Loaded,
+            Failed,
+        } residency = EPageResidency::Unknown;
+
         PageKey key;
         PageBounds bounds{};
     };
@@ -185,7 +195,6 @@ namespace NSTerrain
         bool OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, const std::string_view root, NSTerrain::TerrainDesc desc);
         void OnDestroy(NSRenderer::Ctx rendererCtx);
 
-        void Generate(uint32_t seed, NSTerrain::TerrainDesc desc);
         bool Load(const std::wstring_view path);
         void Free(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 
@@ -210,13 +219,9 @@ namespace NSTerrain
             return m_isOnGPU;
         };
 
-        std::vector<TerrainPage> BuildPageLayout(const SourceManifest& source, const PageManifest& pagesManifest, const TerrainDesc& desc);
+        void BuildPageLayout(std::vector<TerrainPage>& out_Pages);
 
-        void LoadHeightPages(std::vector<TerrainPage>& pages, const std::filesystem::path& pagesRoot, const PageManifest& pagesManifest);
-        void LoadDiffusePages(std::vector<TerrainPage>& pages, const std::filesystem::path& pagesRoot, const PageManifest& pagesManifest);
         void UploadResidentPages(std::vector<TerrainPage>& pages, NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
-
-
     private:
         ID3D12Device14* m_device = nullptr;
         TerrainDesc m_desc{};
@@ -245,7 +250,7 @@ namespace NSTerrain
         void GeneratePageFromEXR();
         PageTextureManifest GenerateHeightBinsFromEXR();
         PageTextureManifest GenerateDiffuseBinsFromEXR();
-        NSTexture::Texture LoadPageTextureBin(std::wstring_view name, const std::filesystem::path& path, PageTextureManifest& manifest, NSTexture::EType type);
+        NSTexture::Texture LoadPageTextureBin(std::wstring_view name, const std::filesystem::path& path, const PageTextureManifest& manifest, NSTexture::EType type);
 
         TerrainChunk BuildChunkForPage(TerrainPage& page, uint32_t localChunkX, uint32_t localChunkZ, NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 

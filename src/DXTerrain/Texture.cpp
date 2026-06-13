@@ -28,19 +28,24 @@ namespace NSTexture
         return ChUnknown;
     };
 
-    TextureMetadata ProbeTexture(std::filesystem::path _path)
+    TextureMetadata ProbeTexture(std::filesystem::path path)
     {
-        std::string path = _path.generic_string();
-        if (not std::filesystem::is_regular_file(_path)) return {};
+        if (not path.is_absolute())
+        {
+            path = IApp::GetInstance()->im_assetsPath / path;
+        }
+        if (not std::filesystem::is_regular_file(path)) return {};
 
-        size_t dotPos = path.find_last_of('.');
-        ASSERT(dotPos != path.npos, "Extension extraction failed from the file");
+        std::string pathStr = path.generic_string();
+
+        size_t dotPos = pathStr.find_last_of('.');
+        ASSERT(dotPos != pathStr.npos, "Extension extraction failed from the file");
 
         TextureMetadata metadata{};
 
-        if (strcmp(path.c_str() + dotPos, ".exr") == 0)
+        if (strcmp(pathStr.c_str() + dotPos, ".exr") == 0)
         {
-            Imf::InputFile file(path.c_str());
+            Imf::InputFile file(pathStr.c_str());
 
             const Imath::Box2i dataWindow = file.header().dataWindow();
 
@@ -92,27 +97,32 @@ namespace NSTexture
             }
         }
     }
-    Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EType type)
+    Texture LoadTexture(std::wstring_view name, std::filesystem::path path, EType type)
     {
-        return LoadTextureWIC(name, filename, GetWICTextureDesc(type));
+        return LoadTextureWIC(name, path, GetWICTextureDesc(type));
     }
-    Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc)
+    Texture LoadTexture(std::wstring_view name, std::filesystem::path path, EXRLoadDesc desc)
     {
-        return LoadTextureEXR(name, filename, desc);
+        return LoadTextureEXR(name, path, desc);
     }
 
     Texture LoadTextureWIC(std::wstring_view name, IWICBitmapDecoder* decoder, EType type)
     {
         return LoadTextureWIC(name, decoder, GetWICTextureDesc(type));
     }
-    Texture LoadTextureWIC(std::wstring_view name, std::wstring_view path, WICLoadDesc desc)
+    Texture LoadTextureWIC(std::wstring_view name, std::filesystem::path path, WICLoadDesc desc)
     {
         IWICImagingFactory2* wicFactory = IApp::GetInstance()->im_wicFactory.Get();
         ASSERT(wicFactory);
 
         ComPtr<IWICBitmapDecoder> decoder;
-        std::wstring filepath(IApp::GetInstance()->im_assetsPath.generic_wstring().append(L"/").append(path));
-        ThrowIfFailed(wicFactory->CreateDecoderFromFilename(filepath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder));
+
+        if (not path.is_absolute())
+        {
+            path = IApp::GetInstance()->im_assetsPath / path;
+        }
+
+        ThrowIfFailed(wicFactory->CreateDecoderFromFilename(path.generic_wstring().c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder));
 
         if (desc.texDesc.format == DXGI_FORMAT_UNKNOWN)
         {
@@ -137,6 +147,7 @@ namespace NSTexture
         ASSERT(wicFactory and device);
 
         Texture tex{};
+        tex.name = name;
 
         ComPtr<IWICBitmapFrameDecode> frame;
         ThrowIfFailed(decoder->GetFrame(0, &frame));
@@ -181,7 +192,7 @@ namespace NSTexture
         return tex;
     }
 
-    Texture LoadTextureEXR(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc)
+    Texture LoadTextureEXR(std::wstring_view name, std::filesystem::path path, EXRLoadDesc desc)
     {
         ASSERT(static_cast<int>(desc.texDesc.textureType) < static_cast<int>(EType::EType_MAX));
         ASSERT(desc.texDesc.localRowPitchMode != ERowPitchMode::UNDEFINED);
@@ -198,9 +209,13 @@ namespace NSTexture
 
         desc.texDesc.bytesPerPixel = BytesPerPixel(desc.texDesc.format);
         const UINT componentCount = ComponentCount(desc.texDesc.format);
-        std::string filepath = (IApp::GetInstance()->im_assetsPath / filename).generic_string();
 
-        Imf::InputFile file(filepath.c_str());
+        if (not path.is_absolute())
+        {
+            path = IApp::GetInstance()->im_assetsPath / path;
+        }
+
+        Imf::InputFile file(path.generic_string().c_str());
 
         const Imath::Box2i dataWindow = file.header().dataWindow();
 
@@ -216,6 +231,7 @@ namespace NSTexture
         const UINT totalChunkCount = (height + ROWS_AT_A_TIME - 1u) / ROWS_AT_A_TIME;
 
         Texture tex{};
+        tex.name = name;
         tex.desc = desc.texDesc;
         tex.width = width;
         tex.height = height;
@@ -564,39 +580,39 @@ namespace NSTexture
         }
     }
 
-    void Texture::CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 srcRect)
+    void Texture::CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 cpyRect)
     {
         ASSERT(dst);
-        ASSERT(srcRect.x + srcRect.width <= width);
-        ASSERT(srcRect.y + srcRect.height <= height);
+        ASSERT(cpyRect.x + cpyRect.width <= width);
+        ASSERT(cpyRect.y + cpyRect.height <= height);
 
-        const size_t copyRowBytes = static_cast<size_t>(srcRect.width) * desc.bytesPerPixel;
+        const size_t copyRowBytes = static_cast<size_t>(cpyRect.width) * desc.bytesPerPixel;
         ASSERT(dstRowPitch >= copyRowBytes);
         ASSERT(copyRowBytes <= localRowPitch);
 
-        const UINT srcEndY = srcRect.y + srcRect.height;
+        const uint32_t srcEndY = cpyRect.y + cpyRect.height;
 
         for (const TextureChunk& chunk : chunks)
         {
             ASSERT(chunk.firstRow + chunk.rowCount <= height);
             ASSERT(chunk.bytes.size() >= static_cast<size_t>(chunk.rowCount) * localRowPitch);
 
-            const UINT chunkStartY = chunk.firstRow;
-            const UINT chunkEndY = chunk.firstRow + chunk.rowCount;
+            const uint32_t chunkStartY = chunk.firstRow;
+            const uint32_t chunkEndY = chunk.firstRow + chunk.rowCount;
 
-            const UINT copyStartY = std::max(srcRect.y, chunkStartY);
-            const UINT copyEndY = std::min(srcEndY, chunkEndY);
+            const uint32_t copyStartY = std::max(cpyRect.y, chunkStartY);
+            const uint32_t copyEndY = std::min(srcEndY, chunkEndY);
 
             if (copyStartY >= copyEndY) continue;
 
-            for (UINT y = copyStartY; y < copyEndY; y++)
+            for (uint32_t y = copyStartY; y < copyEndY; y++)
             {
-                const UINT srcChunkRow = y - chunk.firstRow;
-                const UINT dstRow = y - srcRect.y;
+                const uint32_t srcChunkRow = y - chunk.firstRow;
+                const uint32_t dstRow = y - cpyRect.y;
 
                 const std::byte * src = chunk.bytes.data()
                     + static_cast<size_t>(srcChunkRow) * localRowPitch
-                    + static_cast<size_t>(srcRect.x) * desc.bytesPerPixel;
+                    + static_cast<size_t>(cpyRect.x) * desc.bytesPerPixel;
 
                 std::byte * out = dst
                     + static_cast<size_t>(dstRow) * dstRowPitch;
@@ -606,7 +622,148 @@ namespace NSTexture
         }
     }
 
-    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc)
+    void Texture::CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 cpyRect, ECopyPixelEdgeMode edgeMode)
+    {
+        ASSERT(dst);
+        ASSERT(width > 1u);
+        ASSERT(height > 1u);
+        ASSERT(cpyRect.width > 0u);
+        ASSERT(cpyRect.height > 0u);
+        ASSERT(desc.bytesPerPixel > 0u);
+        ASSERT(cpyRect.x < width);
+        ASSERT(cpyRect.y < height);
+
+        const size_t bpp = desc.bytesPerPixel;
+        ASSERT(static_cast<size_t>(cpyRect.width) <= std::numeric_limits<size_t>::max() / bpp);
+        ASSERT(static_cast<size_t>(cpyRect.x) <= std::numeric_limits<size_t>::max() / bpp);
+
+        const size_t dstTightRowPitch = static_cast<size_t>(cpyRect.width) * bpp;
+        const uint32_t copyWidth = std::min(cpyRect.width, width - cpyRect.x);
+        const uint32_t edgePixelCount = cpyRect.width - copyWidth;
+        const size_t copyOffsetBytes = static_cast<size_t>(cpyRect.x) * bpp;
+        const size_t copyRowBytes = static_cast<size_t>(copyWidth) * bpp;
+        const size_t edgeBytes = static_cast<size_t>(edgePixelCount) * bpp;
+        const uint32_t sourceRowCount = std::min(cpyRect.height, height - cpyRect.y);
+        const uint32_t cpyEndY = cpyRect.y + sourceRowCount;
+
+        ASSERT(dstRowPitch >= dstTightRowPitch);
+        ASSERT(static_cast<size_t>(cpyRect.height - 1u) <= (std::numeric_limits<size_t>::max() - dstTightRowPitch) / dstRowPitch);
+        ASSERT(copyOffsetBytes <= localRowPitch);
+        ASSERT(copyRowBytes <= static_cast<size_t>(localRowPitch) - copyOffsetBytes);
+        ASSERT(copyRowBytes + edgeBytes == dstTightRowPitch);
+
+        for (const TextureChunk& chunk : chunks)
+        {
+            ASSERT(chunk.firstRow < height);
+            ASSERT(chunk.rowCount <= height - chunk.firstRow);
+            ASSERT(chunk.bytes.size() >= static_cast<size_t>(chunk.rowCount) * localRowPitch);
+        }
+
+        auto ResolveSourceY = [this, edgeMode](size_t srcY) -> std::optional<uint32_t>
+        {
+            if (srcY < height) return static_cast<uint32_t>(srcY);
+
+            switch (edgeMode)
+            {
+                case ECopyPixelEdgeMode::ZERO: return std::nullopt;
+
+                case ECopyPixelEdgeMode::CLAMP: return height - 1u;
+
+                case ECopyPixelEdgeMode::MIRROR:
+                {
+                    size_t period = static_cast<size_t>(height) * 2u - 2u;
+                    size_t m = srcY % period;
+                    return static_cast<uint32_t>(m < height ? m : period - m);
+                }
+                case ECopyPixelEdgeMode::REPEAT: return static_cast<uint32_t>(srcY % height);
+
+                default: ASSERT(false, "Unsupported copy pixel edge mode");
+            }
+
+            return std::nullopt;
+        };
+
+        auto FindChunk = [this](uint32_t srcY) -> OptRef<const TextureChunk>
+        {
+            for (const TextureChunk& chunk : chunks)
+            {
+                if (srcY >= chunk.firstRow and srcY - chunk.firstRow < chunk.rowCount)
+                {
+                    return chunk;
+                }
+            }
+            return std::nullopt;
+        };
+
+        for (uint32_t dstRow{}; dstRow < cpyRect.height; ++dstRow)
+        {
+            std::byte * out = dst + static_cast<size_t>(dstRow) * dstRowPitch;
+            std::optional<uint32_t> absoluteY = ResolveSourceY(static_cast<size_t>(cpyRect.y) + dstRow);
+
+            if (not absoluteY.has_value())
+            {
+                memset(out, 0, dstTightRowPitch);
+                continue;
+            }
+
+            const OptRef<const TextureChunk> chunk = FindChunk(absoluteY.value());
+            ASSERT(chunk.has_value());
+
+            const size_t relativeY = absoluteY.value() - chunk.value().get().firstRow;
+
+            const std::byte * chunkStart = chunk.value().get().bytes.data() + relativeY * localRowPitch;
+            const std::byte * copyStart = chunkStart + copyOffsetBytes;
+
+            memcpy(out, copyStart, copyRowBytes);
+
+            if (edgePixelCount == 0u) continue;
+
+            std::byte * offEdge = out + copyRowBytes;
+
+            switch (edgeMode)
+            {
+                case ECopyPixelEdgeMode::ZERO: memset(offEdge, 0, edgeBytes);
+                break;
+
+                case ECopyPixelEdgeMode::CLAMP:
+                {
+                    const std::byte * lastPixel = copyStart + static_cast<size_t>(copyWidth - 1u) * bpp;
+
+                    for (size_t off{}; off < edgePixelCount; off++)
+                    {
+                        memcpy(offEdge + off * bpp, lastPixel, bpp);
+                    }
+                    break;
+                }
+                case ECopyPixelEdgeMode::MIRROR:
+                {
+                    const size_t period = static_cast<size_t>(width) * 2u - 2u;
+
+                    for (size_t off{}; off < edgePixelCount; off++)
+                    {
+                        const size_t m = (cpyRect.x + copyWidth + off) % period;
+                        const size_t col = m < width ? m : period - m;
+
+                        memcpy(offEdge + off * bpp, chunkStart + col * bpp, bpp);
+                    }
+                    break;
+                }
+                case ECopyPixelEdgeMode::REPEAT:
+                {
+                    for (size_t off{}; off < edgePixelCount; off++)
+                    {
+                        const size_t srcCol = static_cast<size_t>(cpyRect.x) + copyWidth + off;
+                        const size_t col = srcCol % width;
+
+                        memcpy(offEdge + off * bpp, chunkStart + col * bpp, bpp);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc, OptRef<const std::filesystem::path> path)
     {
         ASSERT(data, "data is invalid");
         ASSERT(desc.width > 0u);
@@ -659,6 +816,7 @@ namespace NSTexture
             }
         }
 
+        if(path.has_value()) tex.path = path.value().get();
         return tex;
     }
 }

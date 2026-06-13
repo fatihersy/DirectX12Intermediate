@@ -11,17 +11,21 @@ using Json = nlohmann::json;
 TextureManifest JsonToTextureManifest(const Json& json)
 {
     TextureManifest manifest{};
-    manifest.file = json.at(manifest.kJsonObj_file).get<std::string>();
+    manifest.relativePath = json.at(manifest.kJsonObj_file).get<std::string>();
     manifest.format = StringToDXGI_Format(json.at(manifest.kJsonObj_format).get<std::string>());
 
     std::vector<std::string> channelsStr = json.at(manifest.kJsonObj_channels).get<std::vector<std::string>>();
 
     for (std::string& chStr : channelsStr)
     {
-        if (not chStr.empty()) manifest.channels.push_back(NSTexture::ChannelDeduction(chStr[0]));
+        ASSERT(not chStr.empty(), "Empty channel");
+
+        manifest.channels.push_back(NSTexture::ChannelDeduction(chStr[0]));
+
+        ASSERT(manifest.channels.back() != NSTexture::EChannel::ChUnknown, "Unknown channel");
     }
 
-    ASSERT(!manifest.file.empty(), "Terrain source texture file is empty");
+    ASSERT(!manifest.relativePath.empty(), "Terrain source texture file is empty");
     ASSERT(manifest.format != DXGI_FORMAT_UNKNOWN, "Terrain source texture format is invalid");
     ASSERT(!manifest.channels.empty(), "Terrain source texture channels are empty");
 
@@ -50,7 +54,7 @@ PageTextureManifest JsonToPageTextureManifest(const Json& json)
 Json TextureManifestToJson(const TextureManifest& manifest)
 {
     Json json;
-    json[manifest.kJsonObj_file] = manifest.file.generic_string();
+    json[manifest.kJsonObj_file] = manifest.relativePath.generic_string();
     json[manifest.kJsonObj_format] = DXGI_FormatToString(manifest.format);
 
     std::vector<std::string_view> channelsStr;
@@ -103,8 +107,6 @@ void WriteTexturePageBin(NSTexture::Texture& texture, const std::string& path, N
 {
     ASSERT(texture.desc.bytesPerPixel == NSTexture::BytesPerPixel(texture.desc.format));
     ASSERT(sourceRect.width > 0u and sourceRect.height > 0u);
-    ASSERT(sourceRect.x + sourceRect.width <= texture.width);
-    ASSERT(sourceRect.y + sourceRect.height <= texture.height);
 
     std::filesystem::path _path = path;
 
@@ -123,6 +125,40 @@ void WriteTexturePageBin(NSTexture::Texture& texture, const std::string& path, N
 
     file.write(reinterpret_cast<const char*>(pageBytes.data()), static_cast<std::streamsize>(pageBytes.size()));
     ASSERT(file.good(), "Failed to finish writing terrain page texture");
+}
+
+template<typename StrClass>
+static void WritePageName(StrClass& pagePathStr, size_t pageNameOffset, uint32_t coordX, uint32_t coordZ)
+{
+    ASSERT(pageNameOffset != std::string::npos, "Failed to parse path");
+
+    const std::size_t pageXOffset = pageNameOffset + 5;
+    const std::size_t pageZOffset = pageNameOffset + 8;
+
+    auto WriteCoords = [&pagePathStr, &pageNameOffset,  &pageXOffset, &pageZOffset](uint32_t coordX, uint32_t coordZ)
+    {
+        if (typeid(StrClass) == typeid(std::string))
+        {
+            pagePathStr[pageXOffset + 0] = static_cast<char>('0' + (coordX / 10) % 10);
+            pagePathStr[pageXOffset + 1] = static_cast<char>('0' + coordX % 10);
+
+            pagePathStr[pageZOffset + 0] = static_cast<char>('0' + (coordZ / 10) % 10);
+            pagePathStr[pageZOffset + 1] = static_cast<char>('0' + coordZ % 10);
+        }
+        else if (typeid(StrClass) == typeid(std::wstring))
+        {
+            pagePathStr[pageXOffset + 0] = static_cast<wchar_t>('0' + (coordX / 10) % 10);
+            pagePathStr[pageXOffset + 1] = static_cast<wchar_t>('0' + coordX % 10);
+
+            pagePathStr[pageZOffset + 0] = static_cast<wchar_t>('0' + (coordZ / 10) % 10);
+            pagePathStr[pageZOffset + 1] = static_cast<wchar_t>('0' + coordZ % 10);
+        }
+        else {
+            ASSERT(false, "Unsupported type");
+        }
+    };
+
+    WriteCoords(coordX, coordZ);
 }
 
 Terrain::Terrain() {}
@@ -190,17 +226,17 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
 
     if (not srcManifest.isPresent)
     {
-        NSTexture::TextureMetadata heightmapMetadata = NSTexture::ProbeTexture(m_root / kSourceFileHeightmap);
+        NSTexture::TextureMetadata heightmapMetadata = NSTexture::ProbeTexture(m_root / desc.heightmapDesc.relativePath);
         ASSERT(heightmapMetadata.success, "Couldn't find the heightmap texture: %s", m_root / kSourceFileHeightmap);
 
-        NSTexture::TextureMetadata diffuseMetadata = NSTexture::ProbeTexture(m_root / kSourceFileDiffuse);
-        ASSERT(heightmapMetadata.success, "Couldn't find the heightmap texture: %s", m_root / kSourceFileDiffuse);
+        NSTexture::TextureMetadata diffuseMetadata = NSTexture::ProbeTexture(m_root / desc.diffuseDesc.relativePath);
+        ASSERT(diffuseMetadata.success, "Couldn't find the diffuse texture: %s", m_root / kSourceFileDiffuse);
 
-        ASSERT( (heightmapMetadata.width - 1u ) % m_desc.pageCountX == 0u);
-        ASSERT( (heightmapMetadata.height - 1u) % m_desc.pageCountZ == 0u);
-
-        ASSERT(diffuseMetadata.width % m_desc.pageCountX == 0u);
-        ASSERT(diffuseMetadata.height % m_desc.pageCountZ == 0u);
+        ASSERT(heightmapMetadata.width > 1u and heightmapMetadata.height > 1u);
+        ASSERT((heightmapMetadata.width - 1u) % m_desc.pageCountX == 0u, "Heightmap width must divide cleanly into terrain pages");
+        ASSERT((heightmapMetadata.height - 1u) % m_desc.pageCountZ == 0u, "Heightmap height must divide cleanly into terrain pages");
+        ASSERT(diffuseMetadata.width % m_desc.pageCountX == 0u, "Diffuse width must divide cleanly into terrain pages");
+        ASSERT(diffuseMetadata.height % m_desc.pageCountZ == 0u, "Diffuse height must divide cleanly into terrain pages");
 
         for (NSTexture::EChannel reqChannel : desc.heightmapDesc.channels)
         {
@@ -235,20 +271,18 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
         srcManifest.maxHeight = m_desc.maxHeight;
         srcManifest.heightmap =
         {
-            .file = m_desc.heightmapDesc.file,
+            .relativePath = m_desc.heightmapDesc.relativePath,
             .format = m_desc.heightmapDesc.format,
             .channels = m_desc.heightmapDesc.channels
         };
         srcManifest.diffuse =
         {
-            .file = m_desc.diffuseDesc.file,
+            .relativePath = m_desc.diffuseDesc.relativePath,
             .format = m_desc.diffuseDesc.format,
             .channels = m_desc.diffuseDesc.channels
         };
 
         srcManifest.isPresent = true;
-
-        m_desc.dimention = heightmapMetadata.width;
 
         SaveSourceManifest();
     }
@@ -260,6 +294,41 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
     if (not PageMatchesSource())
     {
         GeneratePageFromEXR();
+    }
+
+    BuildPageLayout(m_pages);
+
+    ASSERT(pageManifest.isPresent);
+    ASSERT(m_pages.size() == static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ);
+
+    ASSERT(srcManifest.pageCountX < 100 and srcManifest.pageCountZ < 100, "Too many pages tried to create");
+
+    std::wstring pageNameHeightmap = L"page_00_00::HeightmapBin";
+    std::wstring pageNameDiffuse = L"page_00_00::DiffuseBin";
+
+    for (TerrainPage& page : m_pages)
+    {
+        ASSERT(page.key.index < m_pages.size());
+        ASSERT(page.residency == TerrainPage::EPageResidency::Present, "Page:(%d,%d) is missing or corrupted", page.key.gridX, page.key.gridZ);
+
+        WritePageName(pageNameHeightmap, 0u, page.key.gridX, page.key.gridZ);
+        WritePageName(pageNameDiffuse, 0u, page.key.gridX, page.key.gridZ);
+
+        page.heightTexturePage = LoadPageTextureBin(
+            pageNameHeightmap,
+            page.heightTexturePage.path,
+            pageManifest.height,
+            NSTexture::EType::EType_HEIGHT
+        );
+
+        page.diffuseTexturePage = LoadPageTextureBin(
+            pageNameDiffuse,
+            page.diffuseTexturePage.path,
+            pageManifest.diffuse,
+            NSTexture::EType::EType_DIFFUSE
+        );
+
+        page.residency = TerrainPage::EPageResidency::Loaded;
     }
 
     m_isInitialized = true;
@@ -298,80 +367,6 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_isInitialized = false;
 }
 
-void Terrain::Generate(uint32_t seed, NSTerrain::TerrainDesc desc)
-{
-    this->m_desc = desc;
-
-    ASSERT(m_desc.dimention > 1u);
-
-    m_heightR16.clear();
-    m_heightR16.resize(size_t(m_desc.dimention) * size_t(m_desc.dimention));
-
-    constexpr float baseFrequency = 8.0f;
-
-    for (uint32_t z = 0; z < m_desc.dimention; ++z)
-    {
-        for (uint32_t x = 0; x < m_desc.dimention; ++x)
-        {
-            const float u = float(x) / float(m_desc.dimention - 1);
-            const float v = float(z) / float(m_desc.dimention - 1);
-
-            float h = NSMath::FBm(u * baseFrequency, v * baseFrequency, seed);
-
-            // Pow is an optional shaping: more lowlands, slightly sharper peaks.
-            h = NSMath::Saturate(std::pow(h, 1.35f)) ;
-
-            const float hScaled = h * std::numeric_limits<uint16_t>::max();
-
-            const uint16_t hInt = static_cast<uint16_t>(std::round(hScaled));
-
-            m_heightR16[size_t(z) * size_t(m_desc.dimention) + size_t(x)] = hInt;
-        }
-    }
-
-    NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
-    heightmap = {};
-    heightmap.desc.textureType = NSTexture::EType::EType_HEIGHT;
-    heightmap.desc.format = DXGI_FORMAT_R16_UNORM;
-    heightmap.width = m_desc.dimention;
-    heightmap.height = m_desc.dimention;
-    heightmap.desc.bytesPerPixel = NSTexture::BytesPerPixel(heightmap.desc.format);
-
-    heightmap.localRowPitch = NSTexture::CalculateRowPitch(heightmap.width, heightmap.desc.bytesPerPixel, NSTexture::ERowPitchMode::TIGHT);
-    heightmap.uploadRowPitch = NSTexture::CalculateRowPitch(heightmap.width, heightmap.desc.bytesPerPixel, NSTexture::ERowPitchMode::DX_ALIGN);
-    heightmap.chunks.clear();
-
-    constexpr UINT rowsPerChunk = NSTexture::ROWS_AT_A_TIME;
-
-    const UINT totalChunkCount = (m_desc.dimention + rowsPerChunk - 1u) / rowsPerChunk;
-    heightmap.chunks.reserve(totalChunkCount);
-
-    for (UINT chunkIndex{}; chunkIndex < totalChunkCount; ++chunkIndex)
-    {
-        NSTexture::TextureChunk chunk{};
-        chunk.firstRow = chunkIndex * rowsPerChunk;
-        chunk.rowCount = std::min(rowsPerChunk, m_desc.dimention - chunk.firstRow);
-        chunk.bytes.resize(static_cast<size_t>(chunk.rowCount) * heightmap.localRowPitch);
-
-        for (UINT row{}; row < chunk.rowCount; ++row)
-        {
-            const UINT srcY = chunk.firstRow + row;
-
-            const std::byte* src = reinterpret_cast<const std::byte*>(
-                m_heightR16.data() + static_cast<size_t>(srcY) * m_desc.dimention
-            );
-
-            std::byte* dst = chunk.bytes.data() + static_cast<size_t>(row) * heightmap.localRowPitch;
-
-            memcpy(dst, src, static_cast<size_t>(heightmap.localRowPitch));
-        }
-
-        heightmap.chunks.push_back(std::move(chunk));
-    }
-
-    heightmap.PopulateCPU(true);
-    m_isOnCPU = true;
-}
 bool Terrain::Load(const std::wstring_view _path)
 {
     ASSERT(m_desc.worldWidth > 0.f and m_desc.worldDepth > 0.f and m_desc.maxHeight > 0.f and m_desc.chunkCountX > 0u and m_desc.chunkCountZ > 0u and m_desc.vertsPerChunkEdge > 1u);
@@ -399,17 +394,16 @@ bool Terrain::Load(const std::wstring_view _path)
     }
 
     ASSERT(heightmap.desc.format == DXGI_FORMAT_R16_UNORM);
-    ASSERT(heightmap.width == 16384u);
-    ASSERT(heightmap.height == 16384u);
+    ASSERT(heightmap.width > 1u);
+    ASSERT(heightmap.height > 1u);
 
     ASSERT(heightmap.localRowPitch >= (heightmap.width * heightmap.desc.bytesPerPixel));
     ASSERT(heightmap.uploadRowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
 
     ASSERT(!heightmap.chunks.empty());
 
-    ASSERT(heightmap.width == heightmap.height, "Terrain currently expects a square heightmap");
-
-    m_desc.dimention = heightmap.width;
+    m_desc.heightmapDesc.width = heightmap.width;
+    m_desc.heightmapDesc.height = heightmap.height;
 
     m_heightR16.resize(size_t(heightmap.width) * size_t(heightmap.height));
 
@@ -481,6 +475,122 @@ void Terrain::ReleaseUploadBuffers()
     }
 
     m_isOnCPU = false;
+}
+
+void Terrain::BuildPageLayout(std::vector<TerrainPage>& out_Pages)
+{
+    ASSERT(srcManifest.isPresent);
+    ASSERT(pageManifest.isPresent);
+
+    ASSERT(pageManifest.pageCountX > 0u);
+    ASSERT(pageManifest.pageCountZ > 0u);
+    ASSERT(srcManifest.pageCountX == pageManifest.pageCountX);
+    ASSERT(srcManifest.pageCountZ == pageManifest.pageCountZ);
+    ASSERT(pageManifest.pageCountX < 100u and pageManifest.pageCountZ < 100u);
+
+    ASSERT(pageManifest.height.pageWidth > 1u);
+    ASSERT(pageManifest.height.pageHeight > 1u);
+    ASSERT(pageManifest.diffuse.pageWidth > 0u);
+    ASSERT(pageManifest.diffuse.pageHeight > 0u);
+
+    const uint32_t heightQuadsPerPageX = pageManifest.height.pageWidth - 1u;
+    const uint32_t heightQuadsPerPageZ = pageManifest.height.pageHeight - 1u;
+    ASSERT(heightQuadsPerPageX * pageManifest.pageCountX + 1u == pageManifest.height.sourceWidth);
+    ASSERT(heightQuadsPerPageZ * pageManifest.pageCountZ + 1u == pageManifest.height.sourceHeight);
+    ASSERT(pageManifest.diffuse.pageWidth * pageManifest.pageCountX == pageManifest.diffuse.sourceWidth);
+    ASSERT(pageManifest.diffuse.pageHeight * pageManifest.pageCountZ == pageManifest.diffuse.sourceHeight);
+
+    const float worldPageWidth = srcManifest.worldWidth / static_cast<float>(pageManifest.pageCountX);
+    const float worldPageDepth = srcManifest.worldDepth / static_cast<float>(pageManifest.pageCountZ);
+    const float uvPageWidth = 1.f / static_cast<float>(pageManifest.pageCountX);
+    const float uvPageHeight = 1.f / static_cast<float>(pageManifest.pageCountZ);
+
+    out_Pages.assign(static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ, {});
+
+    std::wstring folderName = NSTool::wformat(L"page_%02u_%02u", 0u, 0u);
+    std::filesystem::path folderPath = (m_root / kSourcePagesFolderName / folderName);
+
+    std::string pathToHeightmapBin = (folderPath / kSourceHeightmapBinFilesName).generic_string();
+    std::string pathToDiffuseBin = (folderPath / kSourceDiffuseBinFilesName).generic_string();
+
+    const std::size_t folderNameOffset = folderPath.generic_string().find("page_00_00");
+
+    for (uint32_t pageZ{}; pageZ < pageManifest.pageCountZ; pageZ++)
+    {
+        for (uint32_t pageX{}; pageX < pageManifest.pageCountX; pageX++)
+        {
+            const size_t pageIndex = static_cast<size_t>(pageZ) * pageManifest.pageCountX + pageX;
+            TerrainPage& page = out_Pages[pageIndex];
+
+            page.key =
+            {
+                .gridX = pageX,
+                .gridZ = pageZ,
+                .index = pageIndex
+            };
+            page.heightSourceRect =
+            {
+                .x = pageX * heightQuadsPerPageX,
+                .y = pageZ * heightQuadsPerPageZ,
+                .width = pageManifest.height.pageWidth,
+                .height = pageManifest.height.pageHeight
+            };
+            page.diffuseSourceRect =
+            {
+                .x = pageX * pageManifest.diffuse.pageWidth,
+                .y = pageZ * pageManifest.diffuse.pageHeight,
+                .width = pageManifest.diffuse.pageWidth,
+                .height = pageManifest.diffuse.pageHeight
+            };
+            page.worldRect =
+            {
+                .x = -0.5f * srcManifest.worldWidth + static_cast<float>(pageX) * worldPageWidth,
+                .y = -0.5f * srcManifest.worldDepth + static_cast<float>(pageZ) * worldPageDepth,
+                .width = worldPageWidth,
+                .height = worldPageDepth,
+            };
+            page.uvRect =
+            {
+                .x = static_cast<float>(pageX) * uvPageWidth,
+                .y = static_cast<float>(pageZ) * uvPageHeight,
+                .width = uvPageWidth,
+                .height = uvPageHeight
+            };
+            page.bounds.aabb =
+            {
+                .min = {
+                    page.worldRect.x,
+                    0.f,
+                    page.worldRect.y
+                },
+                .max = {
+                    page.worldRect.x + page.worldRect.width,
+                    srcManifest.maxHeight,
+                    page.worldRect.y + page.worldRect.height,
+                }
+            };
+
+            page.isOnCPU = false;
+            page.isOnGPU = false;
+
+            WritePageName(pathToHeightmapBin, folderNameOffset, page.key.gridX, page.key.gridZ);
+            WritePageName(pathToDiffuseBin, folderNameOffset, page.key.gridX, page.key.gridZ);
+
+            page.heightTexturePage.path = pathToHeightmapBin;
+            page.diffuseTexturePage.path = pathToDiffuseBin;
+
+            if (std::filesystem::is_regular_file(page.heightTexturePage.path) and std::filesystem::is_regular_file(page.diffuseTexturePage.path))
+            {
+                page.residency = TerrainPage::EPageResidency::Present;
+                continue;
+            }
+            else page.residency = TerrainPage::EPageResidency::Missing;
+        }
+    }
+}
+void Terrain::UploadResidentPages(std::vector<TerrainPage>& pages, NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+{
+    // TODO: Complete function
 }
 
 void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
@@ -741,27 +851,30 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
 float Terrain::SampleHeight(float u, float v) const
 {
     ASSERT(not m_heightR16.empty());
-    if (m_desc.dimention == 0) return 0.0f;
+    const NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
+    ASSERT(heightmap.width > 1u and heightmap.height > 1u, "Invalid heightmap dimensions");
 
     u = NSMath::Saturate(u);
     v = NSMath::Saturate(v);
 
-    float width = static_cast<float>(m_desc.dimention);
-    float depth = static_cast<float>(m_desc.dimention);
+    const uint32_t width = heightmap.width;
+    const uint32_t depth = heightmap.height;
+    const float widthF = static_cast<float>(width);
+    const float depthF = static_cast<float>(depth);
 
-    const float x = u * (width - 1.f);
-    const float z = v * (depth - 1.f);
+    const float x = u * (widthF - 1.f);
+    const float z = v * (depthF - 1.f);
 
     const uint32_t x0 = static_cast<uint32_t>(std::floor(x));
     const uint32_t z0 = static_cast<uint32_t>(std::floor(z));
 
-    const uint32_t x1 = std::min(x0 + 1, static_cast<uint32_t>(width - 1.f));
-    const uint32_t z1 = std::min(z0 + 1, static_cast<uint32_t>(depth - 1.f));
+    const uint32_t x1 = std::min(x0 + 1u, width - 1u);
+    const uint32_t z1 = std::min(z0 + 1u, depth - 1u);
 
     const float tx = x - static_cast<float>(x0);
     const float tz = z - static_cast<float>(z0);
 
-    const auto At = [this, width, depth](uint32_t sampleX, uint32_t sampleZ)
+    const auto At = [this, width](uint32_t sampleX, uint32_t sampleZ)
     {
         const uint16_t h = m_heightR16[size_t(sampleZ) * size_t(width) + size_t(sampleX)];
         return static_cast<float>(h) / std::numeric_limits<uint16_t>::max();
@@ -925,7 +1038,6 @@ void Terrain::GeneratePageFromEXR()
     pageManifest.sourceManifestHash = ComputeSourceManifestHash();
     pageManifest.pageCountX = srcManifest.pageCountX;
     pageManifest.pageCountZ = srcManifest.pageCountZ;
-
     pageManifest.height = GenerateHeightBinsFromEXR();
     pageManifest.diffuse = GenerateDiffuseBinsFromEXR();
 
@@ -939,36 +1051,22 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
     ASSERT(srcManifest.pageCountX > 0u and srcManifest.pageCountZ > 0u);
     ASSERT(srcManifest.heightmap.format == DXGI_FORMAT::DXGI_FORMAT_R16_UNORM, "Terrain height page cache expects DXGI_FORMAT_R16_UNORM");
 
+    std::filesystem::path heightmapPath = m_root / srcManifest.heightmap.relativePath;
     ASSERT(std::filesystem::is_directory(m_root / kSourcePagesFolderName), "Couldn't find the folder in the Terrain root: %s", kSourcePagesFolderName);
-    ASSERT(std::filesystem::is_regular_file(m_root / srcManifest.heightmap.file), "Couldn't find the heightmap file");
+    ASSERT(std::filesystem::is_regular_file(heightmapPath), "Couldn't find the heightmap file");
 
-    std::filesystem::path pagePath = m_root
+    std::string pagePathStr = (m_root
         / kSourcePagesFolderName
         / NSTool::format("page_%02u_%02u", 0u, 0u) // kSourcePageFolderNameFormatter
-        / kSourceHeightmapBinFilesName;
-    std::string pagePathStr = pagePath.generic_string();
+        / kSourceHeightmapBinFilesName).generic_string();
 
     const std::size_t pageNameOffset = pagePathStr.find("page_00_00");
-    ASSERT(pageNameOffset != std::string::npos, "Failed to parse path");
-
-    const std::size_t pageXOffset = pageNameOffset + 5;
-    const std::size_t pageZOffset = pageNameOffset + 8;
-
-    auto WriteCoords = [&pagePathStr, &pageNameOffset,  &pageXOffset, &pageZOffset](uint32_t coordX, uint32_t coordZ)
-    {
-        pagePathStr[pageXOffset + 0] = static_cast<char>('0' + (coordX / 10) % 10);
-        pagePathStr[pageXOffset + 1] = static_cast<char>('0' + coordX % 10);
-
-        pagePathStr[pageZOffset + 0] = static_cast<char>('0' + (coordZ / 10) % 10);
-        pagePathStr[pageZOffset + 1] = static_cast<char>('0' + coordZ % 10);
-    };
 
     ASSERT(srcManifest.pageCountX < 100 and srcManifest.pageCountZ < 100, "Too many pages tried to create");
 
-    std::wstring heightmapPathStr = (m_root / kSourceFileHeightmap).generic_wstring();
     NSTexture::Texture heightTexture = NSTexture::LoadTextureEXR(
         L"NSTerrain::Terrain::Heightmap",
-        heightmapPathStr,
+        heightmapPath.generic_wstring(),
         BuildEXRLoadDesc(srcManifest.heightmap, NSTexture::EType::EType_HEIGHT)
     );
 
@@ -985,7 +1083,7 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
     {
         for (uint32_t pageX{}; pageX < srcManifest.pageCountX; pageX++)
         {
-            WriteCoords(pageX, pageZ);
+            WritePageName(pagePathStr, pageNameOffset, pageX, pageZ);
 
             WriteTexturePageBin(heightTexture, pagePathStr, {
                 .x = pageX * quadsPerPageX,
@@ -1017,36 +1115,22 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
         srcManifest.diffuse.format == DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
         "Terrain diffuse page cache expects a supported R8G8B8A8_UNORM format");
 
+    std::filesystem::path diffusePath = m_root / srcManifest.diffuse.relativePath;
     ASSERT(std::filesystem::is_directory(m_root / kSourcePagesFolderName), "Couldn't find the folder in the Terrain root: %s", kSourcePagesFolderName);
-    ASSERT(std::filesystem::is_regular_file(m_root / srcManifest.diffuse.file), "Couldn't find the diffuse file");
+    ASSERT(std::filesystem::is_regular_file(diffusePath), "Couldn't find the diffuse file");
 
-    std::filesystem::path pagePath = m_root
+    std::string pagePathStr = (m_root
         / kSourcePagesFolderName
         / NSTool::format("page_%02u_%02u", 0u, 0u) // kSourcePageFolderNameFormatter
-        / kSourceDiffuseBinFilesName;
-    std::string pagePathStr = pagePath.generic_string();
+        / kSourceDiffuseBinFilesName).generic_string();
 
     const std::size_t pageNameOffset = pagePathStr.find("page_00_00");
-    ASSERT(pageNameOffset != std::string::npos, "Failed to parse path");
-
-    const std::size_t pageXOffset = pageNameOffset + 5;
-    const std::size_t pageZOffset = pageNameOffset + 8;
-
-    auto WriteCoords = [&pagePathStr, &pageNameOffset,  &pageXOffset, &pageZOffset](uint32_t coordX, uint32_t coordZ)
-    {
-        pagePathStr[pageXOffset + 0] = static_cast<char>('0' + (coordX / 10) % 10);
-        pagePathStr[pageXOffset + 1] = static_cast<char>('0' + coordX % 10);
-
-        pagePathStr[pageZOffset + 0] = static_cast<char>('0' + (coordZ / 10) % 10);
-        pagePathStr[pageZOffset + 1] = static_cast<char>('0' + coordZ % 10);
-    };
 
     ASSERT(srcManifest.pageCountX < 100 and srcManifest.pageCountZ < 100, "Too many pages tried to create");
 
-    std::wstring diffusePathStr = (m_root / kSourceFileDiffuse).generic_wstring();
     NSTexture::Texture diffuseTexture = NSTexture::LoadTextureEXR(
         L"NSTerrain::Terrain::DiffuseSource",
-        diffusePathStr,
+        diffusePath.generic_wstring(),
         BuildEXRLoadDesc(srcManifest.diffuse, NSTexture::EType::EType_DIFFUSE)
     );
 
@@ -1061,7 +1145,7 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
     {
         for (uint32_t pageX{}; pageX < srcManifest.pageCountX; pageX++)
         {
-            WriteCoords(pageX, pageZ);
+            WritePageName(pagePathStr, pageNameOffset, pageX, pageZ);
 
             WriteTexturePageBin(diffuseTexture, pagePathStr, {
                 .x = pageX * pageWidth,
@@ -1084,7 +1168,7 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
     };
 }
 
-NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std::filesystem::path& path, PageTextureManifest& manifest, NSTexture::EType type)
+NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std::filesystem::path& path, const PageTextureManifest& manifest, NSTexture::EType type)
 {
     ASSERT(std::filesystem::is_regular_file(path), "Terrain page texture file does not exist");
     ASSERT(manifest.pageWidth > 0u);
@@ -1120,5 +1204,5 @@ NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std
         },
         .width = manifest.pageWidth,
         .height = manifest.pageHeight
-    });
+    }, path);
 }

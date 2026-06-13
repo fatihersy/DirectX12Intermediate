@@ -157,8 +157,8 @@ namespace NSTexture
 
     struct TextureMetadata
     {
-        uint32_t width;
-        uint32_t height;
+        uint32_t width{};
+        uint32_t height{};
         std::vector<EChannel> channels;
         bool success{};
     };
@@ -213,8 +213,17 @@ namespace NSTexture
     };
     using TextureData = std::vector<TextureChunk>;
 
+    enum class ECopyPixelEdgeMode : uint8_t
+    {
+        ZERO,
+        CLAMP,
+        MIRROR,
+        REPEAT
+    };
+
     struct Texture
     {
+        std::filesystem::path path;
         std::wstring name;
         TextureDesc desc;
         ComPtr<ID3D12Resource2> defaultBuffer;
@@ -229,7 +238,8 @@ namespace NSTexture
         bool m_isOnCPU{};
 
         void CopyPixels(std::byte* dst, size_t dstRowPitch, size_t bytesPerRow, bool consumeLocalData = false);
-        void CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 srcRect);
+        void CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 cpyRect);
+        void CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 cpyRect, ECopyPixelEdgeMode edgeMode);
 
         Texture&& PopulateCPU(bool consumeLocalData);
         Texture&& PopulateGPU(
@@ -396,13 +406,13 @@ namespace NSTexture
     }
     UINT CalculateRowPitch(UINT width, UINT bytesPerPixel, NSTexture::ERowPitchMode mode);
 
-    Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EType type);
-    Texture LoadTexture(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc);
+    Texture LoadTexture(std::wstring_view name, std::filesystem::path path, EType type);
+    Texture LoadTexture(std::wstring_view name, std::filesystem::path path, EXRLoadDesc desc);
     Texture LoadTextureWIC(std::wstring_view name, IWICBitmapDecoder* decoder, EType type);
-    Texture LoadTextureWIC(std::wstring_view name, std::wstring_view filename, WICLoadDesc desc);
+    Texture LoadTextureWIC(std::wstring_view name, std::filesystem::path path, WICLoadDesc desc);
     Texture LoadTextureWIC(std::wstring_view name, IWICBitmapDecoder* decoder, WICLoadDesc desc);
 
-    Texture LoadTextureEXR(std::wstring_view name, std::wstring_view filename, EXRLoadDesc desc);
+    Texture LoadTextureEXR(std::wstring_view name, std::filesystem::path path, EXRLoadDesc desc);
 
-    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc);
+    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc, OptRef<const std::filesystem::path> path = std::nullopt);
 }

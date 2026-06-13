@@ -163,26 +163,24 @@ void app::LoadAssets()
 
         m_scene.m_terrain.desc = NSTerrain::TerrainDesc
         {
-            .worldWidth = 16388.f,
-            .worldDepth = 16388.f,
+            .worldWidth = 16384.f,
+            .worldDepth = 16384.f,
             .maxHeight = 8194.f,
 
-            .pageCountX = 16,
-            .pageCountZ = 16,
+            .pageCountX = 32,
+            .pageCountZ = 32,
 
-            .chunkCountX = 16,
-            .chunkCountZ = 16,
+            .chunkCountX = 32,
+            .chunkCountZ = 32,
             .vertsPerChunkEdge = 33,
 
-            .dimention = 2048,
-
             .heightmapDesc = {
-                .file = NSTerrain::kSourceFileHeightmap,
+                .relativePath = NSTerrain::kSourceFileHeightmap,
                 .format = DXGI_FORMAT_R16_UNORM,
                 .channels = {NSTexture::ChY}
             },
             .diffuseDesc = {
-                .file = NSTerrain::kSourceFileDiffuse,
+                .relativePath = NSTerrain::kSourceFileDiffuse,
                 .format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
                 .channels = {
                     NSTexture::ChR,

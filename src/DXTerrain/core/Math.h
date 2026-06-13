@@ -116,6 +116,13 @@ namespace NSMath
         uint32_t width{};
         uint32_t height{};
     };
+    struct SRectI32
+    {
+        int32_t x{};
+        int32_t y{};
+        int32_t width{};
+        int32_t height{};
+    };
     struct SRectF32
     {
         float x{};
