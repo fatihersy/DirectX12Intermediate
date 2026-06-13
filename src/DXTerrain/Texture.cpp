@@ -215,9 +215,33 @@ namespace NSTexture
             path = IApp::GetInstance()->im_assetsPath / path;
         }
 
-        Imf::InputFile file(path.generic_string().c_str());
+        ASSERT(std::filesystem::is_regular_file(path), "EXR file does not exist: %s", path.generic_string().c_str());
 
-        const Imath::Box2i dataWindow = file.header().dataWindow();
+        std::unordered_map<std::string_view, std::pair<float, std::vector<float>>> channels{};
+
+        Imath::Box2i dataWindow;
+        {
+            Imf::InputFile file(path.generic_string().c_str());
+            dataWindow = file.header().dataWindow();
+
+            for (UINT component{}; component < componentCount; ++component)
+            {
+                std::string_view channelName = desc.channels[component];
+
+                if (channels.contains(channelName.data()) or channelName.empty()) continue;
+
+                const Imf::Channel* channel = file.header().channels().findChannel(channelName.data());
+
+                if (channel)
+                {
+                    ASSERT(channel->xSampling == 1 and channel->ySampling == 1, "Subsampled EXR channels are not supported");
+                }
+
+                auto& [defaultVal, vec] = channels[channelName.data()];
+
+                defaultVal = desc.defaultValues[component];
+            }
+        }
 
         ASSERT(
             (dataWindow.max.x - dataWindow.min.x + 1) > 0
@@ -239,24 +263,6 @@ namespace NSTexture
 
         tex.localRowPitch = CalculateRowPitch(tex.width, desc.texDesc.bytesPerPixel, desc.texDesc.localRowPitchMode);
         tex.uploadRowPitch = CalculateRowPitch(tex.width, desc.texDesc.bytesPerPixel, desc.texDesc.uploadRowPitchMode);
-
-        std::unordered_map<std::string_view, std::pair<float, std::vector<float>>> channels{};
-
-        for (UINT component{}; component < componentCount; ++component)
-        {
-            std::string_view channelName = desc.channels[component];
-
-            if (channels.contains(channelName.data()) or channelName.empty()) continue;
-
-            const Imf::Channel* channel = file.header().channels().findChannel(channelName.data());
-
-            ASSERT(channel, "Channel does not exist");
-            ASSERT(channel->xSampling == 1 and channel->ySampling == 1, "Subsampled EXR channels are not supported");
-
-            auto& [defaultVal, vec] = channels[channelName.data()];
-
-            defaultVal = desc.defaultValues[component];
-        }
 
         ASSERT(not channels.empty(), "No channels to load");
 
@@ -348,6 +354,7 @@ namespace NSTexture
                 pixels.assign(pixelCountToRead, {});
             }
 
+            Imf::InputFile file(path.generic_string().c_str());
             Imf::FrameBuffer frameBuffer;
             const int fileYBegin = dataWindow.min.y + static_cast<int>(rowStart);
             const int fileYEnd = fileYBegin + static_cast<int>(rowsToRead) - 1;
@@ -363,7 +370,7 @@ namespace NSTexture
 
                 frameBuffer.insert(
                     channelName.data(),
-                    Imf::Slice(Imf::FLOAT, baseDiff, sizeof(float), sizeof(float) * width)
+                    Imf::Slice(Imf::FLOAT, baseDiff, sizeof(float), sizeof(float) * width, 1, 1, static_cast<double>(defaultVal))
                 );
             }
 
@@ -759,6 +766,8 @@ namespace NSTexture
                     }
                     break;
                 }
+                default: ASSERT(false, "Unsupported edge mode for CopyPixels");
+                break;
             }
         }
     }

@@ -215,6 +215,7 @@ namespace NSTexture
 
     enum class ECopyPixelEdgeMode : uint8_t
     {
+        UNDEFINED,
         ZERO,
         CLAMP,
         MIRROR,

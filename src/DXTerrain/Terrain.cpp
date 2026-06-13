@@ -14,10 +14,12 @@ TextureManifest JsonToTextureManifest(const Json& json)
     manifest.relativePath = json.at(manifest.kJsonObj_file).get<std::string>();
     manifest.format = StringToDXGI_Format(json.at(manifest.kJsonObj_format).get<std::string>());
 
-    std::vector<std::string> channelsStr = json.at(manifest.kJsonObj_channels).get<std::vector<std::string>>();
+    const auto& channelsJson = json.at(manifest.kJsonObj_channels);
+    ASSERT(channelsJson.is_array(), "Channels must be a JSON array");
 
-    for (std::string& chStr : channelsStr)
+    for (const auto& item : channelsJson)
     {
+        std::string chStr = item.get<std::string>();
         ASSERT(not chStr.empty(), "Empty channel");
 
         manifest.channels.push_back(NSTexture::ChannelDeduction(chStr[0]));
@@ -103,7 +105,7 @@ NSTexture::EXRLoadDesc BuildEXRLoadDesc(const TextureManifest& manifest, NSTextu
 
     return desc;
 }
-void WriteTexturePageBin(NSTexture::Texture& texture, const std::string& path, NSMath::SRectU32 sourceRect)
+void WriteTexturePageBin(NSTexture::Texture& texture, const std::string& path, NSMath::SRectU32 sourceRect, NSTexture::ECopyPixelEdgeMode edgeMode = NSTexture::ECopyPixelEdgeMode::UNDEFINED)
 {
     ASSERT(texture.desc.bytesPerPixel == NSTexture::BytesPerPixel(texture.desc.format));
     ASSERT(sourceRect.width > 0u and sourceRect.height > 0u);
@@ -118,7 +120,13 @@ void WriteTexturePageBin(NSTexture::Texture& texture, const std::string& path, N
     const UINT tightRowPitch = NSTexture::CalculateRowPitch(sourceRect.width, texture.desc.bytesPerPixel, NSTexture::ERowPitchMode::TIGHT);
     std::vector<std::byte> pageBytes(static_cast<size_t>(tightRowPitch) * sourceRect.height);
 
-    texture.CopyPixels(pageBytes.data(), tightRowPitch, sourceRect);
+    if (edgeMode == NSTexture::ECopyPixelEdgeMode::UNDEFINED)
+    {
+        texture.CopyPixels(pageBytes.data(), tightRowPitch, sourceRect);
+    }
+    else {
+        texture.CopyPixels(pageBytes.data(), tightRowPitch, sourceRect, edgeMode);
+    }
 
     std::ofstream file(_path, std::ios::binary | std::ios::trunc);
     ASSERT(file.is_open(), "Failed to write terrain page texture");
@@ -222,9 +230,7 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
 
     m_desc = desc;
 
-    LoadSourceManifest();
-
-    if (not srcManifest.isPresent)
+    if (not LoadSourceManifest())
     {
         NSTexture::TextureMetadata heightmapMetadata = NSTexture::ProbeTexture(m_root / desc.heightmapDesc.relativePath);
         ASSERT(heightmapMetadata.success, "Couldn't find the heightmap texture: %s", m_root / kSourceFileHeightmap);
@@ -233,10 +239,27 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
         ASSERT(diffuseMetadata.success, "Couldn't find the diffuse texture: %s", m_root / kSourceFileDiffuse);
 
         ASSERT(heightmapMetadata.width > 1u and heightmapMetadata.height > 1u);
-        ASSERT((heightmapMetadata.width - 1u) % m_desc.pageCountX == 0u, "Heightmap width must divide cleanly into terrain pages");
-        ASSERT((heightmapMetadata.height - 1u) % m_desc.pageCountZ == 0u, "Heightmap height must divide cleanly into terrain pages");
-        ASSERT(diffuseMetadata.width % m_desc.pageCountX == 0u, "Diffuse width must divide cleanly into terrain pages");
-        ASSERT(diffuseMetadata.height % m_desc.pageCountZ == 0u, "Diffuse height must divide cleanly into terrain pages");
+
+        bool heightmapWidthValid = ((heightmapMetadata.width - 1u) % m_desc.pageCountX == 0u) || (heightmapMetadata.width % m_desc.pageCountX == 0u);
+        bool heightmapHeightValid = ((heightmapMetadata.height - 1u) % m_desc.pageCountZ == 0u) || (heightmapMetadata.height % m_desc.pageCountZ == 0u);
+        ASSERT(heightmapWidthValid, "Heightmap width must divide cleanly into terrain pages (either N*pageCount+1 or N*pageCount)");
+        ASSERT(heightmapHeightValid, "Heightmap height must divide cleanly into terrain pages (either N*pageCount+1 or N*pageCount)");
+
+        const uint32_t quadsPerPageX = (heightmapMetadata.width % m_desc.pageCountX == 0u)
+            ? (heightmapMetadata.width / m_desc.pageCountX)
+            : ((heightmapMetadata.width - 1u) / m_desc.pageCountX);
+        const uint32_t quadsPerPageZ = (heightmapMetadata.height % m_desc.pageCountZ == 0u)
+            ? (heightmapMetadata.height / m_desc.pageCountZ)
+            : ((heightmapMetadata.height - 1u) / m_desc.pageCountZ);
+
+        const uint32_t expectedWidth = quadsPerPageX * m_desc.pageCountX + 1u;
+        const uint32_t expectedHeight = quadsPerPageZ * m_desc.pageCountZ + 1u;
+
+        const float baseWidth = desc.worldWidth > 0.f ? desc.worldWidth : static_cast<float>(heightmapMetadata.width - 1u);
+        const float baseDepth = desc.worldDepth > 0.f ? desc.worldDepth : static_cast<float>(heightmapMetadata.height - 1u);
+
+        m_desc.worldWidth = baseWidth * (static_cast<float>(heightmapMetadata.width - 1u)  / static_cast<float>(expectedWidth - 1u));
+        m_desc.worldDepth = baseDepth * (static_cast<float>(heightmapMetadata.height - 1u) / static_cast<float>(expectedHeight - 1u));
 
         for (NSTexture::EChannel reqChannel : desc.heightmapDesc.channels)
         {
@@ -248,19 +271,23 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
                 found = true;
                 break;
             }
-            ASSERT(found, "Requested channel couldn't found in the texture");
+            ASSERT(found, "Requested channel couldn't found in heightmap texture");
         }
         for (NSTexture::EChannel reqChannel : desc.diffuseDesc.channels)
         {
             bool found{};
             for (NSTexture::EChannel channelFound : diffuseMetadata.channels)
             {
-                if(reqChannel != channelFound) continue;
-
-                found = true;
-                break;
+                if(reqChannel == channelFound)
+                {
+                    found = true;
+                    break;
+                }
             }
-            ASSERT(found, "Requested channel couldn't found in the texture");
+            if (!found)
+            {
+                g_FWarn("Diffuse channel %s not found in texture, falling back to default values", NSTexture::GetChannelName(reqChannel).data());
+            }
         }
 
         srcManifest.name = root;
@@ -286,6 +313,14 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
 
         SaveSourceManifest();
     }
+    else
+    {
+        m_desc.worldWidth = srcManifest.worldWidth;
+        m_desc.worldDepth = srcManifest.worldDepth;
+        m_desc.maxHeight = srcManifest.maxHeight;
+        m_desc.pageCountX = srcManifest.pageCountX;
+        m_desc.pageCountZ = srcManifest.pageCountZ;
+    }
 
     if (PagesExists())
     {
@@ -294,6 +329,11 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
     if (not PageMatchesSource())
     {
         GeneratePageFromEXR();
+    }
+
+    if (m_desc.vertsPerChunkEdge == 0u)
+    {
+        m_desc.vertsPerChunkEdge = ((pageManifest.height.pageWidth - 1u) / m_desc.chunkCountX) + 1u;
     }
 
     BuildPageLayout(m_pages);
@@ -891,11 +931,11 @@ float Terrain::SampleHeight(float u, float v) const
     return NSMath::Lerp(hx0, hx1, tz);
 }
 
-void Terrain::LoadSourceManifest()
+bool Terrain::LoadSourceManifest()
 {
     std::filesystem::path path = m_root / kSourceManifestFilesName;
 
-    if (not std::filesystem::is_regular_file(path)) return;
+    if (not std::filesystem::is_regular_file(path)) return false;
 
     std::ifstream file(path);
     ASSERT(file.is_open(), "Failed to open terrain manifest");
@@ -915,14 +955,23 @@ void Terrain::LoadSourceManifest()
     srcManifest.heightmap = JsonToTextureManifest(json.at(srcManifest.kJsonObj_heightmap));
     srcManifest.diffuse = JsonToTextureManifest(json.at(srcManifest.kJsonObj_diffuse));
 
-    ASSERT(!srcManifest.name.empty(), "Terrain manifest name is empty");
-    ASSERT(srcManifest.pageCountX > 0u, "Terrain pageCountX must be greater than zero");
-    ASSERT(srcManifest.pageCountZ > 0u, "Terrain pageCountZ must be greater than zero");
-    ASSERT(srcManifest.worldWidth > 0.f, "Terrain worldWidth must be greater than zero");
-    ASSERT(srcManifest.worldDepth > 0.f, "Terrain worldDepth must be greater than zero");
-    ASSERT(srcManifest.maxHeight > 0.f, "Terrain maxHeight must be greater than zero");
+    const bool isNameValid = !srcManifest.name.empty();
 
-    srcManifest.isPresent = true;
+    const bool isPageCountXValid = (srcManifest.pageCountX > 0u);
+
+    const bool isPageCountZValid = (srcManifest.pageCountZ > 0u);
+
+    const bool isWorldWidthValid = (srcManifest.worldWidth > 0.f);
+
+    const bool isWorldDepthValid = (srcManifest.worldDepth > 0.f);
+
+    const bool isMaxHeightValid = (srcManifest.maxHeight > 0.f);
+
+    const bool isValid = isNameValid and isPageCountXValid and isPageCountZValid and isWorldWidthValid and isWorldDepthValid and isMaxHeightValid;
+
+    srcManifest.isPresent = isValid;
+
+    return isValid;
 }
 void Terrain::SaveSourceManifest()
 {
@@ -1071,11 +1120,15 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
     );
 
     ASSERT(heightTexture.width > 1u and heightTexture.height > 1u);
-    ASSERT((heightTexture.width - 1u) % srcManifest.pageCountX == 0u, "Heightmap width must divide cleanly into terrain pages");
-    ASSERT((heightTexture.height - 1u) % srcManifest.pageCountZ == 0u, "Heightmap height must divide cleanly into terrain pages");
+    ASSERT(((heightTexture.width - 1u) % srcManifest.pageCountX == 0u) || (heightTexture.width % srcManifest.pageCountX == 0u), "Heightmap width must divide cleanly into terrain pages");
+    ASSERT(((heightTexture.height - 1u) % srcManifest.pageCountZ == 0u) || (heightTexture.height % srcManifest.pageCountZ == 0u), "Heightmap height must divide cleanly into terrain pages");
 
-    const uint32_t quadsPerPageX = (heightTexture.width - 1u) / srcManifest.pageCountX;
-    const uint32_t quadsPerPageZ = (heightTexture.height - 1u) / srcManifest.pageCountZ;
+    const uint32_t quadsPerPageX = (heightTexture.width % srcManifest.pageCountX == 0u)
+        ? (heightTexture.width / srcManifest.pageCountX)
+        : ((heightTexture.width - 1u) / srcManifest.pageCountX);
+    const uint32_t quadsPerPageZ = (heightTexture.height % srcManifest.pageCountZ == 0u)
+        ? (heightTexture.height / srcManifest.pageCountZ)
+        : ((heightTexture.height - 1u) / srcManifest.pageCountZ);
     const uint32_t pageWidth = quadsPerPageX + 1u;
     const uint32_t pageHeight = quadsPerPageZ + 1u;
 
@@ -1085,19 +1138,22 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
         {
             WritePageName(pagePathStr, pageNameOffset, pageX, pageZ);
 
-            WriteTexturePageBin(heightTexture, pagePathStr, {
-                .x = pageX * quadsPerPageX,
-                .y = pageZ * quadsPerPageZ,
-                .width = pageWidth,
-                .height = pageHeight
-            });
+            WriteTexturePageBin(heightTexture, pagePathStr,
+                {
+                    .x = pageX * quadsPerPageX,
+                    .y = pageZ * quadsPerPageZ,
+                    .width = pageWidth,
+                    .height = pageHeight
+                },
+                NSTexture::ECopyPixelEdgeMode::CLAMP
+            );
         }
     }
 
     return PageTextureManifest
     {
-        .sourceWidth = heightTexture.width,
-        .sourceHeight = heightTexture.height,
+        .sourceWidth = quadsPerPageX * srcManifest.pageCountX + 1u,
+        .sourceHeight = quadsPerPageZ * srcManifest.pageCountZ + 1u,
         .format = srcManifest.heightmap.format,
         .pageWidth = pageWidth,
         .pageHeight = pageHeight,
@@ -1135,29 +1191,17 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
     );
 
     ASSERT(diffuseTexture.width > 1u and diffuseTexture.height > 1u);
-    ASSERT(diffuseTexture.width % srcManifest.pageCountX == 0u, "Diffuse width must divide cleanly into terrain pages");
-    ASSERT(diffuseTexture.height % srcManifest.pageCountZ == 0u, "Diffuse height must divide cleanly into terrain pages");
 
     const uint32_t pageWidth = diffuseTexture.width / srcManifest.pageCountX;
     const uint32_t pageHeight = diffuseTexture.height / srcManifest.pageCountZ;
 
-    for (uint32_t pageZ{}; pageZ < srcManifest.pageCountZ; pageZ++)
+    if (diffuseTexture.width % srcManifest.pageCountX != 0u || diffuseTexture.height % srcManifest.pageCountZ != 0u)
     {
-        for (uint32_t pageX{}; pageX < srcManifest.pageCountX; pageX++)
-        {
-            WritePageName(pagePathStr, pageNameOffset, pageX, pageZ);
-
-            WriteTexturePageBin(diffuseTexture, pagePathStr, {
-                .x = pageX * pageWidth,
-                .y = pageZ * pageHeight,
-                .width = pageWidth,
-                .height = pageHeight
-            });
-        }
+        g_FWarn("Diffuse texture size adjusted during page generation (original: %u x %u, page-covered: %u x %u)",
+            diffuseTexture.width, diffuseTexture.height, pageWidth * srcManifest.pageCountX, pageHeight * srcManifest.pageCountZ);
     }
 
-    return PageTextureManifest
-    {
+    PageTextureManifest manifest {
         .sourceWidth = diffuseTexture.width,
         .sourceHeight = diffuseTexture.height,
         .format = srcManifest.diffuse.format,
@@ -1166,6 +1210,26 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
         .bytesPerPixel = NSTexture::BytesPerPixel(srcManifest.diffuse.format),
         .haloPixels = 0u
     };
+
+    for (uint32_t pageZ{}; pageZ < srcManifest.pageCountZ; pageZ++)
+    {
+        for (uint32_t pageX{}; pageX < srcManifest.pageCountX; pageX++)
+        {
+            WritePageName(pagePathStr, pageNameOffset, pageX, pageZ);
+
+            WriteTexturePageBin(diffuseTexture, pagePathStr,
+                {
+                    .x = pageX * manifest.pageWidth,
+                    .y = pageZ * manifest.pageHeight,
+                    .width = manifest.pageWidth,
+                    .height = manifest.pageHeight
+                },
+                NSTexture::ECopyPixelEdgeMode::REPEAT
+            );
+        }
+    }
+
+    return manifest;
 }
 
 NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std::filesystem::path& path, const PageTextureManifest& manifest, NSTexture::EType type)
@@ -1176,9 +1240,10 @@ NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std
     ASSERT(manifest.format != DXGI_FORMAT::DXGI_FORMAT_UNKNOWN);
     ASSERT(manifest.bytesPerPixel == NSTexture::BytesPerPixel(manifest.format));
 
+    const size_t expectedFileSize = static_cast<size_t>(manifest.pageWidth) * manifest.pageHeight * manifest.bytesPerPixel;
     const uintmax_t fileSize = std::filesystem::file_size(path);
-    ASSERT(fileSize > 0);
     ASSERT(fileSize < static_cast<uintmax_t>(std::numeric_limits<size_t>::max()));
+    ASSERT(fileSize == expectedFileSize, "Page texture bin size mismatch: expected %llu bytes, got %llu bytes", expectedFileSize, fileSize);
 
     std::vector<std::byte> bytes(static_cast<size_t>(fileSize));
 

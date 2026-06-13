@@ -239,7 +239,7 @@ namespace NSTerrain
         float SampleHeight(float u, float v) const;
 
         void SaveSourceManifest();
-        void LoadSourceManifest();
+        bool LoadSourceManifest();
         std::string ComputeSourceManifestHash();
 
         void SavePagesManifest();

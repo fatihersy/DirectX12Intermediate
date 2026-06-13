@@ -163,16 +163,11 @@ void app::LoadAssets()
 
         m_scene.m_terrain.desc = NSTerrain::TerrainDesc
         {
-            .worldWidth = 16384.f,
-            .worldDepth = 16384.f,
             .maxHeight = 8194.f,
-
             .pageCountX = 32,
             .pageCountZ = 32,
-
             .chunkCountX = 32,
             .chunkCountZ = 32,
-            .vertsPerChunkEdge = 33,
 
             .heightmapDesc = {
                 .relativePath = NSTerrain::kSourceFileHeightmap,
