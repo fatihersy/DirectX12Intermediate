@@ -4,6 +4,9 @@
 #include "IApp.h"
 #include "DXSampleHelper.h"
 
+#include "Tools.h"
+#include "Logger.h"
+
 ShaderCompiler* ShaderCompiler::s_instance = nullptr;
 
 ShaderCompiler::ShaderCompiler()

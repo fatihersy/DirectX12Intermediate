@@ -6,11 +6,11 @@ public:
     ShaderCompiler();
     ~ShaderCompiler();
 
-    ComPtr<IDxcCompiler3> m_dxcCompiler;
-    ComPtr<IDxcLibrary> m_dxcLibrary;
-    ComPtr<IDxcUtils> m_dxcUtils;
-    ComPtr<IDxcValidator2> m_dxcValidator;
-    ComPtr<IDxcIncludeHandler> m_dxcIncludeHandler;
+    Microsoft::WRL::ComPtr<IDxcCompiler3> m_dxcCompiler;
+    Microsoft::WRL::ComPtr<IDxcLibrary> m_dxcLibrary;
+    Microsoft::WRL::ComPtr<IDxcUtils> m_dxcUtils;
+    Microsoft::WRL::ComPtr<IDxcValidator2> m_dxcValidator;
+    Microsoft::WRL::ComPtr<IDxcIncludeHandler> m_dxcIncludeHandler;
 
     static ShaderCompiler* GetInstance()
     {
@@ -18,7 +18,7 @@ public:
         return s_instance;
     }
 
-    void CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShader, std::vector<LPCWSTR>& args);
+    void CompileShader(LPCWSTR pFileName, Microsoft::WRL::ComPtr<IDxcBlob>& outShader, std::vector<LPCWSTR>& args);
 private:
     static ShaderCompiler* s_instance;
 };

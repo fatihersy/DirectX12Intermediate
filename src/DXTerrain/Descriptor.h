@@ -1,4 +1,7 @@
 #pragma once
+#include "core/Defines.h"
+
+#include "DescripterTypes.h"
 
 namespace NSDescriptor
 {

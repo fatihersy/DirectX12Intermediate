@@ -1,4 +1,9 @@
 #pragma once
+#include "core/Defines.h"
+
+#include "DescripterTypes.h"
+#include "RendererTypes.h"
+#include "Texture.h"
 
 class Material
 {
@@ -19,7 +24,7 @@ public:
 
     HRESULT LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder, INT textureType);
 
-    void UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition = true);
+    void UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, bool barrierTransition = true);
     void UnloadGPU(NSRenderer::Ctx rendererCtx)
     {
         if (not m_isOnGPU) return;

@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Texture.h"
 
 #include <OpenEXR/ImfInputFile.h>
 #include <OpenEXR/ImfFrameBuffer.h>
@@ -7,6 +8,7 @@
 
 #include "IApp.h"
 #include "DXSampleHelper.h"
+#include "Tools.h"
 
 template<typename T>
 T ToUNORM(float v)
@@ -445,7 +447,7 @@ namespace NSTexture
 
         return std::move(*this);
     }
-    Texture&& Texture::PopulateGPU(NSRenderer::GraphicsCommandList cmdList, bool barrierTransition, D3D12_RESOURCE_STATES stateAfter, SHADER_RESOURCE_VIEW_DESC _srvDesc)
+    Texture&& Texture::PopulateGPU(NSDX12::GraphicsCommandList cmdList, bool barrierTransition, D3D12_RESOURCE_STATES stateAfter, NSDX12::SHADER_RESOURCE_VIEW_DESC _srvDesc)
     {
         ID3D12Device14* device = IApp::GetInstance()->im_device.Get();
         ASSERT(device, "Device is not valid");
@@ -690,7 +692,7 @@ namespace NSTexture
             return std::nullopt;
         };
 
-        auto FindChunk = [this](uint32_t srcY) -> OptRef<const TextureChunk>
+        auto FindChunk = [this](uint32_t srcY) -> MemberRef<const TextureChunk>
         {
             for (const TextureChunk& chunk : chunks)
             {
@@ -713,7 +715,7 @@ namespace NSTexture
                 continue;
             }
 
-            const OptRef<const TextureChunk> chunk = FindChunk(absoluteY.value());
+            const MemberRef<const TextureChunk> chunk = FindChunk(absoluteY.value());
             ASSERT(chunk.has_value());
 
             const size_t relativeY = absoluteY.value() - chunk.value().get().firstRow;
@@ -772,7 +774,7 @@ namespace NSTexture
         }
     }
 
-    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc, OptRef<const std::filesystem::path> path)
+    Texture LoadTextureMemory(std::wstring_view name, const std::byte* data, UINT srcRowPitch, size_t dataSize, MemoryLoadDesc desc)
     {
         ASSERT(data, "data is invalid");
         ASSERT(desc.width > 0u);
@@ -824,8 +826,6 @@ namespace NSTexture
                 memcpy(_Dst, _Src, tightRowPitch);
             }
         }
-
-        if(path.has_value()) tex.path = path.value().get();
         return tex;
     }
 }

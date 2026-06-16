@@ -1,6 +1,9 @@
 #pragma once
 
+#include "Blackboard.h"
 #include "Pipeline.h"
+#include "RendererTypes.h"
+#include "Texture.h"
 
 class Model;
 
@@ -12,10 +15,10 @@ namespace NSRenderPass
         GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~GeometryPass() override;
 
-        GeometryPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        GeometryPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
@@ -37,10 +40,10 @@ namespace NSRenderPass
         AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~AtmospherePass() override;
 
-        AtmospherePass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        AtmospherePass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
         AtmosphereConstants m_constantsUpload{};
@@ -53,7 +56,7 @@ namespace NSRenderPass
         ComPtr<ID3D12Resource2> m_transmittanceLUT;
         ComPtr<ID3D12Resource2> m_scatteringLUT;
 
-        void UpdateAtmosphere(D3D12_GPU_VIRTUAL_ADDRESS constantsGpuAddr, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        void UpdateAtmosphere(D3D12_GPU_VIRTUAL_ADDRESS constantsGpuAddr, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
 
         static constexpr UINT IDX_ROOT_CBV_FRAME = 0u;
         static constexpr UINT IDX_ROOT_CBV_MESH = 1u;
@@ -80,10 +83,10 @@ namespace NSRenderPass
         EnvironmentCubemapPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~EnvironmentCubemapPass() override;
 
-        EnvironmentCubemapPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        EnvironmentCubemapPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
@@ -111,9 +114,9 @@ namespace NSRenderPass
         ComputePipeline m_brdfPipeline;
         ComPtr<ID3D12RootSignature> m_brdfRoot;
 
-        void Capture(Model& model, NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
-        void PrefilterCubemap(NSRenderer::EnvironmentCubemap& envMap, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
-        void GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        void Capture(Model& model, NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
+        void PrefilterCubemap(NSRenderer::EnvironmentCubemap& envMap, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
+        void GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
 
         static constexpr UINT BRDF_LUT_SIZE = 256u;
     };
@@ -124,10 +127,10 @@ namespace NSRenderPass
         TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~TerrainPass() override;
 
-        TerrainPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory);
+        TerrainPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
@@ -154,14 +157,14 @@ namespace NSRenderPass
         DebugPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~DebugPass() override;
 
-        DebugPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, std::reference_wrapper<DebugUtils> utils);
+        DebugPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, std::reference_wrapper<DebugUtils> utils);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
     private:
         ID3D12Device14* m_device;
-        OptRef<DebugUtils> m_utils;
+        MemberRef<DebugUtils> m_utils;
 
         GraphicsPipeline m_linePipeline;
 
@@ -183,10 +186,10 @@ namespace NSRenderPass
         ZPrePass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx);
         ~ZPrePass() override;
 
-        ZPrePass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList);
+        ZPrePass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) override;
+        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
     private:
         GraphicsPipeline m_modelDepthPipeline;

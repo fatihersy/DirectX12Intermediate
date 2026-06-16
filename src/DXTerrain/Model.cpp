@@ -9,7 +9,8 @@
 #include "IApp.h"
 #include "Primitives.h"
 #include "DXSampleHelper.h"
-#include "Model.h"
+#include "Tools.h"
+#include "Logger.h"
 
 aiMatrix4x4 GetGlobalNodeTransformation(aiNode* node)
 {
@@ -48,6 +49,7 @@ void Model::Move(DirectX::XMFLOAT3 vector, float delta)
 bool Model::Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path)
 {
     Assimp::Importer importer;
+
     const aiScene* scene = importer.ReadFile(path.generic_string(),
         aiProcess_Triangulate |
         aiProcess_ConvertToLeftHanded |
@@ -66,7 +68,7 @@ bool Model::Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path)
 
     return true;
 }
-bool Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition)
+bool Model::UploadGPU(NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, bool barrierTransition)
 {
     ASSERT(isOnCPU);
 
@@ -141,7 +143,7 @@ void Model::UnloadGPU(NSRenderer::Ctx rendererCtx)
     }
 
     rendererCtx.unloadModel(m_registerKey);
-    m_registerKey = NSModel::RegisterModelKey();
+    m_registerKey = {};
 
     isOnGPU = false;
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "ModelTypes.h"
 
 #include "Material.h"
 
@@ -28,15 +29,15 @@ public:
     DirectX::XMFLOAT3 m_scale{ 1.f, 1.f, 1.f };
 };
 
-class Model
+class Model : public NSMath::ICullable
 {
 public:
     Model();
     Model(ID3D12Device14* device, IWICImagingFactory2* wicFactory, std::wstring_view name);
 
     std::wstring m_name;
-    NSModel::SceneModelKey m_sceneKey;
-    NSModel::RegisterModelKey m_registerKey;
+    EntityKey<::Model> m_id;
+    ObserverKey m_registerKey;
 
     void RotateAdd(DirectX::XMFLOAT3 rotation);
     void Move(DirectX::XMFLOAT3 vector, float delta);
@@ -45,9 +46,20 @@ public:
         m_position.x = position.x;
         m_position.y = position.y;
         m_position.z = position.z;
-        m_collision.position.x = position.x;
-        m_collision.position.y = position.y;
-        m_collision.position.z = position.z;
+
+        std::visit(overloaded
+        {
+            [&position](NSMath::SBoundSphere& sphere)
+            {
+                sphere.position.x = position.x;
+                sphere.position.y = position.y;
+                sphere.position.z = position.z;
+            },
+            [&position](NSMath::SBoundAABB& aabb)
+            {
+                ASSERT(false, "Unsupported collision type");
+            }
+        }, bound);
 
         return std::move(*this);
     }
@@ -97,7 +109,7 @@ public:
     }
 
     bool Load(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path);
-    bool UploadGPU(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition = true);
+    bool UploadGPU(NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, bool barrierTransition = true);
     void UnloadGPU(NSRenderer::Ctx rendererCtx);
     void ResetUploadHeaps();
 
@@ -107,27 +119,14 @@ public:
     }
 
     void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
+    void ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach);
 
+    std::array<ObserverKey, static_cast<size_t>(NSRenderer::EnvironmentCubemap::NUM_FACES)> envCameraKeys;
+
+    Flag<NSModel::EModelFlag> m_flags;
     std::filesystem::path m_assetsPath;
     bool isOnGPU{};
     bool isOnCPU{};
-    NSMath::SBoundSphere m_collision;
-
-    bool TestFlag(NSModel::EModelFlag flag) const {
-        return m_flags.test(static_cast<uint32_t>(flag));
-    }
-    void SetFlag(NSModel::EModelFlag flag) {
-        m_flags.set(static_cast<uint32_t>(flag));
-    }
-    void ResetFlag(NSModel::EModelFlag flag) {
-        m_flags.reset(static_cast<uint32_t>(flag));
-    }
-    void FlipFlag(NSModel::EModelFlag flag) {
-        m_flags.flip(static_cast<uint32_t>(flag));
-    }
-
-    void ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach);
-
 private:
     IWICImagingFactory2* m_wicFactory = nullptr;
     ID3D12Device14* m_device = nullptr;
@@ -142,6 +141,4 @@ private:
 
     Mesh& CreateMeshFromMemory(std::wstring_view name, const std::vector<NSModel::Vertex>& inVertices, const std::vector<UINT>& inIndices);
     Model&& _As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel::EPrimitive type, void* pDesc);
-
-    std::bitset<32> m_flags{};
 };

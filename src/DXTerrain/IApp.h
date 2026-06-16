@@ -1,4 +1,7 @@
 #pragma once
+#include "core/Defines.h"
+#include "StepTimer.h"
+
 class IApp
 {
 public:
@@ -27,7 +30,6 @@ public:
     constexpr static UINT ic_framesInFlight = 2u;
     constexpr static UINT ic_maxObjects = 128u;
 
-    uint32_t im_nextId{};
     float im_aspectRatio{};
     std::filesystem::path im_executablePath;
     std::filesystem::path im_assetsPath;

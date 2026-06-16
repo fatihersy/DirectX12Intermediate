@@ -1,70 +1,59 @@
 #pragma once
 
+#include "SceneTypes.h"
+
 #include "Model.h"
 
 class Scene : public NSScene::IScene
 {
 public:
     Scene(){};
-    Scene(ID3D12Device14* device, IWICImagingFactory2* wicFactory, float timeOfDay);
     ~Scene();
 
+    EntityKey<Scene> m_id;
+
+    void OnInit(ID3D12Device14* device, IWICImagingFactory2* wicFactory, float timeOfDay);
     void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
     void OnUpdate();
-    void UpdateCamera();
+    void UpdateCamera(NSScene::Camera& camera);
 
-    bool ValidateKey(NSModel::SceneModelKey sceneKey) override
+    bool ValidateKey(ObserverKey entKey) override
     {
-        return
-            m_models.size() > sceneKey.index
-            and
-            m_models[sceneKey.index].m_sceneKey.id == sceneKey.id;
-    }
-    bool ValidateKeys(NSModel::SceneModelKey sceneKey, NSModel::RegisterModelKey regKey) override
-    {
-        return
-            m_models.size() > sceneKey.index
-            and
-            m_models[sceneKey.index].m_sceneKey.id == sceneKey.id
-            and
-            m_models[sceneKey.index].m_registerKey.id == regKey.id
-            and
-            sceneKey.id == regKey.id;
+        return m_models.Contains(entKey);
     }
 
-    const NSScene::Terrain& GetTerrain() const override {
+    std::weak_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncludeCull> flag, ObserverKey excludeKey = {}) override;
+
+    NSScene::Terrain& GetTerrain() override {
         return m_terrain;
     }
-    const NSScene::Camera& GetMainCamera() const override {
-        return m_camera;
+    std::shared_ptr<NSScene::Camera> GetMainCamera() override {
+        ASSERT(m_cameras.Contains(mainCameraKey), "Main camera did't initialized yet");
+        return m_cameras.Get(mainCameraKey);
     }
 
-    std::vector<NSModel::SceneModelKey> CullModels(const NSScene::Camera& camera, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey()) override;
-    NSScene::CullTerrainResult CullTerrain(const NSScene::Camera& camera) override;
-
     template<typename T> requires NSModel::IsPrimitiveMesh<T>
-    Model& AddObject(NSModel::AddCtx ctx, NSModel::PrimitiveTraits<T> desc, NSRenderer::Ctx rendererCtx)
+    std::shared_ptr<::Model> AddObject(NSModel::AddCtx ctx, NSModel::PrimitiveTraits<T> desc, NSRenderer::Ctx rendererCtx)
     {
-        Model& model = m_models.emplace_back(Model(m_device, m_wicFactory, ctx.name));
+        std::shared_ptr<::Model> model = m_models.Add(std::make_shared<Model>(Model(m_device, m_wicFactory, ctx.name)));
 
-        model
-            .As<T>(rendererCtx, desc)
-            .SetPosition(ctx.position)
-            .SetMetallic(ctx.metallic)
-            .SetRoughness(ctx.roughness)
-            .SetOpacity(ctx.opacity);
+        model->As<T>(rendererCtx, desc)
+                .SetPosition(ctx.position)
+                .SetMetallic(ctx.metallic)
+                .SetRoughness(ctx.roughness)
+                .SetOpacity(ctx.opacity);
 
         return model;
     }
-    bool AddObject(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path, NSModel::AddCtx ctx, Model& outModel)
+    bool AddObject(NSRenderer::Ctx rendererCtx, const std::filesystem::path& path, NSModel::AddCtx ctx, std::shared_ptr<Model> outModel)
     {
-        outModel = m_models.emplace_back(Model(m_device, m_wicFactory, ctx.name));
+        outModel = m_models.Add(std::make_shared<::Model>(Model(m_device, m_wicFactory, ctx.name)));
 
-        if (outModel.Load(rendererCtx, path))
+        if (outModel->Load(rendererCtx, path))
         {
-            outModel
-                .SetPosition(ctx.position)
+            outModel->
+                 SetPosition(ctx.position)
                 .SetMetallic(ctx.metallic)
                 .SetRoughness(ctx.roughness)
                 .SetOpacity(ctx.opacity);
@@ -77,17 +66,20 @@ public:
 
     void ForEachModel(std::function<void(Model& model)> ForEach);
 
-    void SetupCameraInfiniteProjection(float fovY, float aspect, float nearZ);
+    void SetupCameraInfiniteProjection(NSScene::Camera& camera, float fovY, float aspect, float nearZ);
 
     ID3D12Device14* m_device = nullptr;
     IWICImagingFactory2* m_wicFactory = nullptr;
     NSScene::Terrain m_terrain{};
 
-    std::vector<Model> m_models;
-    NSScene::Camera m_camera{};
+    EntityMap<Model> m_models;
+    EntityMap<NSScene::Camera> m_cameras;
 
     float m_timeOfDay{};
 
     DirectX::XMVECTOR m_lightDir{};
     DirectX::XMVECTOR m_lightColor{};
+
+    private:
+        ObserverKey mainCameraKey;
 };

@@ -1,26 +1,17 @@
 #pragma once
+#include "TextureTypes.h"
 
 namespace NSTerrain
 {
-    struct ChunkKey
+    struct ChunkIndex
     {
         uint32_t gridX{};
         uint32_t gridZ{};
-        size_t index = SIZE_MAX;
     };
-    struct ChunkBounds
-    {
-        NSMath::SBoundAABB aabb;
-    };
-    struct PageKey
+    struct PageIndex
     {
         uint32_t gridX{};
         uint32_t gridZ{};
-        size_t index = SIZE_MAX;
-    };
-    struct PageBounds
-    {
-        NSMath::SBoundAABB aabb;
     };
 
     struct TerrainSourceTextureDesc

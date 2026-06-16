@@ -52,14 +52,7 @@ namespace NSModel
         MODEL_FLAG_ATMOSPHERE,
         MODEL_FLAG_GENERATE_ENV_CUBEMAP,
         MODEL_FLAG_MAX,
-        MODEL_FLAG_Force32Bit = UINT32_MAX,
-    };
-
-    enum class ERegModelFlag : uint32_t {
-        MODEL_FLAG_NONE = 0,
-        MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE = 1,
-        MODEL_FLAG_MAX,
-        MODEL_FLAG_Force32Bit = UINT32_MAX,
+        Force32Bit = UINT32_MAX,
     };
 
     enum class EPrimitive : uint32_t {
@@ -136,26 +129,4 @@ namespace NSModel
     static_assert(offsetof(PrimitiveTraits<SCone>, desc) == 0);
 
     template<typename T> concept IsPrimitiveMesh = PrimitiveTraits<std::decay_t<T>>::type != EPrimitive::PRIMITIVE_TYPE_NONE;
-
-    struct SceneModelKey {
-        uint32_t id = INT_MAX;
-        size_t index = INT_MAX;
-    };
-    struct RegisterModelKey {
-        uint32_t id = INT_MAX;
-        size_t index = INT_MAX;
-    };
-
-    inline bool operator==(SceneModelKey& lhs, SceneModelKey& rhs) {
-        return lhs.id == rhs.id and lhs.index == rhs.index;
-    }
-    inline bool operator!=(SceneModelKey& lhs, SceneModelKey& rhs) {
-        return lhs.id != rhs.id or lhs.index != rhs.index;
-    }
-    inline bool operator==(RegisterModelKey& lhs, RegisterModelKey& rhs) {
-        return lhs.id == rhs.id and lhs.index == rhs.index;
-    }
-    inline bool operator!=(RegisterModelKey& lhs, RegisterModelKey& rhs) {
-        return lhs.id != rhs.id or lhs.index != rhs.index;
-    }
 }

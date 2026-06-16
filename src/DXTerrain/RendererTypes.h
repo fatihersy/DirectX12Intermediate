@@ -1,22 +1,10 @@
 #pragma once
+#include "core/Defines.h"
+#include "core/Math.h"
+#include "core/EntityTypes.h"
 
-namespace NSDescriptor
-{
-    struct Handle
-    {
-        D3D12_CPU_DESCRIPTOR_HANDLE cpuAddr{};
-        D3D12_GPU_DESCRIPTOR_HANDLE gpuAddr{};
-        uint32_t index = UINT32_MAX;
-        uint32_t amount{};
-    };
-
-    struct Offset
-    {
-        D3D12_CPU_DESCRIPTOR_HANDLE cpuAddr{};
-        D3D12_GPU_DESCRIPTOR_HANDLE gpuAddr{};
-        uint32_t index = UINT32_MAX;
-    };
-}
+#include "AllocatorTypes.h"
+#include "DescripterTypes.h"
 
 namespace NSBarrier
 {
@@ -220,287 +208,6 @@ static_assert(offsetof(TerrainConstants, terrainDiffuseSrvIndex) % 4 == 0);
 static_assert(offsetof(TerrainConstants, PADDING_1) % 4 == 0);
 static_assert(offsetof(TerrainConstants, splatSrvIndices) % 4 == 0);
 
-namespace NSRenderer {
-    class GraphicsCommandList
-    {
-    public:
-        GraphicsCommandList() = default;
-        explicit GraphicsCommandList(ID3D12GraphicsCommandList10* cmdList) : m_cmdList(cmdList) {}
-
-        [[__deprecated__("Please do not use raw command list")]]
-        ID3D12GraphicsCommandList* Raw() const { return m_cmdList; }
-
-        void ResourceBarrier(UINT numBarriers, const D3D12_RESOURCE_BARRIER* pBarriers) const {
-            m_cmdList->ResourceBarrier(numBarriers, pBarriers);
-        }
-
-        void DrawInstanced(UINT vertexCountPerInstance, UINT instanceCount, UINT startVertexLocation, UINT startInstanceLocation) const {
-            m_cmdList->DrawInstanced(vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
-        }
-
-        void DrawIndexedInstanced(UINT indexCountPerInstance, UINT instanceCount, UINT startIndexLocation, INT baseVertexLocation, UINT startInstanceLocation) const {
-            m_cmdList->DrawIndexedInstanced(indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
-        }
-
-        void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ) const {
-            m_cmdList->Dispatch(threadGroupCountX, threadGroupCountY, threadGroupCountZ);
-        }
-
-        void SetPipelineState(ID3D12PipelineState* pPipelineState) const {
-            m_cmdList->SetPipelineState(pPipelineState);
-        }
-
-        void SetDescriptorHeaps(UINT numDescriptorHeaps, ID3D12DescriptorHeap* const* ppDescriptorHeaps) const {
-            m_cmdList->SetDescriptorHeaps(numDescriptorHeaps, ppDescriptorHeaps);
-        }
-
-        void SetGraphicsRootSignature(ID3D12RootSignature* pRootSignature) const {
-            m_cmdList->SetGraphicsRootSignature(pRootSignature);
-        }
-
-        void SetComputeRootSignature(ID3D12RootSignature* pRootSignature) const {
-            m_cmdList->SetComputeRootSignature(pRootSignature);
-        }
-
-        void SetGraphicsRoot32BitConstant(UINT rootParameterIndex, UINT srcData, UINT destOffsetIn32BitValues) const {
-            m_cmdList->SetGraphicsRoot32BitConstant(rootParameterIndex, srcData, destOffsetIn32BitValues);
-        }
-
-        void SetGraphicsRoot32BitConstants(UINT rootParameterIndex, UINT num32BitValuesToSet, const void* pSrcData, UINT destOffsetIn32BitValues) const {
-            m_cmdList->SetGraphicsRoot32BitConstants(rootParameterIndex, num32BitValuesToSet, pSrcData, destOffsetIn32BitValues);
-        }
-
-        void SetGraphicsRootConstantBufferView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation) const {
-            m_cmdList->SetGraphicsRootConstantBufferView(rootParameterIndex, bufferLocation);
-        }
-
-        void SetGraphicsRootShaderResourceView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation) const {
-            m_cmdList->SetGraphicsRootShaderResourceView(rootParameterIndex, bufferLocation);
-        }
-
-        void SetGraphicsRootUnorderedAccessView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation) const {
-            m_cmdList->SetGraphicsRootUnorderedAccessView(rootParameterIndex, bufferLocation);
-        }
-
-        void SetGraphicsRootDescriptorTable(UINT rootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE baseDescriptor) const {
-            m_cmdList->SetGraphicsRootDescriptorTable(rootParameterIndex, baseDescriptor);
-        }
-
-        void SetComputeRoot32BitConstant(UINT rootParameterIndex, UINT srcData, UINT destOffsetIn32BitValues) const {
-            m_cmdList->SetComputeRoot32BitConstant(rootParameterIndex, srcData, destOffsetIn32BitValues);
-        }
-
-        void SetComputeRoot32BitConstants(UINT rootParameterIndex, UINT num32BitValuesToSet, const void* pSrcData, UINT destOffsetIn32BitValues) const {
-            m_cmdList->SetComputeRoot32BitConstants(rootParameterIndex, num32BitValuesToSet, pSrcData, destOffsetIn32BitValues);
-        }
-
-        void SetComputeRootConstantBufferView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation) const {
-            m_cmdList->SetComputeRootConstantBufferView(rootParameterIndex, bufferLocation);
-        }
-
-        void SetComputeRootShaderResourceView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation) const {
-            m_cmdList->SetComputeRootShaderResourceView(rootParameterIndex, bufferLocation);
-        }
-
-        void SetComputeRootUnorderedAccessView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation) const {
-            m_cmdList->SetComputeRootUnorderedAccessView(rootParameterIndex, bufferLocation);
-        }
-
-        void SetComputeRootDescriptorTable(UINT rootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE baseDescriptor) const {
-            m_cmdList->SetComputeRootDescriptorTable(rootParameterIndex, baseDescriptor);
-        }
-
-        void IASetVertexBuffers(UINT startSlot, UINT numViews, const D3D12_VERTEX_BUFFER_VIEW* pViews) const {
-            m_cmdList->IASetVertexBuffers(startSlot, numViews, pViews);
-        }
-
-        void IASetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW* pView) const {
-            m_cmdList->IASetIndexBuffer(pView);
-        }
-
-        void RSSetViewports(UINT numViewports, const D3D12_VIEWPORT* pViewports) const {
-            m_cmdList->RSSetViewports(numViewports, pViewports);
-        }
-
-        void RSSetScissorRects(UINT numRects, const D3D12_RECT* pRects) const {
-            m_cmdList->RSSetScissorRects(numRects, pRects);
-        }
-
-        void CopyResource(ID3D12Resource* pDstResource, ID3D12Resource* pSrcResource) const {
-            m_cmdList->CopyResource(pDstResource, pSrcResource);
-        }
-
-        void CopyBufferRegion(ID3D12Resource* pDstBuffer, UINT64 dstOffset, ID3D12Resource* pSrcBuffer, UINT64 srcOffset, UINT64 numBytes) const {
-            m_cmdList->CopyBufferRegion(pDstBuffer, dstOffset, pSrcBuffer, srcOffset, numBytes);
-        }
-
-        void CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION* pDst, UINT dstX, UINT dstY, UINT dstZ, const D3D12_TEXTURE_COPY_LOCATION* pSrc, const D3D12_BOX* pSrcBox) const {
-            m_cmdList->CopyTextureRegion(pDst, dstX, dstY, dstZ, pSrc, pSrcBox);
-        }
-
-        void ExecuteIndirect(
-            ID3D12CommandSignature* pCommandSignature, UINT maxCommandCount, ID3D12Resource* pArgumentBuffer, UINT64 argumentBufferOffset, ID3D12Resource* pCountBuffer, UINT64 countBufferOffset) const
-        {
-            m_cmdList->ExecuteIndirect(pCommandSignature, maxCommandCount, pArgumentBuffer, argumentBufferOffset, pCountBuffer, countBufferOffset);
-        }
-
-        void BeginQuery(ID3D12QueryHeap* pQueryHeap, D3D12_QUERY_TYPE type, UINT index) const {
-            m_cmdList->BeginQuery(pQueryHeap, type, index);
-        }
-
-        void EndQuery(ID3D12QueryHeap* pQueryHeap, D3D12_QUERY_TYPE type, UINT index) const {
-            m_cmdList->EndQuery(pQueryHeap, type, index);
-        }
-
-        void ResolveQueryData(ID3D12QueryHeap* pQueryHeap, D3D12_QUERY_TYPE type, UINT startIndex, UINT numQueries, ID3D12Resource* pDestinationBuffer, UINT64 alignedDestinationBufferOffset) const {
-            m_cmdList->ResolveQueryData(pQueryHeap, type, startIndex, numQueries, pDestinationBuffer, alignedDestinationBufferOffset);
-        }
-
-        void OMSetStencilRef(UINT stencilRef) const {
-            m_cmdList->OMSetStencilRef(stencilRef);
-        }
-
-        void OMSetBlendFactor(const FLOAT blendFactor[4]) const {
-            m_cmdList->OMSetBlendFactor(blendFactor);
-        }
-
-        void OMSetRenderTargets(
-            UINT numRenderTargetDescriptors,
-            const D3D12_CPU_DESCRIPTOR_HANDLE* pRenderTargetDescriptors,
-            BOOL RTsSingleHandleToDescriptorRange,
-            const D3D12_CPU_DESCRIPTOR_HANDLE* pDepthStencilDescriptor) const
-        {
-            m_cmdList->OMSetRenderTargets(numRenderTargetDescriptors, pRenderTargetDescriptors, RTsSingleHandleToDescriptorRange, pDepthStencilDescriptor);
-        }
-
-        void ClearRenderTargetView(D3D12_CPU_DESCRIPTOR_HANDLE renderTargetView, const FLOAT colorRGBA[4], UINT numRects, const D3D12_RECT* pRects) const {
-            m_cmdList->ClearRenderTargetView(renderTargetView, colorRGBA, numRects, pRects);
-        }
-
-        void ClearDepthStencilView(
-            D3D12_CPU_DESCRIPTOR_HANDLE depthStencilView,
-            D3D12_CLEAR_FLAGS clearFlags,
-            FLOAT depth, UINT8 stencil,
-            UINT numRects, const D3D12_RECT* pRects) const
-        {
-            m_cmdList->ClearDepthStencilView(depthStencilView, clearFlags, depth, stencil, numRects, pRects);
-        }
-
-        void IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY primitiveTopology) const {
-            m_cmdList->IASetPrimitiveTopology(primitiveTopology);
-        }
-
-        //HRESULT Close() const {
-        //  return m_cmdList->Close();
-        //}
-
-        //HRESULT Reset(ID3D12CommandAllocator* pAllocator, ID3D12PipelineState* pInitialState) const {
-        //    return m_cmdList->Reset(pAllocator, pInitialState);
-        //}
-
-        //void SetPredication(ID3D12Resource* pBuffer, UINT64 alignedBufferOffset, D3D12_PREDICATION_OP operation) const {
-        //    m_cmdList->SetPredication(pBuffer, alignedBufferOffset, operation);
-        //}
-
-        //void SOSetTargets(UINT startSlot, UINT numViews, const D3D12_STREAM_OUTPUT_BUFFER_VIEW* pViews) const {
-        //    m_cmdList->SOSetTargets(startSlot, numViews, pViews);
-        //}
-
-        // Additionals --------------------------------------------------------
-
-        inline UINT64 UpdateSubresources(
-            _In_ ID3D12Resource* pDestinationResource,
-            _In_ ID3D12Resource* pIntermediate,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
-            UINT64 RequiredSize,
-            _In_reads_(NumSubresources) const D3D12_PLACED_SUBRESOURCE_FOOTPRINT* pLayouts,
-            _In_reads_(NumSubresources) const UINT* pNumRows,
-            _In_reads_(NumSubresources) const UINT64* pRowSizesInBytes,
-            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
-        {
-            ASSERT(m_cmdList);
-
-            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pSrcData);
-        }
-
-        inline UINT64 UpdateSubresources(
-            _In_ ID3D12Resource* pDestinationResource,
-            _In_ ID3D12Resource* pIntermediate,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
-            UINT64 RequiredSize,
-            _In_reads_(NumSubresources) const D3D12_PLACED_SUBRESOURCE_FOOTPRINT* pLayouts,
-            _In_reads_(NumSubresources) const UINT* pNumRows,
-            _In_reads_(NumSubresources) const UINT64* pRowSizesInBytes,
-            _In_ const void* pResourceData,
-            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
-        {
-            ASSERT(m_cmdList);
-
-            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pResourceData, pSrcData);
-        }
-
-        inline UINT64 UpdateSubresources(
-            _In_ ID3D12Resource* pDestinationResource,
-            _In_ ID3D12Resource* pIntermediate,
-            UINT64 IntermediateOffset,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
-            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
-        {
-            ASSERT(m_cmdList);
-
-            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
-        }
-
-        inline UINT64 UpdateSubresources(
-            _In_ ID3D12Resource* pDestinationResource,
-            _In_ ID3D12Resource* pIntermediate,
-            UINT64 IntermediateOffset,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
-            _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
-            _In_ const void* pResourceData,
-            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
-        {
-            ASSERT(m_cmdList);
-
-            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
-        }
-
-        template <UINT MaxSubresources>
-        inline UINT64 UpdateSubresources(
-            _In_ ID3D12Resource* pDestinationResource,
-            _In_ ID3D12Resource* pIntermediate,
-            UINT64 IntermediateOffset,
-            _In_range_(0,MaxSubresources) UINT FirstSubresource,
-            _In_range_(1,MaxSubresources-FirstSubresource) UINT NumSubresources,
-            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
-        {
-            ASSERT(m_cmdList);
-
-            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
-        }
-
-        template <UINT MaxSubresources>
-        inline UINT64 UpdateSubresources(
-            _In_ ID3D12Resource* pDestinationResource,
-            _In_ ID3D12Resource* pIntermediate,
-            UINT64 IntermediateOffset,
-            _In_range_(0,MaxSubresources) UINT FirstSubresource,
-            _In_range_(1,MaxSubresources-FirstSubresource) UINT NumSubresources,
-            _In_ const void* pResourceData,
-            _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
-        {
-            ASSERT(m_cmdList);
-
-            return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
-        }
-    private:
-        ID3D12GraphicsCommandList10* m_cmdList = nullptr;
-    };
-}
-
 namespace NSBarrier
 {
     class IBarrierBatch
@@ -515,7 +222,7 @@ namespace NSBarrier
         virtual bool Remove(NSBarrier::BarrierKey key, CD3DX12_RESOURCE_BARRIER barrier) = 0;
         virtual void Clear(NSBarrier::BarrierKey key) = 0;
 
-        virtual bool Execute(NSBarrier::BarrierKey key, NSRenderer::GraphicsCommandList cmdList) = 0;
+        virtual bool Execute(NSBarrier::BarrierKey key, NSDX12::GraphicsCommandList cmdList) = 0;
 
     };
 }
@@ -525,9 +232,9 @@ namespace NSRenderer
 {
     enum class ERendererFlag : uint32_t
     {
-        MODE_WIREFRAME,
+        MODE_WIREFRAME = 0,
         MAX,
-        Force32bit = UINT32_MAX
+        Force32Bit = UINT32_MAX
     };
 
     struct BlackboardKey
@@ -555,48 +262,30 @@ namespace NSRenderer
         static constexpr UINT MIP_COUNT = 8u;
     };
 
+    enum class ERegModelFlag : uint32_t {
+        MODEL_FLAG_NONE = 0,
+        MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE = 1,
+        MODEL_FLAG_MAX,
+        Force32Bit = UINT32_MAX,
+    };
+
     struct Model
     {
     public:
-        NSModel::SceneModelKey sceneKey;
-        NSModel::RegisterModelKey registerKey;
+        ObserverKey m_sceneKey;
+        EntityKey<NSRenderer::Model> m_id;
         EnvironmentCubemap m_envCubemap{};
 
         struct Neighbor {
-            NSModel::SceneModelKey sceneKey;
+            EntityID id;
             DirectX::XMFLOAT3 position;
         };
         std::vector<Neighbor> objsInFrustum;
 
-        bool TestFlag(NSModel::ERegModelFlag flag) const {
-            const size_t _flag = static_cast<size_t>(flag);
-            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
-
-            return m_flags.test(_flag);
-        }
-        void SetFlag(NSModel::ERegModelFlag flag) {
-            const size_t _flag = static_cast<size_t>(flag);
-            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
-
-            m_flags.set(_flag);
-        }
-        void ResetFlag(NSModel::ERegModelFlag flag) {
-            const size_t _flag = static_cast<size_t>(flag);
-            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
-
-            m_flags.reset(_flag);
-        }
-        void FlipFlag(NSModel::ERegModelFlag flag) {
-            const size_t _flag = static_cast<size_t>(flag);
-            ASSERT(_flag < static_cast<size_t>(NSModel::ERegModelFlag::MODEL_FLAG_MAX));
-
-            m_flags.flip(_flag);
-        }
-
         bool isDirty{};
 
+        Flag<ERegModelFlag> m_flags;
     private:
-        std::bitset<32> m_flags{};
     };
 
     inline constexpr BlackboardKey kRenderer_frameIndex{ "Renderer.frameIndex" };
@@ -616,12 +305,16 @@ namespace NSRenderer
     using FnDescFree_t = std::function<void(NSDescriptor::Handle& handle)>;
     using FnDescOffset_t = std::function<NSDescriptor::Offset(const NSDescriptor::Handle& handle, uint32_t offset)>;
     using FnConstAlloc_t = std::function<NSAllocator::Ctx(size_t size)>;
-    using FnRendererModelRegister_t = std::function<NSRenderer::Model&(std::wstring_view modelName, NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag)>;
-    using FnRendererModelUnload_t = std::function<void(NSModel::RegisterModelKey key)>;
-    using FnRendererTestFlag_t = std::function<bool(NSRenderer::ERendererFlag flag)>;
-    using FnRendererSetFlag_t = std::function<void(NSRenderer::ERendererFlag flag)>;
-    using FnRendererResetFlag_t = std::function<void(NSRenderer::ERendererFlag flag)>;
-    using FnRendererFlipFlag_t = std::function<void(NSRenderer::ERendererFlag flag)>;
+    using FnRendererModelRegister_t = std::function<std::shared_ptr<NSRenderer::Model>(std::wstring_view modelName, ObserverKey key, NSDX12::GraphicsCommandList cmdList, ERegModelFlag flag)>;
+    using FnRendererModelUnload_t = std::function<void(ObserverKey key)>;
+
+    using FnRendererFlagHasLeastOne_t = std::function<bool(Flag<NSRenderer::ERendererFlag> flag)>;
+    using FnRendererFlagHasLeastAll_t = std::function<bool(Flag<NSRenderer::ERendererFlag> flag)>;
+    using FnRendererFlagHasExact_t = std::function<bool(Flag<NSRenderer::ERendererFlag> flag)>;
+    using FnRendererFlagEmpty_t = std::function<bool()>;
+    using FnRendererFlagSet_t = std::function<void(Flag<NSRenderer::ERendererFlag> flag)>;
+    using FnRendererFlagUnSet_t = std::function<void(Flag<NSRenderer::ERendererFlag> flag)>;
+    using FnRendererFlagToggle_t = std::function<void(Flag<NSRenderer::ERendererFlag> flag)>;
 
     struct DepthStencilCreateDescription {
         DXGI_FORMAT format{};
@@ -650,10 +343,13 @@ namespace NSRenderer
             FnRendererModelUnload_t fn_unloadModel,
             std::reference_wrapper<const NSDescriptor::Handle> in_fallbackSRV,
             std::reference_wrapper<NSBarrier::IBarrierBatch> in_barrierBatch,
-            FnRendererTestFlag_t fn_RendererTestFlag,
-            FnRendererSetFlag_t fn_RendererSetFlag,
-            FnRendererResetFlag_t fn_RendererResetFlag,
-            FnRendererFlipFlag_t fn_RendererFlipFlag
+            FnRendererFlagHasLeastOne_t fn_RendererFlagHasLeastOne,
+            FnRendererFlagHasLeastAll_t fn_RendererFlagHasLeastAll,
+            FnRendererFlagHasExact_t fn_RendererFlagHasExact,
+            FnRendererFlagEmpty_t fn_RendererFlagEmpty,
+            FnRendererFlagSet_t fn_RendererFlagSet,
+            FnRendererFlagUnSet_t fn_RendererFlagUnSet,
+            FnRendererFlagToggle_t fn_RendererFlagToggle
         )
         :   allocSRVRing(std::move(fn_allocSRVRing)),
             allocSRVStatic(std::move(fn_allocSRVStatic)),
@@ -670,10 +366,13 @@ namespace NSRenderer
             unloadModel(std::move(fn_unloadModel)),
             fallbackSRV(in_fallbackSRV),
             barrierBatch(in_barrierBatch),
-            rendererTestFlag(fn_RendererTestFlag),
-            rendererSetFlag(fn_RendererSetFlag),
-            rendererResetFlag(fn_RendererResetFlag),
-            rendererFlipFlag(fn_RendererFlipFlag)
+            rendererFlagHasLeastOne(fn_RendererFlagHasLeastOne),
+            rendererFlagHasLeastAll(fn_RendererFlagHasLeastAll),
+            rendererFlagHasExact(fn_RendererFlagHasExact),
+            rendererFlagEmpty(fn_RendererFlagEmpty),
+            rendererFlagSet(fn_RendererFlagSet),
+            rendererFlagUnSet(fn_RendererFlagUnSet),
+            rendererFlagToggle(fn_RendererFlagToggle)
         {};
 
         FnDescAlloc_t allocSRVRing;
@@ -691,10 +390,13 @@ namespace NSRenderer
         FnRendererModelUnload_t unloadModel;
         std::reference_wrapper<const NSDescriptor::Handle> fallbackSRV;
         std::reference_wrapper<NSBarrier::IBarrierBatch> barrierBatch;
-        FnRendererTestFlag_t rendererTestFlag;
-        FnRendererSetFlag_t rendererSetFlag;
-        FnRendererResetFlag_t rendererResetFlag;
-        FnRendererFlipFlag_t rendererFlipFlag;
+        FnRendererFlagHasLeastOne_t rendererFlagHasLeastOne;
+        FnRendererFlagHasLeastAll_t rendererFlagHasLeastAll;
+        FnRendererFlagHasExact_t rendererFlagHasExact;
+        FnRendererFlagEmpty_t rendererFlagEmpty;
+        FnRendererFlagSet_t rendererFlagSet;
+        FnRendererFlagUnSet_t rendererFlagUnSet;
+        FnRendererFlagToggle_t rendererFlagToggle;
     };
 }
 
@@ -751,7 +453,7 @@ namespace NSRenderPass
 
         virtual void OnDestroy(NSRenderer::Ctx rendererCtx) = 0;
 
-        virtual void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList) = 0;
+        virtual void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) = 0;
         virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) = 0;
 
         bool IsEnabled() const { return im_isEnabled; };

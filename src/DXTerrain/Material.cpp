@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "Material.h"
-#include "DXSampleHelper.h"
 
 Material::Material(IWICImagingFactory2* wicFactory) : m_wicFactory(wicFactory)
 {}
@@ -15,21 +14,8 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
         ? std::wstring_view(L"Material")
         : std::wstring_view(m_name.data(), m_name.size());
 
-    try
-    {
-        m_textures.emplace_back(NSTexture::LoadTextureWIC(textureName, decoder, tType));
-        m_textures.back().UnloadCPU();
-    }
-    catch (const HrException& e)
-    {
-        g_FError("Failed to load material texture\n");
-        return e.Error();
-    }
-    catch (...)
-    {
-        g_FError("Failed to load material texture\n");
-        return E_FAIL;
-    }
+    m_textures.emplace_back(NSTexture::LoadTextureWIC(textureName, decoder, tType));
+    m_textures.back().UnloadCPU();
 
     m_isOnCPU = true;
 
@@ -38,11 +24,11 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
     return S_OK;
 }
 
-void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, bool barrierTransition)
+void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, bool barrierTransition)
 {
     ASSERT(device);
 
-    ASSERT(not m_textures.empty() and m_isOnCPU, "Textures are not ready to upload to GPU");
+    if (m_textures.empty() or not m_isOnCPU) return;
 
     std::for_each(m_textures.begin(), m_textures.end(), [](NSTexture::Texture& tex)
     {

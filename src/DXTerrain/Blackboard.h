@@ -1,4 +1,7 @@
 #pragma once
+#include "core/Defines.h"
+
+#include "RendererTypes.h"
 
 class Blackboard
 {
@@ -42,19 +45,19 @@ public:
     }
 
     template<typename T>
-    OptRef<T> GetOpt(NSRenderer::BlackboardKey key)
+    MemberRef<T> GetOpt(NSRenderer::BlackboardKey key)
     {
         T* ptr = GetMut<T>(key);
 
-        return ptr ? OptRef<T>{*ptr} : std::nullopt;
+        return ptr ? MemberRef<T>{*ptr} : std::nullopt;
     }
 
     template<typename T>
-    OptRef<const T> GetOpt(NSRenderer::BlackboardKey key) const
+    MemberRef<const T> GetOpt(NSRenderer::BlackboardKey key) const
     {
         const T* ptr = GetConst<T>(key);
 
-        return ptr ? OptRef<const T>{*ptr} : std::nullopt;
+        return ptr ? MemberRef<const T>{*ptr} : std::nullopt;
     }
 
 private:

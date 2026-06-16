@@ -1,4 +1,5 @@
 #pragma once
+#include "ModelTypes.h"
 
 class Primitives
 {

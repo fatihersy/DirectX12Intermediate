@@ -1,4 +1,5 @@
 #pragma once
+#include "core/Defines.h"
 
 struct GRAPHICS_PIPELINE_STATE_DESC
 {
@@ -71,7 +72,7 @@ public:
     GraphicsPipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature);
     GraphicsPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature);
 
-    void Bind(NSRenderer::GraphicsCommandList cmdList) const
+    void Bind(NSDX12::GraphicsCommandList cmdList) const
     {
         ASSERT(im_pipeline);
 
@@ -96,7 +97,7 @@ public:
     ComputePipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature);
     ComputePipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature);
 
-    void Bind(NSRenderer::GraphicsCommandList cmdList) const
+    void Bind(NSDX12::GraphicsCommandList cmdList) const
     {
         ASSERT(im_pipeline);
 
@@ -117,7 +118,7 @@ public:
     TessellationPipeline(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& rootSignature);
     TessellationPipeline(ID3D12Device14* device, LPCWSTR name, FnSetRootSignature SetRootSignature);
 
-    void Bind(NSRenderer::GraphicsCommandList cmdList) const
+    void Bind(NSDX12::GraphicsCommandList cmdList) const
     {
         ASSERT(im_pipeline);
 

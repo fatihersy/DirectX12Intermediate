@@ -8,7 +8,7 @@
 #include "ShaderCompiler.h"
 #include "Terrain.h"
 
-using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)>;
+using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSDX12::GraphicsCommandList cmdList)>;
 
 class Renderer
 {
@@ -21,8 +21,8 @@ public:
     void BeginFrame();
     void DrawScene(NSScene::IScene& scene);
     void EndFrame();
-    NSRenderer::Model& RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag);
-    void UnloadModel(NSModel::RegisterModelKey key);
+    std::shared_ptr<NSRenderer::Model> RegisterModel(std::wstring_view modelName, ObserverKey sceneKey, NSDX12::GraphicsCommandList cmdList, NSRenderer::ERegModelFlag flag);
+    void UnloadModel(ObserverKey key);
 
     void Resize(UINT width, UINT height);
 
@@ -45,15 +45,12 @@ public:
         return *m_passes[static_cast<size_t>(id)];
     }
 
-    NSRenderer::Model& GetRegisteredModel(NSModel::RegisterModelKey& key)
+    std::shared_ptr<NSRenderer::Model> GetRegisteredModel(ObserverKey key)
     {
-        auto optRegModels = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-        ASSERT(optRegModels.has_value() and optRegModels->get().size() > key.index);
+        auto optRegModels = m_blackboard.GetOpt<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        ASSERT(optRegModels.has_value() and optRegModels->get().Contains(key));
 
-        NSRenderer::Model& regModel = optRegModels->get()[key.index];
-        ASSERT(regModel.sceneKey.id == key.id);
-
-        return regModel;
+        return optRegModels->get().Get(key);
     }
 
     NSDescriptor::Handle AllocSRVRing(uint32_t amount = 1u) {
@@ -92,7 +89,7 @@ public:
         return std::ref(*m_barrierBatch);
     }
 
-    bool CreateTerrain(NSRenderer::GraphicsCommandList cmdList, const std::string_view root, NSTerrain::TerrainDesc desc)
+    bool CreateTerrain(NSDX12::GraphicsCommandList cmdList, const std::string_view root, NSTerrain::TerrainDesc desc)
     {
         return m_terrain.OnInit(cmdList, GetCtx(), root, desc);
     }
@@ -114,51 +111,27 @@ public:
             [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset { return this->OffsetRTV(handle, offset);          },
             [this](const NSDescriptor::Handle& handle, uint32_t offset)                -> NSDescriptor::Offset { return this->OffsetDSV(handle, offset);          },
             [this](size_t size)                                                        -> NSAllocator::Ctx { return this->m_constantAllocator.Allocate(size); },
-            [this](std::wstring_view modelName, NSModel::SceneModelKey key, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag)-> NSRenderer::Model&
+            [this](std::wstring_view modelName, ObserverKey key, NSDX12::GraphicsCommandList cmdList, NSRenderer::ERegModelFlag flag)-> std::shared_ptr<NSRenderer::Model>
             {
                 return this->RegisterModel(modelName, key, cmdList, flag);
             },
-            [this](NSModel::RegisterModelKey key) { this->UnloadModel(key); },
+            [this](ObserverKey key) { this->UnloadModel(key); },
             std::cref(m_fallbackTextureSRVhandle),
             GetBarrierBatch(),
-            [this](NSRenderer::ERendererFlag flag) -> bool { return this->TestFlag(flag); },
-            [this](NSRenderer::ERendererFlag flag) -> void { this->SetFlag(flag); },
-            [this](NSRenderer::ERendererFlag flag) -> void { this->ResetFlag(flag); },
-            [this](NSRenderer::ERendererFlag flag) -> void { this->FlipFlag(flag); }
+            [this](Flag<NSRenderer::ERendererFlag> flag) -> bool { return this->m_flag.HasLeastOne(flag); },
+            [this](Flag<NSRenderer::ERendererFlag> flag) -> bool { return this->m_flag.HasLeastAll(flag); },
+            [this](Flag<NSRenderer::ERendererFlag> flag) -> bool { return this->m_flag.HasExact(flag); },
+            [this]()                                     -> bool { return this->m_flag.Empty(); },
+            [this](Flag<NSRenderer::ERendererFlag> flag) -> void { this->m_flag.Set(flag); },
+            [this](Flag<NSRenderer::ERendererFlag> flag) -> void { this->m_flag.UnSet(flag); },
+            [this](Flag<NSRenderer::ERendererFlag> flag) -> void { this->m_flag.Toggle(flag); }
         );
     }
     NSRenderPass::DebugUtils& GetDebugUtils() {
         return m_debugUtils;
-    }
+    };
 
-    bool TestFlag(NSRenderer::ERendererFlag flag)
-    {
-        const size_t _flag = static_cast<size_t>(flag);
-        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
-
-        return m_flags.test(_flag);
-    }
-    void SetFlag(NSRenderer::ERendererFlag flag)
-    {
-        const size_t _flag = static_cast<size_t>(flag);
-        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
-
-        m_flags.set(static_cast<uint32_t>(_flag));
-    }
-    void ResetFlag(NSRenderer::ERendererFlag flag)
-    {
-        const size_t _flag = static_cast<size_t>(flag);
-        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
-
-        m_flags.reset(static_cast<uint32_t>(_flag));
-    }
-    void FlipFlag(NSRenderer::ERendererFlag flag)
-    {
-        const size_t _flag = static_cast<size_t>(flag);
-        ASSERT(_flag < static_cast<size_t>(NSRenderer::ERendererFlag::MAX));
-
-        m_flags.flip(static_cast<uint32_t>(_flag));
-    }
+    Flag<NSRenderer::ERendererFlag> m_flag;
 private:
     IDXGIFactory7* m_factory = nullptr;
     ID3D12Device14* m_device = nullptr;
@@ -212,8 +185,6 @@ private:
 
     void MoveToNextFrame();
     void WaitForGPU();
-
-    std::bitset<32> m_flags{};
 
     constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
 

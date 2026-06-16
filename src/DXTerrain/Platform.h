@@ -1,4 +1,5 @@
 #pragma once
+#include "Logger.h"
 
 class IApp;
 

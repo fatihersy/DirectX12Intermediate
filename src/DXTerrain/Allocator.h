@@ -1,4 +1,7 @@
 #pragma once
+#include "core/Defines.h"
+
+#include "AllocatorTypes.h"
 
 class ConstantAllocator
 {
@@ -30,4 +33,3 @@ private:
     size_t m_blobFrameEnd{};
     size_t m_blobOffset{};
 };
-

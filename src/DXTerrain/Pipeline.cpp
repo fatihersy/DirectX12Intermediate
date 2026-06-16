@@ -4,6 +4,7 @@
 #include "DXSampleHelper.h"
 
 #include "ShaderCompiler.h"
+#include "Logger.h"
 
 void MakeRootSignature(ID3D12Device14* device, LPCWSTR name, ComPtr<ID3D12RootSignature>& outSignature, FnSetRootSignature SetRootSignature)
 {

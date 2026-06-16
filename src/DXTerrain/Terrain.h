@@ -1,4 +1,12 @@
 #pragma once
+#include "core/Defines.h"
+#include "core/EntityTypes.h"
+#include "core/Math.h"
+
+#include "TerrainTypes.h"
+#include "RendererTypes.h"
+
+#include "Texture.h"
 
 namespace NSTerrain
 {
@@ -117,6 +125,9 @@ namespace NSTerrain
     };
     struct TerrainChunk
     {
+        ChunkIndex index;
+        EntityKey<TerrainChunk> m_id;
+
         ComPtr<ID3D12Resource> vertexDefault;
         ComPtr<ID3D12Resource> vertexUpload;
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
@@ -134,12 +145,12 @@ namespace NSTerrain
         DirectX::XMFLOAT2 chunkUVOffset{};
         DirectX::XMFLOAT2 chunkUVScale{};
 
-        ChunkKey key;
-        ChunkBounds bounds;
     };
-    struct TerrainPage
+    struct TerrainPage : public NSMath::ICullable
     {
         uint32_t terrainLod{};
+        PageIndex index;
+        EntityKey<TerrainPage> m_id;
 
         NSMath::SRectU32 heightSourceRect{};
         NSMath::SRectU32 diffuseSourceRect{};
@@ -150,7 +161,7 @@ namespace NSTerrain
         NSTexture::Texture heightTexturePage{};
         NSTexture::Texture diffuseTexturePage{};
 
-        std::vector<TerrainChunk> chunks{};
+        EntityMap<TerrainChunk> chunks{};
 
         bool isOnCPU{};
         bool isOnGPU{};
@@ -164,9 +175,6 @@ namespace NSTerrain
             Loaded,
             Failed,
         } residency = EPageResidency::Unknown;
-
-        PageKey key;
-        PageBounds bounds{};
     };
 
     struct ITerrainView
@@ -175,7 +183,7 @@ namespace NSTerrain
         virtual ~ITerrainView() = default;
 
         virtual const TerrainDesc& GetDesc() const = 0;
-        virtual const std::vector<TerrainPage>& GetPages() const = 0;
+        virtual const EntityMap<TerrainPage>& GetPages() const = 0;
         virtual NSDescriptor::Offset GetHeightmapSRV() const = 0;
         virtual bool IsOnCPU() const = 0;
         virtual bool IsOnGPU() const = 0;
@@ -192,21 +200,21 @@ namespace NSTerrain
         Terrain(Terrain&& other) noexcept;
         Terrain& operator=(Terrain&& other) noexcept;
 
-        bool OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, const std::string_view root, NSTerrain::TerrainDesc desc);
+        bool OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, const std::string_view root, NSTerrain::TerrainDesc desc);
         void OnDestroy(NSRenderer::Ctx rendererCtx);
 
         bool Load(const std::wstring_view path);
-        void Free(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        void Free(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 
-        void Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
-        void Unload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        void Upload(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        void Unload(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 
         void ReleaseUploadBuffers();
 
         const TerrainDesc& GetDesc() const override {
             return m_desc;
         }
-        const std::vector<TerrainPage>& GetPages() const override {
+        const EntityMap<TerrainPage>& GetPages() const override {
             return m_pages;
         }
         NSDescriptor::Offset GetHeightmapSRV() const override {
@@ -219,23 +227,23 @@ namespace NSTerrain
             return m_isOnGPU;
         };
 
-        void BuildPageLayout(std::vector<TerrainPage>& out_Pages);
+        void BuildPageLayout(EntityMap<TerrainPage>& out_Pages);
 
-        void UploadResidentPages(std::vector<TerrainPage>& pages, NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        void UploadResidentPages(std::vector<TerrainPage>& pages, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
     private:
         ID3D12Device14* m_device = nullptr;
         TerrainDesc m_desc{};
         SourceManifest srcManifest;
         PageManifest pageManifest;
-        std::vector<TerrainPage> m_pages;
+        EntityMap<TerrainPage> m_pages;
         std::vector<uint16_t> m_heightR16;
 
         enum class TextureIDs : uint32_t { HEIGHTMAP = 0, DIFFUSE, MAX };
         NSDescriptor::Handle m_texSrvHandle{};
         std::array<NSTexture::Texture, static_cast<size_t>(TextureIDs::MAX)> m_textures;
 
-        void BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
-        void BuildGeometryForPages(std::vector<TerrainPage>& pages, NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        void BuildChunks(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        void BuildGeometryForPages(EntityKey<TerrainPage>& pages, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
         float SampleHeight(float u, float v) const;
 
         void SaveSourceManifest();
@@ -252,7 +260,7 @@ namespace NSTerrain
         PageTextureManifest GenerateDiffuseBinsFromEXR();
         NSTexture::Texture LoadPageTextureBin(std::wstring_view name, const std::filesystem::path& path, const PageTextureManifest& manifest, NSTexture::EType type);
 
-        TerrainChunk BuildChunkForPage(TerrainPage& page, uint32_t localChunkX, uint32_t localChunkZ, NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+        TerrainChunk BuildChunkForPage(TerrainPage& page, uint32_t localChunkX, uint32_t localChunkZ, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 
         std::filesystem::path m_root;
         bool m_isOnGPU{};

@@ -1,28 +1,55 @@
 #pragma once
 
+#include "core/EntityTypes.h"
+#include "core/Math.h"
+#include "TerrainTypes.h"
+#include "RendererTypes.h"
+
 namespace NSScene
 {
-    struct TerrainChunk
-    {
-        NSTerrain::ChunkKey key;
-        NSTerrain::ChunkBounds bound;
-    };
     struct TerrainPage
     {
-        NSTerrain::PageKey key;
-        NSTerrain::PageBounds bound;
-        std::vector<TerrainChunk> chunks;
+        EntityKey<TerrainPage> m_id;
+        NSTerrain::PageIndex index;
+        ObserverKey m_registerKey;
+        NSMath::BoundingBox bound;
+
+        bool isVisibleTEMP{};
     };
 
     struct Terrain
     {
         NSTerrain::TerrainDesc desc;
-        std::vector<TerrainPage> pages;
+        EntityMap<TerrainPage> pages;
         bool isInitialized{};
+    };
+
+    enum class EIncludeCull : uint32_t
+    {
+        STATIC_OBJECTS,
+        DYNAMIC_OBJECTS,
+        MODELS,
+        TERRAIN,
+        ALL,
+        Force32Bit = UINT32_MAX
+    };
+
+    struct CullResult
+    {
+        EntityKey<CullResult> m_id;
+        ObserverKey culledSceneKey;
+
+        std::vector<NSMath::ICullable> m_culledObjects;
+
+        Flag<EIncludeCull> flag;
+        uint32_t generation{};
+    private:
     };
 
     struct Camera
     {
+        EntityKey<Camera> m_id;
+
         Camera(){};
         Camera(const DirectX::XMMATRIX proj, DirectX::XMFLOAT3 fEye, DirectX::XMFLOAT4 fFwd, DirectX::XMFLOAT4 fUp)
         {
@@ -48,6 +75,9 @@ namespace NSScene
 
             viewMatrix = DirectX::XMMatrixLookAtLH(camEye, DirectX::XMVectorAdd(camEye, camFwd), camUp);
         }
+        bool FindCull(Flag<NSScene::EIncludeCull> flag, ObserverKey sceneKey, std::weak_ptr<NSScene::CullResult> result);
+
+        EntityMap<CullResult> cullResults;
 
         float camYaw{};
         float camPitch{};
@@ -56,37 +86,17 @@ namespace NSScene
         float lookSensitivity = .01f;
     };
 
-    struct CullTerrainResult
-    {
-        struct CulledChunk
-        {
-            NSTerrain::ChunkKey key;
-            NSTerrain::ChunkBounds bound;
-        };
-        struct CulledPage
-        {
-            NSTerrain::PageKey key;
-            NSTerrain::PageBounds bound;
-
-            std::vector<CulledChunk> chunks;
-        };
-
-        std::vector<CulledPage> pages;
-    };
-
     class IScene
     {
     public:
         virtual void OnDestroy(NSRenderer::Ctx rendererCtx) = 0;
 
-        virtual bool ValidateKey(NSModel::SceneModelKey sceneKey) = 0;
-        virtual bool ValidateKeys(NSModel::SceneModelKey sceneKey, NSModel::RegisterModelKey regKey) = 0;
+        virtual bool ValidateKey(ObserverKey entKey) = 0;
 
-        virtual const NSScene::Terrain& GetTerrain() const = 0;
-        virtual const NSScene::Camera& GetMainCamera() const = 0;
+        virtual NSScene::Terrain& GetTerrain() = 0;
+        virtual std::shared_ptr<NSScene::Camera> GetMainCamera() = 0;
 
-        virtual std::vector<NSModel::SceneModelKey> CullModels(const NSScene::Camera& camera, NSModel::SceneModelKey excludedModelKey = NSModel::SceneModelKey()) = 0;
-        virtual CullTerrainResult CullTerrain(const NSScene::Camera& camera) = 0;
+        virtual std::weak_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncludeCull> flag, ObserverKey excludeKey = {}) = 0;
 
         static constexpr float FAR_CLIP = 20000.f;
         static constexpr float NEAR_CLIP = 0.1f;

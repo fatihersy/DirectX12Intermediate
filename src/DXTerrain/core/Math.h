@@ -1,4 +1,7 @@
 #pragma once
+#include "Defines.h"
+
+#include "EntityTypes.h"
 
 namespace NSMath
 {
@@ -99,16 +102,6 @@ namespace NSMath
 
         return XMVector3Less(diff, vEps);
     }
-    struct SBoundSphere {
-        DirectX::XMFLOAT3 position{};
-        float radius{};
-        UINT sliceCount{};
-        UINT stackCount{};
-    };
-    struct SBoundAABB {
-        DirectX::XMFLOAT3 min{};
-        DirectX::XMFLOAT3 max{};
-    };
     struct SRectU32
     {
         uint32_t x{};
@@ -130,43 +123,75 @@ namespace NSMath
         float width{};
         float height{};
     };
+
+    struct SBoundSphere {
+        DirectX::XMFLOAT3 position{};
+        float radius{};
+        UINT sliceCount{};
+        UINT stackCount{};
+    };
+    struct SBoundAABB {
+        DirectX::XMFLOAT3 min{};
+        DirectX::XMFLOAT3 max{};
+    };
+
+    using BoundingBox = std::variant<SBoundSphere, SBoundAABB>;
+
+    struct ICullable
+    {
+        ObserverKey key;
+        BoundingBox bound;
+    };
+
     struct SFrustum
     {
         SFrustum() {};
         SFrustum(DirectX::XMMATRIX viewProj);
 
-        bool TestSphere(SBoundSphere& bound) const
-        {
-            using namespace DirectX;
-
-            for (size_t i{}; i < 6; i++)
-            {
-                const float dist = XMVectorGetX(XMPlaneDotCoord(Planes[i], XMLoadFloat3(&bound.position)));
-
-                if (dist < -bound.radius) return false;
-            }
-
-            return true;
-        }
-        bool TestAABB(const SBoundAABB& bound) const
-        {
-            using namespace DirectX;
-
-            for (size_t i{}; i < 6; i++)
-            {
-                XMVECTOR pVertex = XMVectorSelect(
-                    XMLoadFloat3(&bound.min),
-                    XMLoadFloat3(&bound.max),
-                    XMVectorGreaterOrEqual(Planes[i],
-                    XMVectorZero())
-                );
-
-                if (XMVectorGetX(XMPlaneDotCoord(Planes[i], pVertex)) < 0.f) return false;
-            }
-
-            return true;
-        }
-
         DirectX::XMVECTOR Planes[6]{};
+
+        bool TestBounds(BoundingBox& bb) const
+        {
+            using namespace DirectX;
+
+            bool collides = true;
+
+            std::visit(overloaded
+            {
+                [this, &collides](const SBoundSphere& sphere)
+                {
+                    for (size_t i{}; i < 6; i++)
+                    {
+                        const float dist = XMVectorGetX(XMPlaneDotCoord(Planes[i], XMLoadFloat3(&sphere.position)));
+
+                        if (dist < -sphere.radius)
+                        {
+                            collides = false;
+                            break;
+                        }
+                    }
+                },
+                [this, &collides](const SBoundAABB& aabb)
+                {
+                    for (size_t i{}; i < 6; i++)
+                    {
+                        XMVECTOR pVertex = XMVectorSelect(
+                            XMLoadFloat3(&aabb.min),
+                            XMLoadFloat3(&aabb.max),
+                            XMVectorGreaterOrEqual(Planes[i],
+                            XMVectorZero())
+                        );
+
+                        if (XMVectorGetX(XMPlaneDotCoord(Planes[i], pVertex)) < 0.f)
+                        {
+                            collides = false;
+                            break;
+                        }
+                    }
+                }
+            }, bb);
+
+            return collides;
+        }
     };
 }

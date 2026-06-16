@@ -63,7 +63,7 @@ GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRen
         return D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
     }))
 {}
-GeometryPass& GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+GeometryPass& GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     // Pipeline
     {
@@ -139,7 +139,7 @@ void GeometryPass::OnDestroy(NSRenderer::Ctx rendererCtx)
 GeometryPass::~GeometryPass()
 {}
 
-void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
@@ -162,9 +162,11 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
 
         FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
 
-        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
-        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
-        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
+        std::shared_ptr<NSScene::Camera> mainCam =scene.GetMainCamera();
+
+        XMStoreFloat4x4(&frameCB.view, mainCam->viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, mainCam->projMatrix);
+        XMStoreFloat3(&frameCB.eye, mainCam->camEye);
         XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
         XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
@@ -175,55 +177,60 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
 
     cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_BRDF_LUT_SRV, brdfLUTsrv->get().gpuAddr);
 
-    auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+    auto optRegModels = blackboard.GetOpt<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     ASSERT(optRegModels.has_value());
 
-    std::vector<NSRenderer::Model>& regModels = optRegModels->get();
+    EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-    std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(scene.GetMainCamera(), {});
+    std::weak_ptr<NSScene::Camera> wpMainCamera = scene.GetMainCamera();
+    ASSERT(wpMainCamera.lock(), "Main camera is invalid");
 
-    for (NSModel::SceneModelKey& key : modelsCulled)
+    auto mainCamera = wpMainCamera.lock();
+
+    scene.Cull(mainCamera->m_id, NSScene::EIncludeCull::ALL);
+
+    mainCamera->cullResults.ForEach([&](EntityID, std::shared_ptr<NSScene::CullResult> result)
     {
-        ASSERT(key.index < scene.m_models.size());
-        Model& sceneModel = scene.m_models[key.index];
-
-        if (not sceneModel.TestFlag(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
-
-        ASSERT(sceneModel.m_registerKey.index < regModels.size());
-
-        NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
-
-        ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
-
-        cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_CUBEMAP_SRV, regModel.m_envCubemap.srvHandle.gpuAddr);
-
-        sceneModel.Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+        for (NSMath::ICullable cullable : result->m_culledObjects)
         {
-            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
-            MeshConstants& meshCB = allocCtx.As<MeshConstants>();
+            ASSERT(scene.m_models.Contains(cullable.key.entID));
+            std::shared_ptr<Model> sceneModel = scene.m_models.Get(cullable.key);
 
-            DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
-            DirectX::XMVECTOR det;
-            DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
-            DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
+            if (not sceneModel->m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
 
-            meshCB.baseColor = mesh.material.m_baseColor;
-            meshCB.metallic = mesh.material.m_metallic;
-            meshCB.roughness = mesh.material.m_roughness;
-            meshCB.opacity = mesh.material.m_opacity;
-            meshCB.textureFlags = mesh.material.GetFlags();
+            ASSERT(regModels.Contains(sceneModel->m_registerKey));
+            std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(sceneModel->m_registerKey);
 
-            cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
+            cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_CUBEMAP_SRV, regModel->m_envCubemap.srvHandle.gpuAddr);
 
-            if (mesh.material.m_isOnGPU) {
-                cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_MODEL_TEX_SRV, mesh.material.m_srvHandle.gpuAddr);
-            }
+            sceneModel->Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+            {
+                NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
+                MeshConstants& meshCB = allocCtx.As<MeshConstants>();
 
-            cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-            cmdList.IASetIndexBuffer(&mesh.indexBufferView);
-            cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
-        });
-    }
+                DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
+                DirectX::XMVECTOR det;
+                DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
+                DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
+
+                meshCB.baseColor = mesh.material.m_baseColor;
+                meshCB.metallic = mesh.material.m_metallic;
+                meshCB.roughness = mesh.material.m_roughness;
+                meshCB.opacity = mesh.material.m_opacity;
+                meshCB.textureFlags = mesh.material.GetFlags();
+
+                cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
+
+                if (mesh.material.m_isOnGPU) {
+                    cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_MODEL_TEX_SRV, mesh.material.m_srvHandle.gpuAddr);
+                }
+
+                cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+                cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+                cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+            });
+        }
+    });
 }
 void GeometryPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {}
@@ -441,7 +448,7 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
         DirectX::XMStoreFloat3(&m_constantsUpload.SunDir, vSunDir);
     }
 }
-AtmospherePass& AtmospherePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+AtmospherePass& AtmospherePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     return *this;
 }
@@ -456,7 +463,7 @@ void AtmospherePass::OnDestroy(NSRenderer::Ctx rendererCtx)
 };
 AtmospherePass::~AtmospherePass()
 {};
-void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
     UINT width = IApp::GetInstance()->im_width;
@@ -497,15 +504,17 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
         atmosCBAC.As<AtmosphereConstants>() = m_constantsDefault;
     }
 
+    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+
     NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
     {
         using namespace DirectX;
 
         FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
 
-        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
-        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
-        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
+        XMStoreFloat4x4(&frameCB.view, mainCam->viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, mainCam->projMatrix);
+        XMStoreFloat3(&frameCB.eye, mainCam->camEye);
         XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
         XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
@@ -516,11 +525,11 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_ATMOSPHERE, atmosCBAC.gpuAddr);
     cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_TABLE_SRV, rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE).gpuAddr);
 
-    OptRef<Model> skyDome = std::nullopt;
+    MemberRef<Model> skyDome = std::nullopt;
 
     scene.ForEachModel([&skyDome](Model& model)
     {
-        if (model.TestFlag(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE) and model.isOnGPU) {
+        if (model.m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE) and model.isOnGPU) {
             skyDome = model;
             return;
         }
@@ -552,7 +561,7 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
 }
 void AtmospherePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {}
-void AtmospherePass::UpdateAtmosphere(D3D12_GPU_VIRTUAL_ADDRESS constantsGpuAddr, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void AtmospherePass::UpdateAtmosphere(D3D12_GPU_VIRTUAL_ADDRESS constantsGpuAddr, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     {
         CD3DX12_RESOURCE_BARRIER barriers[] =
@@ -859,7 +868,7 @@ EnvironmentCubemapPass::EnvironmentCubemapPass(ID3D12Device14* device, Blackboar
 }
 EnvironmentCubemapPass::~EnvironmentCubemapPass(){};
 
-EnvironmentCubemapPass& EnvironmentCubemapPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+EnvironmentCubemapPass& EnvironmentCubemapPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     GenerateBRDFLUT(rendererCtx, cmdList);
 
@@ -876,7 +885,7 @@ void EnvironmentCubemapPass::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_prefilterPipeline.Reset();
     m_brdfPipeline.Reset();
 }
-void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
@@ -886,90 +895,80 @@ void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackb
 
     using namespace DirectX;
 
-    auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+    auto optRegModels = blackboard.GetOpt<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     ASSERT(optRegModels.has_value());
 
-    std::vector<NSRenderer::Model>& regModels = optRegModels->get();
+    EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-    for (Model& sceneModel : scene.m_models)
+    scene.m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model)
     {
-        ASSERT(regModels.size() > sceneModel.m_registerKey.index);
+        std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(model->m_registerKey);
 
-        NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
+        if (not model->m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP)) return;
 
-        ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
-
-        if (not sceneModel.TestFlag(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP)) continue;
-
-        if (regModel.isDirty)
+        if (regModel->isDirty)
         {
-            Capture(sceneModel, scene, blackboard, rendererCtx, cmdList);
-            continue;
+            Capture(DE_REF(model), scene, blackboard, rendererCtx, cmdList);
+            return;
         }
         else
         {
-            for (NSRenderer::Model::Neighbor& neighbor : regModel.objsInFrustum)
+            for (NSRenderer::Model::Neighbor& neighbor : regModel->objsInFrustum)
             {
-                if (not NSMath::Float3Equals(neighbor.position, sceneModel.GetPosition()))
+                if (not NSMath::Float3Equals(neighbor.position, model->GetPosition()))
                 {
-                    regModel.isDirty = true;
+                    regModel->isDirty = true;
                 }
             }
         }
-    }
+    });
 }
+
 void EnvironmentCubemapPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx){}
-void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+
+void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     Scene& scene = static_cast<Scene&>(_scene);
 
-    auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    std::vector<NSRenderer::Model>& regModels = optRegModels->get();
-    NSRenderer::Model& regInModel = regModels[inModel.m_registerKey.index];
+    auto optRegModels = blackboard.GetOpt<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+    ASSERT(optRegModels.has_value(), "Renderer models is invalid");
+
+    EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
+    std::shared_ptr<NSRenderer::Model> regInModel = regModels.Get(inModel.m_registerKey);
 
     DirectX::XMFLOAT3 pos = inModel.GetPosition();
-    const DirectX::XMMATRIX proj = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, 1.f, scene.NEAR_CLIP, scene.FAR_CLIP);
-    NSScene::Camera cams[regInModel.m_envCubemap.NUM_FACES] =
-    {
-        NSScene::Camera(proj, pos, { 1, 0, 0, 0 }, { 0, 1, 0, 0 }),
-        NSScene::Camera(proj, pos, {-1, 0, 0, 0 }, { 0, 1, 0, 0 }),
-        NSScene::Camera(proj, pos, { 0, 1, 0, 0 }, { 0, 0,-1, 0 }),
-        NSScene::Camera(proj, pos, { 0,-1, 0, 0 }, { 0, 0, 1, 0 }),
-        NSScene::Camera(proj, pos, { 0, 0, 1, 0 }, { 0, 1, 0, 0 }),
-        NSScene::Camera(proj, pos, { 0, 0,-1, 0 }, { 0, 1, 0, 0 })
-    };
 
     {
         D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-            regInModel.m_envCubemap.cubemapTexture.Get(),
+            regInModel->m_envCubemap.cubemapTexture.Get(),
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
             D3D12_RESOURCE_STATE_RENDER_TARGET
         );
         cmdList.ResourceBarrier(1, &barrier);
     }
 
-    CD3DX12_VIEWPORT viewport(0.f, 0.f, regInModel.m_envCubemap.PER_FACE_RESOLUTION, regInModel.m_envCubemap.PER_FACE_RESOLUTION);
-    CD3DX12_RECT scissor(0L, 0L, regInModel.m_envCubemap.PER_FACE_RESOLUTION, regInModel.m_envCubemap.PER_FACE_RESOLUTION);
+    CD3DX12_VIEWPORT viewport(0.f, 0.f, regInModel->m_envCubemap.PER_FACE_RESOLUTION, regInModel->m_envCubemap.PER_FACE_RESOLUTION);
+    CD3DX12_RECT scissor(0L, 0L, regInModel->m_envCubemap.PER_FACE_RESOLUTION, regInModel->m_envCubemap.PER_FACE_RESOLUTION);
 
     cmdList.RSSetViewports(1, &viewport);
     cmdList.RSSetScissorRects(1, &scissor);
 
-    for (size_t face{}; face < regInModel.m_envCubemap.NUM_FACES; face++)
+    for (size_t face{}; face < regInModel->m_envCubemap.NUM_FACES; face++)
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rendererCtx.offsetRTV(regInModel.m_envCubemap.rtvHandle, static_cast<UINT>(face)).cpuAddr;
-        cmdList.OMSetRenderTargets(1, &rtvHandle, FALSE, &regInModel.m_envCubemap.dsvHandle.cpuAddr);
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rendererCtx.offsetRTV(regInModel->m_envCubemap.rtvHandle, static_cast<UINT>(face)).cpuAddr;
+        cmdList.OMSetRenderTargets(1, &rtvHandle, FALSE, &regInModel->m_envCubemap.dsvHandle.cpuAddr);
 
         const float clearColor[] = {0.f, 0.f, 0.f, 1.f};
         cmdList.ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-        cmdList.ClearDepthStencilView(regInModel.m_envCubemap.dsvHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
+        cmdList.ClearDepthStencilView(regInModel->m_envCubemap.dsvHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 
-        NSScene::Camera& cam = cams[face];
+        std::shared_ptr<NSScene::Camera> camera = scene.m_cameras.Get(inModel.envCameraKeys[face]);
 
         NSAllocator::Ctx captureCBAC = rendererCtx.constAlloc(sizeof(EnvCaptureConstants));
         {
             EnvCaptureConstants& constants = captureCBAC.As<EnvCaptureConstants>();
-            DirectX::XMStoreFloat4x4(&constants.view, cam.viewMatrix);
-            DirectX::XMStoreFloat4x4(&constants.proj, cam.projMatrix);
+            DirectX::XMStoreFloat4x4(&constants.view, camera->viewMatrix);
+            DirectX::XMStoreFloat4x4(&constants.proj, camera->projMatrix);
             DirectX::XMStoreFloat4(&constants.lightDir, scene.m_lightDir);
             DirectX::XMStoreFloat4(&constants.lightColor, scene.m_lightColor);
             DirectX::XMFLOAT3 pos = inModel.GetPosition();
@@ -1004,21 +1003,19 @@ void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Bl
             m_geomPipeline.Bind(cmdList);
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_CAPTURE, captureCBAC.gpuAddr);
 
-            std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(cam, inModel.m_sceneKey);
+            std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(camera->m_id, NSScene::EIncludeCull::STATIC_OBJECTS | NSScene::EIncludeCull::DYNAMIC_OBJECTS, inModel.m_id).lock();
 
-            for (NSModel::SceneModelKey& sceneKey : modelsCulled)
+            for (NSMath::ICullable culled : cullResult->m_culledObjects)
             {
-                Model& sceneModel = scene.m_models[sceneKey.index];
+                ASSERT(scene.m_models.Contains(culled.key));
+                std::shared_ptr<::Model> sceneModel = scene.m_models.Get(culled.key);
 
-                ASSERT(regModels.size() > sceneModel.m_registerKey.index);
+                ASSERT(regModels.Contains(culled.key));
+                std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(sceneModel->m_registerKey);
 
-                NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
+                if (regModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) continue;
 
-                ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
-
-                if (regModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) continue;
-
-                sceneModel.Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+                sceneModel->Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
                 {
                     NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
                     MeshConstants& meshCB = allocCtx.As<MeshConstants>();
@@ -1045,16 +1042,16 @@ void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Bl
 
     {
         D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-            regInModel.m_envCubemap.cubemapTexture.Get(),
+            regInModel->m_envCubemap.cubemapTexture.Get(),
             D3D12_RESOURCE_STATE_RENDER_TARGET,
             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
         );
         cmdList.ResourceBarrier(1, &barrier);
     }
 
-    PrefilterCubemap(regInModel.m_envCubemap, rendererCtx, cmdList);
+    PrefilterCubemap(regInModel->m_envCubemap, rendererCtx, cmdList);
 
-    regInModel.isDirty = false;
+    regInModel->isDirty = false;
 
     auto mainRTV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainRTV);
     auto mainDSV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainDSV);
@@ -1062,7 +1059,7 @@ void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Bl
 
     cmdList.OMSetRenderTargets(1, &mainRTV->get(), FALSE, &mainDSV->get());
 }
-void EnvironmentCubemapPass::PrefilterCubemap(NSRenderer::EnvironmentCubemap& envMap, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void EnvironmentCubemapPass::PrefilterCubemap(NSRenderer::EnvironmentCubemap& envMap, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     std::vector<D3D12_RESOURCE_BARRIER> barriers;
     barriers.reserve(envMap.NUM_FACES * envMap.MIP_COUNT);
@@ -1142,7 +1139,7 @@ void EnvironmentCubemapPass::PrefilterCubemap(NSRenderer::EnvironmentCubemap& en
         cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     }
 }
-void EnvironmentCubemapPass::GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void EnvironmentCubemapPass::GenerateBRDFLUT(NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     {
         D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -1298,7 +1295,7 @@ TerrainPass::~TerrainPass()
 
 };
 
-TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory)
+TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory)
 {
 
     m_textures[static_cast<size_t>(ETexture::GRASS)] = LoadTexture(L"TerrainPass::GrassTex", L"terrain/grass.jpg", NSTexture::EType::EType_DIFFUSE);
@@ -1355,7 +1352,7 @@ void TerrainPass::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_wireframePipeline.Reset();
 };
 
-void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not this->im_isEnabled) return;
 
@@ -1378,12 +1375,28 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.RSSetViewports(1, &viewport);
     cmdList.RSSetScissorRects(1, &scissor);
 
-    NSScene::CullTerrainResult cullTerrainResult = scene.CullTerrain(scene.m_camera);
-    const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
-    const std::vector<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
-    const std::vector<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
+    std::shared_ptr<NSScene::Camera> camera = scene.GetMainCamera();
+    std::weak_ptr<NSScene::CullResult> _cullResult;
+    camera->cullResults.ForEach([&_cullResult, &scene](EntityID, std::shared_ptr<NSScene::CullResult> result)
+    {
+        if (result->culledSceneKey == scene.m_id and result->flag.HasExact(NSScene::EIncludeCull::TERRAIN))
+        {
+            _cullResult = result;
+        }
+    });
+    if (_cullResult.expired())
+    {
+        _cullResult = scene.Cull(camera->m_id, NSScene::EIncludeCull::TERRAIN);
+    }
 
-    if (rendererCtx.rendererTestFlag(NSRenderer::ERendererFlag::MODE_WIREFRAME))
+    ASSERT(not _cullResult.expired(), "Unable to get cull results");
+    std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
+
+    const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
+    const EntityMap<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
+    const EntityMap<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
+
+    if (rendererCtx.rendererFlagHasLeastOne(NSRenderer::ERendererFlag::MODE_WIREFRAME))
     {
         m_wireframePipeline.Bind(cmdList);
     }
@@ -1400,9 +1413,9 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
         FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
 
-        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
-        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
-        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
+        XMStoreFloat4x4(&frameCB.view, camera->viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, camera->projMatrix);
+        XMStoreFloat3(&frameCB.eye, camera->camEye);
         XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
         XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
@@ -1413,20 +1426,18 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
     const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
-    for (const NSScene::CullTerrainResult::CulledPage& culledPage : cullTerrainResult.pages)
+    for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
-        ASSERT(scePages.size() == regPages.size(), "Scene and Reg vectors both must have their equavalent elements");
-        ASSERT(regPages.size() > culledPage.key.index, "Every Page keys must meet with an element");
+        ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
+        ASSERT(regPages.Contains(culled.key), "Every Page keys must meet with an element");
 
-        const NSTerrain::TerrainPage& regPage = regPages[culledPage.key.index];
+        std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(culled.key);
 
-        for (const NSScene::CullTerrainResult::CulledChunk& culledChunk : culledPage.chunks)
+        regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk)
         {
-            ASSERT(regPage.chunks.size() > culledChunk.key.index, "Chunk doesn't meet with an element");
+            ASSERT(regPage->chunks.Contains(chunk->m_id), "Chunk doesn't meet with an element");
 
-            const NSTerrain::TerrainChunk& regChunk = regPage.chunks[culledChunk.key.index];
-
-            ASSERT(regChunk.key.gridX == culledChunk.key.gridX and regChunk.key.gridZ == culledChunk.key.gridZ, "Chunk doesn't meet with an element");
+            std::shared_ptr<const NSTerrain::TerrainChunk> regChunk = regPage->chunks.Get(chunk->m_id);
 
             NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
             {
@@ -1437,8 +1448,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
                 cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
                 cbuffer.tessFactorScale = 1.f;
                 cbuffer.textureTilingFactor = 64.f;
-                cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
-                cbuffer.chunkUVScale = regChunk.chunkUVScale;
+                cbuffer.chunkUVOffset = regChunk->chunkUVOffset;
+                cbuffer.chunkUVScale = regChunk->chunkUVScale;
                 cbuffer.heightmapSrvIndex = heightmapSrvIndex;
                 cbuffer.terrainDiffuseSrvIndex = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset.index;
                 cbuffer.splatSrvIndices[0] = m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset.index;
@@ -1449,10 +1460,10 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
-            cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
-            cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
-            cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
-        }
+            cmdList.IASetVertexBuffers(0, 1, &regChunk->vertexBufferView);
+            cmdList.IASetIndexBuffer(&regChunk->patchIndexBufferView);
+            cmdList.DrawIndexedInstanced(regChunk->patchIndexCount, 1, 0, 0, 0);
+        });
     }
 
 };
@@ -1465,7 +1476,7 @@ DebugPass::DebugPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer:
 {}
 DebugPass::~DebugPass()
 {}
-DebugPass& DebugPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList, std::reference_wrapper<DebugUtils> utils)
+DebugPass& DebugPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, std::reference_wrapper<DebugUtils> utils)
 {
     this->m_utils = utils;
 
@@ -1643,15 +1654,16 @@ void DebugPass::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_utils->get().isActive = false;
 }
 
-void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
     ASSERT(m_utils);
     DebugUtils& utils = m_utils->get();
+    Scene& scene = static_cast<Scene&>(_scene);
 
-    const NSScene::Camera& mainCam = scene.GetMainCamera();
-    const NSScene::Terrain& terrain = scene.GetTerrain();
+    const std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+    NSScene::Terrain& terrain = scene.GetTerrain();
     {
         using namespace DirectX;
 
@@ -1679,48 +1691,53 @@ void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRender
             AddLine(p3, p0, color);
         };
 
-        const NSScene::CullTerrainResult visibleKeys = scene.CullTerrain(mainCam);
-        struct SPageVisibility {
-            bool isVisible{};
-            std::vector<bool> chunks{};
-        };
-        std::vector<SPageVisibility> visiblePages(terrain.pages.size());
-
-        for (const NSScene::CullTerrainResult::CulledPage& culledPage : visibleKeys.pages)
+        std::weak_ptr<NSScene::CullResult> _cullResult;
+        if (not mainCam->FindCull(NSScene::EIncludeCull::TERRAIN, scene.m_id, _cullResult))
         {
-            if (visiblePages.size() < culledPage.key.index) continue;
-
-            SPageVisibility& pageVisibility = visiblePages[culledPage.key.index];
-            pageVisibility.isVisible = true;
-
-            for (const NSScene::CullTerrainResult::CulledChunk& culledChunk : culledPage.chunks)
-            {
-                if (pageVisibility.chunks.size() > culledChunk.key.index) pageVisibility.chunks[culledChunk.key.index] = true;
-            }
+            _cullResult = scene.Cull(mainCam->m_id, NSScene::EIncludeCull::TERRAIN);
         }
+        ASSERT(not _cullResult.expired(), "Unable to cull terrain");
+
+        std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
 
         const XMFLOAT4 hiddenChunkColor{ 0.65f, 0.12f, 0.10f, 1.0f };
         const XMFLOAT4 visibleChunkColor{ 0.10f, 0.85f, 0.25f, 1.0f };
         utils.m_debugLines.clear();
 
-        for (const NSScene::TerrainPage& page : terrain.pages)
+        for (NSMath::ICullable culled : cullResult->m_culledObjects)
         {
-            AddAabbTop(page.bound.aabb, visiblePages[page.key.index].isVisible ? visibleChunkColor : hiddenChunkColor);
-        }
+            ASSERT(terrain.pages.Contains(culled.key), "Invalid Terrain page key");
+            std::shared_ptr<NSScene::TerrainPage> page = terrain.pages.Get(culled.key);
 
-        const XMVECTOR frustumEye = mainCam.camEye;
-        const XMVECTOR frustumFwd = XMVector3Normalize(mainCam.camFwd);
-        const XMVECTOR frustumUp = XMVector3Normalize(mainCam.camUp);
+            ASSERT(not std::holds_alternative<NSMath::SBoundAABB>(page->bound), "Terrain page has an unsupported bounding type");
+
+            auto& aabb = std::get<NSMath::SBoundAABB>(page->bound);
+            page->isVisibleTEMP = true;
+
+            AddAabbTop(aabb, visibleChunkColor);
+        }
+        terrain.pages.ForEach([&](EntityID, std::shared_ptr<const NSScene::TerrainPage> page)
+        {
+            if (page->isVisibleTEMP) return;
+
+            auto& bound = std::get<NSMath::SBoundAABB>(page->bound);
+
+            AddAabbTop(bound, hiddenChunkColor);
+        });
+
+        const XMVECTOR frustumEye = mainCam->camEye;
+        const XMVECTOR frustumFwd = XMVector3Normalize(mainCam->camFwd);
+        const XMVECTOR frustumUp = XMVector3Normalize(mainCam->camUp);
         const XMVECTOR frustumRight = XMVector3Normalize(XMVector3Cross(frustumUp, frustumFwd));
 
         const float terrainRadius = std::sqrt(
             terrain.desc.worldWidth * terrain.desc.worldWidth +
             terrain.desc.worldDepth * terrain.desc.worldDepth
         ) * 0.5f;
-        const float nearDist = std::max(XMVectorGetZ(mainCam.projMatrix.r[3]), 1.0f);
+        const float nearDist = std::max(XMVectorGetZ(mainCam->projMatrix.r[3]), 1.0f);
         const float farDist = std::max(terrainRadius * 1.5f, nearDist + 10.0f);
-        const float projY = XMVectorGetY(mainCam.projMatrix.r[1]);
-        const float projX = XMVectorGetX(mainCam.projMatrix.r[0]);
+        const float projY = XMVectorGetY(mainCam->projMatrix.r[1]);
+        const float projX = XMVectorGetX(mainCam->projMatrix.r[0]);
         const float aspect = projX != 0.0f ? projY / projX : 1.0f;
 
         auto FrustumCorner = [&](float xSign, float ySign, float dist)
@@ -1796,26 +1813,22 @@ void DebugPass::Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRender
     const float terrainWidth = std::max(terrain.desc.worldWidth, 1.0f);
     const float terrainDepth = std::max(terrain.desc.worldDepth, 1.0f);
     const float terrainMaxHeight = std::max(terrain.desc.maxHeight, 1.0f);
-    float minX = -terrainWidth * 0.5f;
-    float maxX = terrainWidth * 0.5f;
-    float minZ = -terrainDepth * 0.5f;
-    float maxZ = terrainDepth * 0.5f;
 
-    if (not terrain.pages.empty())
+    float minX = std::numeric_limits<float>::max();
+    float maxX = std::numeric_limits<float>::lowest();
+    float minZ = std::numeric_limits<float>::max();
+    float maxZ = std::numeric_limits<float>::lowest();
+
+    terrain.pages.ForEach([&minX, &maxX, &minZ, &maxZ](EntityID, std::shared_ptr<const NSScene::TerrainPage> page)
     {
-        minX = terrain.pages.front().bound.aabb.min.x;
-        maxX = terrain.pages.front().bound.aabb.max.x;
-        minZ = terrain.pages.front().bound.aabb.min.z;
-        maxZ = terrain.pages.front().bound.aabb.max.z;
+        ASSERT(std::holds_alternative<NSMath::SBoundAABB>(page->bound), "Terrain page has an unsupported bounding type");
+        auto boundingBox = std::get<NSMath::SBoundAABB>(page->bound);
 
-        for (const NSScene::TerrainPage& pages : terrain.pages)
-        {
-            minX = std::min(minX, pages.bound.aabb.min.x);
-            maxX = std::max(maxX, pages.bound.aabb.max.x);
-            minZ = std::min(minZ, pages.bound.aabb.min.z);
-            maxZ = std::max(maxZ, pages.bound.aabb.max.z);
-        }
-    }
+        minX = std::min(minX, boundingBox.min.x);
+        maxX = std::max(maxX, boundingBox.max.x);
+        minZ = std::min(minZ, boundingBox.min.z);
+        maxZ = std::max(maxZ, boundingBox.max.z);
+    });
 
     const float centerX = (minX + maxX) * 0.5f;
     const float centerZ = (minZ + maxZ) * 0.5f;
@@ -1929,7 +1942,7 @@ ZPrePass::ZPrePass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::C
 ZPrePass::~ZPrePass()
 {}
 
-ZPrePass& ZPrePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+ZPrePass& ZPrePass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     // Model Pipeline
     {
@@ -2041,7 +2054,7 @@ void ZPrePass::OnDestroy(NSRenderer::Ctx rendererCtx)
     this->m_terrDepthPipeline.Reset();
 }
 
-void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
@@ -2055,15 +2068,18 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
 
     Scene& scene = static_cast<Scene&>(_scene);
 
+    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+
     NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstantsZPrepass));
     {
         using namespace DirectX;
 
         FrameConstantsZPrepass& frameCB = frameCBAC.As<FrameConstantsZPrepass>();
 
-        XMStoreFloat4x4(&frameCB.view, scene.m_camera.viewMatrix);
-        XMStoreFloat4x4(&frameCB.proj, scene.m_camera.projMatrix);
-        XMStoreFloat3(&frameCB.eye, scene.m_camera.camEye);
+
+        XMStoreFloat4x4(&frameCB.view, mainCam->viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, mainCam->projMatrix);
+        XMStoreFloat3(&frameCB.eye, mainCam->camEye);
         frameCB.PADDING_0 = 0u;
     }
 
@@ -2079,31 +2095,33 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         );
         ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
 
-        NSScene::CullTerrainResult cullTerrainResult = scene.CullTerrain(scene.m_camera);
+        std::weak_ptr<NSScene::CullResult> _cullResult;
+        if (not mainCam->FindCull(NSScene::EIncludeCull::TERRAIN, scene.m_id, _cullResult))
+        {
+            _cullResult = scene.Cull(mainCam->m_id, NSScene::EIncludeCull::TERRAIN);
+        }
+        ASSERT(not _cullResult.expired(), "Unable to cull terrain");
+
+        std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
+
         const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
-        const std::vector<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
-        const std::vector<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
+        const EntityMap<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
+        const EntityMap<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
 
         const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
         const float worldTexelSpacingX = 0.f; // TODO: Placeholder. Fix it later desc.worldWidth / static_cast<float>(desc.dimention - 1u);
         const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
         const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
-        for (const NSScene::CullTerrainResult::CulledPage& culledPage : cullTerrainResult.pages)
+        for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
-            ASSERT(scePages.size() == regPages.size(), "Scene and Reg vectors both must have their equavalent elements");
-            ASSERT(regPages.size() > culledPage.key.index, "Every Page keys must meet with an element");
+            ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
+            ASSERT(regPages.Contains(culled.key), "Every Page keys must meet with an element");
 
-            const NSTerrain::TerrainPage& regPage = regPages[culledPage.key.index];
+            std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(culled.key);
 
-            for (const NSScene::CullTerrainResult::CulledChunk& culledChunk : culledPage.chunks)
+            regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk)
             {
-                ASSERT(regPage.chunks.size() > culledChunk.key.index, "Chunk doesn't meet with an element");
-
-                const NSTerrain::TerrainChunk& regChunk = regPage.chunks[culledChunk.key.index];
-
-                ASSERT(regChunk.key.gridX == culledChunk.key.gridX and regChunk.key.gridZ == culledChunk.key.gridZ, "Chunk doesn't meet with an element");
-
                 NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
                 {
                     TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
@@ -2113,8 +2131,8 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                     cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
                     cbuffer.tessFactorScale = 1.f;
                     cbuffer.textureTilingFactor = 64.f;
-                    cbuffer.chunkUVOffset = regChunk.chunkUVOffset;
-                    cbuffer.chunkUVScale = regChunk.chunkUVScale;
+                    cbuffer.chunkUVOffset = chunk->chunkUVOffset;
+                    cbuffer.chunkUVScale = chunk->chunkUVScale;
                     cbuffer.heightmapSrvIndex = heightmapSrvIndex;
                     cbuffer.terrainDiffuseSrvIndex = rendererCtx.fallbackSRV.get().index;
                     cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.get().index;
@@ -2125,10 +2143,10 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
 
                 cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
-                cmdList.IASetVertexBuffers(0, 1, &regChunk.vertexBufferView);
-                cmdList.IASetIndexBuffer(&regChunk.patchIndexBufferView);
-                cmdList.DrawIndexedInstanced(regChunk.patchIndexCount, 1, 0, 0, 0);
-            }
+                cmdList.IASetVertexBuffers(0, 1, &chunk->vertexBufferView);
+                cmdList.IASetIndexBuffer(&chunk->patchIndexBufferView);
+                cmdList.DrawIndexedInstanced(chunk->patchIndexCount, 1, 0, 0, 0);
+            });
         }
     }
 
@@ -2138,27 +2156,31 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         cmdList.IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmdList.SetGraphicsRootConstantBufferView(IDX_MODEL_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
-        auto optRegModels = blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+        auto optRegModels = blackboard.GetOpt<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models);
         ASSERT(optRegModels.has_value());
 
-        std::vector<NSRenderer::Model>& regModels = optRegModels->get();
+        EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-        std::vector<NSModel::SceneModelKey> modelsCulled = scene.CullModels(scene.GetMainCamera(), {});
-
-        for (NSModel::SceneModelKey& key : modelsCulled)
+        std::weak_ptr<NSScene::CullResult> _cullResult;
+        if (not mainCam->FindCull(NSScene::EIncludeCull::STATIC_OBJECTS | NSScene::EIncludeCull::DYNAMIC_OBJECTS, scene.m_id, _cullResult))
         {
-            ASSERT(key.index < scene.m_models.size());
-            Model& sceneModel = scene.m_models[key.index];
+            _cullResult = scene.Cull(mainCam->m_id, NSScene::EIncludeCull::STATIC_OBJECTS | NSScene::EIncludeCull::DYNAMIC_OBJECTS);
+        }
+        ASSERT(not _cullResult.expired(), "Unable to cull terrain");
 
-            if (not sceneModel.TestFlag(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
+        std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
 
-            ASSERT(sceneModel.m_registerKey.index < regModels.size());
+        for (NSMath::ICullable& culled : cullResult->m_culledObjects)
+        {
+            ASSERT(scene.m_models.Contains(culled.key), "Invalid model key");
+            std::shared_ptr<Model> sceneModel = scene.m_models.Get(culled.key);
 
-            NSRenderer::Model& regModel = regModels[sceneModel.m_registerKey.index];
+            if (not sceneModel->m_flags.HasLeastOne(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
 
-            ASSERT(scene.ValidateKeys(regModel.sceneKey, sceneModel.m_registerKey));
+            ASSERT(regModels.Contains(sceneModel->m_registerKey), "Invalid model key");
+            std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(sceneModel->m_registerKey);
 
-            sceneModel.Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+            sceneModel->Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
             {
                 NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstantsZPrepass));
                 MeshConstantsZPrepass& meshCB = allocCtx.As<MeshConstantsZPrepass>();

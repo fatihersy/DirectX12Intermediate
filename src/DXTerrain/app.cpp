@@ -152,10 +152,14 @@ void app::LoadPipeline()
 }
 void app::LoadAssets()
 {
-    m_renderer.Execute([this](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
+    m_renderer.Execute([this](NSRenderer::Ctx ctx, NSDX12::GraphicsCommandList cmdList)
     {
-        m_scene = Scene(im_device.Get(), im_wicFactory.Get(), 12.f);
+        m_scene.OnInit(im_device.Get(), im_wicFactory.Get(), 12.f);
+
+        std::shared_ptr<NSScene::Camera> mainCam = m_scene.GetMainCamera();
+
         m_scene.SetupCameraInfiniteProjection(
+            DE_REF(mainCam),
             DirectX::XM_PIDIV4,
             im_aspectRatio,
             m_scene.NEAR_CLIP
@@ -188,6 +192,7 @@ void app::LoadAssets()
 
         DirectX::XMFLOAT3 camEye{};
 
+
         if (this->m_renderer.CreateTerrain(cmdList, "terrain", m_scene.m_terrain.desc))
         {
             camEye = {
@@ -195,30 +200,23 @@ void app::LoadAssets()
                 m_scene.m_terrain.desc.maxHeight * .5f,
                 0.f
             };
-            m_scene.m_camera.SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
+            mainCam->SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
 
-            for (const NSTerrain::TerrainPage& page : this->m_renderer.GetTerrain().GetPages())
+            this->m_renderer.GetTerrain().GetPages().ForEach([this](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page)
             {
-                m_scene.m_terrain.pages.push_back({
-                    .key = page.key,
-                    .bound = page.bounds
-                });
-
-                for (const NSTerrain::TerrainChunk& chunk : page.chunks)
-                {
-                    m_scene.m_terrain.pages.back().chunks.push_back({
-                        .key = chunk.key,
-                        .bound = chunk.bounds
-                    });
-                }
-            }
+                m_scene.m_terrain.pages.Add(std::make_shared<NSScene::TerrainPage>(NSScene::TerrainPage{
+                    .index = page->index,
+                    .m_registerKey = page->key,
+                    .bound = page->bound
+                }));
+            });
 
             m_scene.m_terrain.isInitialized = true;
         }
 
-        NSModel::SceneModelKey sDomeKey{};
+        ObserverKey sDomeKey;
         {
-            Model& skyDome = m_scene.AddObject<NSModel::SDome>
+            std::shared_ptr<Model> skyDome = m_scene.AddObject<NSModel::SDome>
             (
                 NSModel::AddCtx { .name = L"SkyDome" },
                 NSModel::SDome {
@@ -229,13 +227,10 @@ void app::LoadAssets()
                 ctx
             );
 
-            skyDome.m_sceneKey.id = this->im_nextId++;
-            skyDome.m_sceneKey.index = 0u;
-            skyDome.SetFlag(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE);
+            skyDome->m_flags.Set(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE);
 
-            skyDome.UploadGPU(ctx, cmdList);
-            skyDome.m_registerKey = ctx.registerModel(skyDome.m_name, skyDome.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE).registerKey;
-            sDomeKey = skyDome.m_sceneKey;
+            skyDome->UploadGPU(ctx, cmdList);
+            skyDome->m_registerKey = ctx.registerModel(skyDome->m_name, skyDome->m_id, cmdList, NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)->m_id;
         }
 
         {
@@ -260,32 +255,46 @@ void app::LoadAssets()
                     .stackCount = 20
                 });
 
-                Model& model = m_scene.AddObject<NSModel::SSphere>
+                DirectX::XMFLOAT3 position({ posX, posY, posZ });
+                std::shared_ptr<Model> model = m_scene.AddObject<NSModel::SSphere>
                 (
                     NSModel::AddCtx {
                         .name = NSTool::wformat(L"Sphere%d", idx).c_str(),
-                        .position = { posX, posY, posZ },
+                        .position = position,
                         .metallic = metallic,
                         .roughness = roughness
                     },
                     desc,
                     ctx
                 );
-                model.m_sceneKey.id = this->im_nextId++;
-                model.m_sceneKey.index = idx;
-                model.SetFlag(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP);
-                model.SetFlag(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL);
+                model->m_flags.Set(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP);
+                model->m_flags.Set(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL);
 
-                model.m_collision.radius = desc.desc.radius;
-                model.m_collision.sliceCount = desc.desc.sliceCount;
-                model.m_collision.stackCount = desc.desc.stackCount;
+                ASSERT(std::holds_alternative<NSMath::SBoundSphere>(model->bound), "Model has an unsupported bounding type");
+
+                auto& modelBB = std::get<NSMath::SBoundSphere>(model->bound);
+
+                modelBB.radius = desc.desc.radius;
+                modelBB.sliceCount = desc.desc.sliceCount;
+                modelBB.stackCount = desc.desc.stackCount;
+
                 idx++;
             }
         }
 
-        m_scene.ForEachModel([&ctx, &sDomeKey](Model& model)
+        const DirectX::XMMATRIX envCamProj = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, 1.f, m_scene.NEAR_CLIP, m_scene.FAR_CLIP);
+
+        m_scene.ForEachModel([this, &ctx, &sDomeKey, &envCamProj](Model& model)
         {
-            if (model.m_sceneKey.id == sDomeKey.id) return;
+            if (model.m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP))
+            {
+                model.envCameraKeys[0] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 1, 0, 0, 0 }, { 0, 1, 0, 0 }}))->m_id;
+                model.envCameraKeys[1] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), {-1, 0, 0, 0 }, { 0, 1, 0, 0 }}))->m_id;
+                model.envCameraKeys[2] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0, 1, 0, 0 }, { 0, 0,-1, 0 }}))->m_id;
+                model.envCameraKeys[3] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0,-1, 0, 0 }, { 0, 0, 1, 0 }}))->m_id;
+                model.envCameraKeys[4] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0, 0, 1, 0 }, { 0, 1, 0, 0 }}))->m_id;
+                model.envCameraKeys[5] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0, 0,-1, 0 }, { 0, 1, 0, 0 }}))->m_id;
+            }
 
             model.ForEach([model, &ctx](Mesh& mesh, UINT meshIndex)
             {
@@ -337,22 +346,18 @@ void app::LoadAssets()
 
         ASSERT(ctx.barrierBatch.get().Execute(NSBarrier::kApp_beginModelLoad, cmdList));
 
-        for (size_t itr = 1u; itr < m_scene.m_models.size(); itr++)
+        m_scene.m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model)
         {
-            Model& model = m_scene.m_models[itr];
-
-            ASSERT(model.m_sceneKey.index == itr);
-
-            model.UploadGPU(ctx, cmdList, false);
-            NSRenderer::Model& regModel = ctx.registerModel(model.m_name, model.m_sceneKey, cmdList, NSModel::ERegModelFlag::MODEL_FLAG_NONE);
-            model.m_registerKey = regModel.registerKey;
+            model->UploadGPU(ctx, cmdList, false);
+            std::shared_ptr<NSRenderer::Model> regModel = ctx.registerModel(model->m_name, model->m_id, cmdList, NSRenderer::ERegModelFlag::MODEL_FLAG_NONE);
+            model->m_registerKey = regModel->m_id;
 
             ctx.barrierBatch.get().Add(NSBarrier::kApp_endModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
-                regModel.m_envCubemap.cubemapTexture.Get(),
+                regModel->m_envCubemap.cubemapTexture.Get(),
                 D3D12_RESOURCE_STATE_COMMON,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
             ));
-        }
+        });
 
         ASSERT(ctx.barrierBatch.get().Execute(NSBarrier::kApp_endModelLoad, cmdList));
     });
@@ -393,7 +398,7 @@ void app::OnResize(UINT width, UINT height)
 
     m_renderer.Resize(im_width, im_height);
 
-    m_scene.SetupCameraInfiniteProjection(DirectX::XM_PIDIV4, im_aspectRatio, m_scene.NEAR_CLIP);
+    m_scene.SetupCameraInfiniteProjection(DE_REF(m_scene.GetMainCamera()), DirectX::XM_PIDIV4, im_aspectRatio, m_scene.NEAR_CLIP);
 };
 void app::ToggleFullScreen()
 {
@@ -434,7 +439,7 @@ void app::UpdateKeyBindings()
 
     if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::F1))
     {
-        m_renderer.FlipFlag(NSRenderer::ERendererFlag::MODE_WIREFRAME);
+        m_renderer.m_flag.Toggle(NSRenderer::ERendererFlag::MODE_WIREFRAME);
     }
     if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::Escape))
     {
@@ -457,33 +462,35 @@ void app::UpdateKeyBindings()
     {
         DirectX::XMVECTOR move = DirectX::XMVectorZero();
 
+        std::shared_ptr<NSScene::Camera> mainCam = m_scene.GetMainCamera();
+
         if (kbState.W) {
-            move = DirectX::XMVectorAdd(move, m_scene.m_camera.camFwd);
+            move = DirectX::XMVectorAdd(move, mainCam->camFwd);
         }
         if (kbState.S) {
-            move = DirectX::XMVectorSubtract(move, m_scene.m_camera.camFwd);
+            move = DirectX::XMVectorSubtract(move, mainCam->camFwd);
         }
         if (kbState.A) {
-            auto left = DirectX::XMVector3Cross(m_scene.m_camera.camFwd, m_scene.m_camera.camUp);
+            auto left = DirectX::XMVector3Cross(mainCam->camFwd, mainCam->camUp);
             left = DirectX::XMVector3Normalize(left);
             move = DirectX::XMVectorAdd(move, left);
         }
         if (kbState.D) {
-            auto right = DirectX::XMVector3Cross(m_scene.m_camera.camUp, m_scene.m_camera.camFwd);
+            auto right = DirectX::XMVector3Cross(mainCam->camUp, mainCam->camFwd);
             right = DirectX::XMVector3Normalize(right);
             move = DirectX::XMVectorAdd(move, right);
         }
         if (kbState.Q) {
-            move = DirectX::XMVectorAdd(move, m_scene.m_camera.camUp);
+            move = DirectX::XMVectorAdd(move, mainCam->camUp);
         }
         if (kbState.E) {
-            move = DirectX::XMVectorSubtract(move, m_scene.m_camera.camUp);
+            move = DirectX::XMVectorSubtract(move, mainCam->camUp);
         }
 
         if (DirectX::XMVector3Greater(DirectX::XMVector3LengthSq(move), DirectX::g_XMEpsilon)) {
             move = DirectX::XMVector3Normalize(move);
-            move = DirectX::XMVectorScale(move, m_scene.m_camera.camSpeed * static_cast<FLOAT>(m_timer.GetElapsedSeconds()));
-            m_scene.m_camera.camEye = DirectX::XMVectorAdd(m_scene.m_camera.camEye, move);
+            move = DirectX::XMVectorScale(move, mainCam->camSpeed * static_cast<FLOAT>(m_timer.GetElapsedSeconds()));
+            mainCam->camEye = DirectX::XMVectorAdd(mainCam->camEye, move);
         }
 
         if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::NumPad1))
@@ -497,14 +504,17 @@ void app::UpdateMouseBindings()
 {
     auto mouseState = m_mouse->GetState();
 
-    if (mouseState.positionMode == DirectX::Mouse::MODE_RELATIVE) {
-        FLOAT dx = static_cast<FLOAT>(mouseState.x) * m_scene.m_camera.lookSensitivity;
-        FLOAT dy = static_cast<FLOAT>(mouseState.y) * m_scene.m_camera.lookSensitivity;
+    std::shared_ptr<NSScene::Camera> mainCam = m_scene.GetMainCamera();
 
-        m_scene.m_camera.camYaw += dx;
-        m_scene.m_camera.camPitch -= dy;
+    if (mouseState.positionMode == DirectX::Mouse::MODE_RELATIVE)
+    {
+        FLOAT dx = static_cast<FLOAT>(mouseState.x) * mainCam->lookSensitivity;
+        FLOAT dy = static_cast<FLOAT>(mouseState.y) * mainCam->lookSensitivity;
 
-        m_scene.m_camera.camPitch = std::clamp(m_scene.m_camera.camPitch, -89.f, 89.f);
+        mainCam->camYaw += dx;
+        mainCam->camPitch -= dy;
+
+        mainCam->camPitch = std::clamp(mainCam->camPitch, -89.f, 89.f);
 
         m_mouse->ResetScrollWheelValue();
     }

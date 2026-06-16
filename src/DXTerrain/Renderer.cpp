@@ -6,6 +6,7 @@
 
 #include "DXSampleHelper.h"
 #include "RenderPass.h"
+#include "Logger.h"
 
 class BarrierBatch : public NSBarrier::IBarrierBatch
 {
@@ -66,7 +67,7 @@ public:
 
         m_entries[key.name.data()].clear();
     };
-    bool Execute(NSBarrier::BarrierKey key, NSRenderer::GraphicsCommandList cmdList) override
+    bool Execute(NSBarrier::BarrierKey key, NSDX12::GraphicsCommandList cmdList) override
     {
         if (m_entries.empty() or not m_entries.contains(key.name.data())) return false;
 
@@ -303,34 +304,34 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
     m_blackboard.Set<std::reference_wrapper<const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain, std::cref(m_terrain));
 
     {
-        std::vector<NSRenderer::Model> models;
-        m_blackboard.Set<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models, std::move(models));
+        EntityMap<NSRenderer::Model> models;
+        m_blackboard.Set<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models, std::move(models));
     }
 
-    Execute([this, &device](NSRenderer::Ctx rendererCtx, NSRenderer::GraphicsCommandList cmdList)
+    Execute([this, &device](NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
     {
         AddPass<NSRenderPass::ZPrePass>(device, m_blackboard, GetCtx())
-            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .OnInit(m_blackboard, GetCtx(), NSDX12::GraphicsCommandList(cmdList))
             .SetIsEnabled(true);
 
         AddPass<NSRenderPass::AtmospherePass>(device, m_blackboard, GetCtx())
-            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .OnInit(m_blackboard, GetCtx(), NSDX12::GraphicsCommandList(cmdList))
             .SetIsEnabled(true);
 
         AddPass<NSRenderPass::EnvironmentCubemapPass>(device, m_blackboard, GetCtx())
-            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .OnInit(m_blackboard, GetCtx(), NSDX12::GraphicsCommandList(cmdList))
             .SetIsEnabled(true);
 
         AddPass<NSRenderPass::GeometryPass>(device, m_blackboard, GetCtx())
-            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList))
+            .OnInit(m_blackboard, GetCtx(), NSDX12::GraphicsCommandList(cmdList))
             .SetIsEnabled(true);
 
         AddPass<NSRenderPass::TerrainPass>(device, m_blackboard, GetCtx())
-            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList), m_wicFactory)
+            .OnInit(m_blackboard, GetCtx(), NSDX12::GraphicsCommandList(cmdList), m_wicFactory)
             .SetIsEnabled(true);
 
         AddPass<NSRenderPass::DebugPass>(device, m_blackboard, GetCtx())
-            .OnInit(m_blackboard, GetCtx(), NSRenderer::GraphicsCommandList(cmdList), m_debugUtils)
+            .OnInit(m_blackboard, GetCtx(), NSDX12::GraphicsCommandList(cmdList), m_debugUtils)
             .SetIsEnabled(true);
     });
 }
@@ -409,7 +410,7 @@ void Renderer::Execute(FnRendererExecutionBody Record)
     };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
 
-    Record(GetCtx(), NSRenderer::GraphicsCommandList(m_commandList.Get()));
+    Record(GetCtx(), NSDX12::GraphicsCommandList(m_commandList.Get()));
 
     ThrowIfFailed(m_commandList->Close());
     ID3D12CommandList* const lists[] = { m_commandList.Get() };
@@ -492,7 +493,7 @@ void Renderer::DrawScene(NSScene::IScene& scene)
     m_blackboard.Set(NSRenderer::kRenderer_frameIndex, m_swapChain->GetCurrentBackBufferIndex());
 
     NSRenderer::Ctx rendererCtx = GetCtx();
-    NSRenderer::GraphicsCommandList cmdList = NSRenderer::GraphicsCommandList(m_commandList.Get());
+    NSDX12::GraphicsCommandList cmdList = NSDX12::GraphicsCommandList(m_commandList.Get());
 
     for (auto& pass : m_passes)
     {
@@ -530,30 +531,28 @@ void Renderer::EndFrame()
     MoveToNextFrame();
 }
 
-NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel::SceneModelKey sceneKey, NSRenderer::GraphicsCommandList cmdList, NSModel::ERegModelFlag flag)
+std::shared_ptr<NSRenderer::Model> Renderer::RegisterModel(std::wstring_view modelName, ObserverKey sceneKey, NSDX12::GraphicsCommandList cmdList, NSRenderer::ERegModelFlag flag)
 {
-    std::vector<NSRenderer::Model>* models = m_blackboard.GetMut<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
-    ASSERT(models);
+    auto models = m_blackboard.GetOpt<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+    ASSERT(models.has_value());
 
-    NSRenderer::Model& rendererModel = models->emplace_back();
-    rendererModel.registerKey = { sceneKey.id, models->size() - 1u };
-    rendererModel.sceneKey = sceneKey;
-    rendererModel.SetFlag(flag);
+    std::shared_ptr<NSRenderer::Model> rendererModel = models->get().Add();
+    rendererModel->m_flags.Set(flag);
 
     // Environment Cubemap
     {
         // Cubemap Texture
         {
-            D3D12_RESOURCE_FLAGS flags = rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
+            D3D12_RESOURCE_FLAGS flags = rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
                 ? D3D12_RESOURCE_FLAG_NONE
                 : D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
             D3D12_RESOURCE_DESC desc{};
             desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            desc.Width = rendererModel.m_envCubemap.PER_FACE_RESOLUTION;
-            desc.Height = rendererModel.m_envCubemap.PER_FACE_RESOLUTION;
-            desc.DepthOrArraySize = rendererModel.m_envCubemap.NUM_FACES;
-            desc.MipLevels = rendererModel.m_envCubemap.MIP_COUNT;
+            desc.Width = rendererModel->m_envCubemap.PER_FACE_RESOLUTION;
+            desc.Height = rendererModel->m_envCubemap.PER_FACE_RESOLUTION;
+            desc.DepthOrArraySize = rendererModel->m_envCubemap.NUM_FACES;
+            desc.MipLevels = rendererModel->m_envCubemap.MIP_COUNT;
             desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
             desc.SampleDesc.Count = 1;
             desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -563,7 +562,7 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
 
             constexpr float clearColor[] = { 0.f, 0.f, 0.f, 1.f };
             D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R16G16B16A16_FLOAT, clearColor);
-            const D3D12_CLEAR_VALUE* pOptimizedClearValue = rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
+            const D3D12_CLEAR_VALUE* pOptimizedClearValue = rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
                 ? nullptr
                 : &clearVal;
 
@@ -573,7 +572,7 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
                 &desc,
                 D3D12_RESOURCE_STATE_COMMON,
                 pOptimizedClearValue,
-                IID_PPV_ARGS(&rendererModel.m_envCubemap.cubemapTexture)
+                IID_PPV_ARGS(&rendererModel->m_envCubemap.cubemapTexture)
             ));
         }
 
@@ -581,8 +580,8 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
         {
             D3D12_RESOURCE_DESC desc{};
             desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            desc.Width = rendererModel.m_envCubemap.PER_FACE_RESOLUTION;
-            desc.Height = rendererModel.m_envCubemap.PER_FACE_RESOLUTION;
+            desc.Width = rendererModel->m_envCubemap.PER_FACE_RESOLUTION;
+            desc.Height = rendererModel->m_envCubemap.PER_FACE_RESOLUTION;
             desc.DepthOrArraySize = 1;
             desc.MipLevels = 1;
             desc.Format = DXGI_FORMAT_D32_FLOAT;
@@ -602,14 +601,14 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
                 &desc,
                 D3D12_RESOURCE_STATE_DEPTH_WRITE,
                 &clearVal,
-                IID_PPV_ARGS(&rendererModel.m_envCubemap.cubemapDepth)
+                IID_PPV_ARGS(&rendererModel->m_envCubemap.cubemapDepth)
             ));
         }
 
         // RTVs
-        if (not rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
-            rendererModel.m_envCubemap.rtvHandle = AllocRTVStatic(rendererModel.m_envCubemap.NUM_FACES);
-            for (UINT face = 0u; face < rendererModel.m_envCubemap.NUM_FACES; face++)
+        if (not rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
+            rendererModel->m_envCubemap.rtvHandle = AllocRTVStatic(rendererModel->m_envCubemap.NUM_FACES);
+            for (UINT face = 0u; face < rendererModel->m_envCubemap.NUM_FACES; face++)
             {
                 D3D12_RENDER_TARGET_VIEW_DESC desc{};
                 desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -619,17 +618,17 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
                 desc.Texture2DArray.ArraySize = 1;
 
                 m_device->CreateRenderTargetView(
-                    rendererModel.m_envCubemap.cubemapTexture.Get(),
+                    rendererModel->m_envCubemap.cubemapTexture.Get(),
                     &desc,
-                    OffsetRTV(rendererModel.m_envCubemap.rtvHandle, face).cpuAddr
+                    OffsetRTV(rendererModel->m_envCubemap.rtvHandle, face).cpuAddr
                 );
-                rendererModel.m_envCubemap.cubemapTexture->SetName(NSTool::wformat(L"%s::m_envCubemap.cubemapTexture", modelName.data()).c_str());
+                rendererModel->m_envCubemap.cubemapTexture->SetName(NSTool::wformat(L"%s::m_envCubemap.cubemapTexture", modelName.data()).c_str());
             }
         }
 
         // DSV
         {
-            rendererModel.m_envCubemap.dsvHandle = AllocDSVStatic(1u);
+            rendererModel->m_envCubemap.dsvHandle = AllocDSVStatic(1u);
 
             D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
             desc.Format = DXGI_FORMAT_D32_FLOAT;
@@ -637,94 +636,94 @@ NSRenderer::Model& Renderer::RegisterModel(std::wstring_view modelName, NSModel:
             desc.Texture2D.MipSlice = 0;
 
             m_device->CreateDepthStencilView(
-                rendererModel.m_envCubemap.cubemapDepth.Get(),
+                rendererModel->m_envCubemap.cubemapDepth.Get(),
                 &desc,
-                rendererModel.m_envCubemap.dsvHandle.cpuAddr
+                rendererModel->m_envCubemap.dsvHandle.cpuAddr
             );
         }
 
         // SRV
         {
-            rendererModel.m_envCubemap.srvHandle = AllocSRVStatic(1u);
+            rendererModel->m_envCubemap.srvHandle = AllocSRVStatic(1u);
 
             D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
             desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
             desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
             desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            desc.TextureCube.MipLevels = rendererModel.m_envCubemap.MIP_COUNT;
+            desc.TextureCube.MipLevels = rendererModel->m_envCubemap.MIP_COUNT;
             desc.TextureCube.MostDetailedMip = 0;
 
             m_device->CreateShaderResourceView(
-                rendererModel.m_envCubemap.cubemapTexture.Get(),
+                rendererModel->m_envCubemap.cubemapTexture.Get(),
                 &desc,
-                rendererModel.m_envCubemap.srvHandle.cpuAddr
+                rendererModel->m_envCubemap.srvHandle.cpuAddr
             );
         }
 
         // UAVs
-        if (not rendererModel.TestFlag(NSModel::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
-            constexpr UINT uavCount = rendererModel.m_envCubemap.MIP_COUNT - 1u;
-            rendererModel.m_envCubemap.uavHandle = AllocSRVStatic(uavCount);
+        if (not rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
+            const UINT uavCount = rendererModel->m_envCubemap.MIP_COUNT - 1u;
+            rendererModel->m_envCubemap.uavHandle = AllocSRVStatic(uavCount);
 
-            for (UINT mip = 1u; mip < rendererModel.m_envCubemap.MIP_COUNT; mip++)
+            for (UINT mip = 1u; mip < rendererModel->m_envCubemap.MIP_COUNT; mip++)
             {
                 D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
                 uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
                 uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
                 uavDesc.Texture2DArray.MipSlice = mip;
                 uavDesc.Texture2DArray.FirstArraySlice = 0;
-                uavDesc.Texture2DArray.ArraySize = rendererModel.m_envCubemap.NUM_FACES;
+                uavDesc.Texture2DArray.ArraySize = rendererModel->m_envCubemap.NUM_FACES;
 
                 m_device->CreateUnorderedAccessView(
-                    rendererModel.m_envCubemap.cubemapTexture.Get(),
+                    rendererModel->m_envCubemap.cubemapTexture.Get(),
                     nullptr,
                     &uavDesc,
-                    OffsetSRV(rendererModel.m_envCubemap.uavHandle, mip - 1u).cpuAddr
+                    OffsetSRV(rendererModel->m_envCubemap.uavHandle, mip - 1u).cpuAddr
                 );
             }
         }
 
-        rendererModel.m_envCubemap.isOnGPU = false;
-        rendererModel.m_envCubemap.isDirty = true;
-        rendererModel.m_envCubemap.generation = 0u;
+        rendererModel->m_envCubemap.isOnGPU = false;
+        rendererModel->m_envCubemap.isDirty = true;
+        rendererModel->m_envCubemap.generation = 0u;
 
-        rendererModel.isDirty = true;
+        rendererModel->isDirty = true;
     }
     return rendererModel;
 }
-void Renderer::UnloadModel(NSModel::RegisterModelKey key)
+void Renderer::UnloadModel(ObserverKey key)
 {
-    auto modelsOpt = m_blackboard.GetOpt<std::vector<NSRenderer::Model>>(NSRenderer::kRenderer_models);
+    auto modelsOpt = m_blackboard.GetOpt<EntityMap<NSRenderer::Model>>(NSRenderer::kRenderer_models);
     ASSERT(modelsOpt.has_value(), "Blackboard key is has no value");
 
     auto& models = modelsOpt.value().get();
 
-    ASSERT(models.size() > key.index and models[key.index].sceneKey.id == key.id, "Renderer::UnloadModel::Invalid Register model key");
+    ASSERT(models.Contains(key), "Renderer::UnloadModel::Invalid Register model key");
 
-    NSRenderer::Model& model = models[key.index];
+    std::shared_ptr<NSRenderer::Model> model = models.Get(key);
 
-    if (m_srvHeap.Owns(model.m_envCubemap.srvHandle))
+    if (m_srvHeap.Owns(model->m_envCubemap.srvHandle))
     {
-        FreeSRVStatic(model.m_envCubemap.srvHandle);
+        FreeSRVStatic(model->m_envCubemap.srvHandle);
     }
-    if(m_srvHeap.Owns(model.m_envCubemap.uavHandle))
+    if(m_srvHeap.Owns(model->m_envCubemap.uavHandle))
     {
-        FreeSRVStatic(model.m_envCubemap.uavHandle);
+        FreeSRVStatic(model->m_envCubemap.uavHandle);
     }
-    if (m_rtvHeap.Owns(model.m_envCubemap.rtvHandle))
+    if (m_rtvHeap.Owns(model->m_envCubemap.rtvHandle))
     {
-        FreeRTVStatic(model.m_envCubemap.rtvHandle);
+        FreeRTVStatic(model->m_envCubemap.rtvHandle);
     }
-    if (m_dsvHeap.Owns(model.m_envCubemap.dsvHandle))
+    if (m_dsvHeap.Owns(model->m_envCubemap.dsvHandle))
     {
-        FreeDSVStatic(model.m_envCubemap.dsvHandle);
+        FreeDSVStatic(model->m_envCubemap.dsvHandle);
     }
 
-    model.m_envCubemap.cubemapDepth.Reset();
-    model.m_envCubemap.cubemapTexture.Reset();
-    model.m_envCubemap.isDirty = false;
-    model.m_envCubemap.isOnGPU = false;
-    model.m_envCubemap.generation = 0;
+    model->m_envCubemap.cubemapDepth.Reset();
+    model->m_envCubemap.cubemapTexture.Reset();
+    model->m_envCubemap.isDirty = false;
+    model->m_envCubemap.isOnGPU = false;
+    model->m_envCubemap.generation = 0;
 }
 
 void Renderer::Resize(UINT width, UINT height)
@@ -823,7 +822,7 @@ void Renderer::CreateFallbackTexture()
     NSDescriptor::Handle& fbHandle = m_fallbackTextureSRVhandle;
     ID3D12Device14* device = m_device;
 
-    Execute([&fbTex, &fbHandle, &device](NSRenderer::Ctx ctx, NSRenderer::GraphicsCommandList cmdList)
+    Execute([&fbTex, &fbHandle, &device](NSRenderer::Ctx ctx, NSDX12::GraphicsCommandList cmdList)
     {
         fbTex.desc.textureType = NSTexture::EType::EType_DIFFUSE;
         fbTex.width = 64;

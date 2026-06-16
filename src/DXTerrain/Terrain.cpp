@@ -5,6 +5,8 @@
 #include "IApp.h"
 #include "DXSampleHelper.h"
 
+#include "Logger.h"
+
 using namespace NSTerrain;
 using Json = nlohmann::json;
 
@@ -217,7 +219,7 @@ Terrain& Terrain::operator=(Terrain&& other) noexcept
     return *this;
 }
 
-bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, const std::string_view root, NSTerrain::TerrainDesc desc)
+bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx, const std::string_view root, NSTerrain::TerrainDesc desc)
 {
     if (m_isInitialized) {
         g_FWarn("Terrain::OnInit::Calling OnInit function twice without Destroy first");
@@ -339,37 +341,36 @@ bool Terrain::OnInit(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
     BuildPageLayout(m_pages);
 
     ASSERT(pageManifest.isPresent);
-    ASSERT(m_pages.size() == static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ);
+    ASSERT(m_pages.Size() == static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ);
 
     ASSERT(srcManifest.pageCountX < 100 and srcManifest.pageCountZ < 100, "Too many pages tried to create");
 
     std::wstring pageNameHeightmap = L"page_00_00::HeightmapBin";
     std::wstring pageNameDiffuse = L"page_00_00::DiffuseBin";
 
-    for (TerrainPage& page : m_pages)
+    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page)
     {
-        ASSERT(page.key.index < m_pages.size());
-        ASSERT(page.residency == TerrainPage::EPageResidency::Present, "Page:(%d,%d) is missing or corrupted", page.key.gridX, page.key.gridZ);
+        ASSERT(page->residency == TerrainPage::EPageResidency::Present, "Page:(%d,%d) is missing or corrupted", page->index.gridX, page->index.gridZ);
 
-        WritePageName(pageNameHeightmap, 0u, page.key.gridX, page.key.gridZ);
-        WritePageName(pageNameDiffuse, 0u, page.key.gridX, page.key.gridZ);
+        WritePageName(pageNameHeightmap, 0u, page->index.gridX, page->index.gridZ);
+        WritePageName(pageNameDiffuse, 0u, page->index.gridX, page->index.gridZ);
 
-        page.heightTexturePage = LoadPageTextureBin(
+        page->heightTexturePage = LoadPageTextureBin(
             pageNameHeightmap,
-            page.heightTexturePage.path,
+            page->heightTexturePage.path,
             pageManifest.height,
             NSTexture::EType::EType_HEIGHT
         );
 
-        page.diffuseTexturePage = LoadPageTextureBin(
+        page->diffuseTexturePage = LoadPageTextureBin(
             pageNameDiffuse,
-            page.diffuseTexturePage.path,
+            page->diffuseTexturePage.path,
             pageManifest.diffuse,
             NSTexture::EType::EType_DIFFUSE
         );
 
-        page.residency = TerrainPage::EPageResidency::Loaded;
-    }
+        page->residency = TerrainPage::EPageResidency::Loaded;
+    });
 
     m_isInitialized = true;
     return true;
@@ -386,18 +387,23 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     if (m_texSrvHandle.amount > 0) rendererCtx.freeSRVStatic(m_texSrvHandle);
     m_texSrvHandle = {};
 
-    for (auto& page : m_pages) for (auto& chunk : page.chunks)
-    {
-        chunk.vertexDefault.Reset();
-        chunk.vertexUpload.Reset();
-        chunk.triangleIndexDefault.Reset();
-        chunk.triangleIndexUpload.Reset();
-        chunk.patchIndexDefault.Reset();
-        chunk.patchIndexUpload.Reset();
-    }
+    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page){
+        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk)
+        {
+            chunk->vertexDefault.Reset();
+            chunk->vertexUpload.Reset();
+            chunk->triangleIndexDefault.Reset();
+            chunk->triangleIndexUpload.Reset();
+            chunk->patchIndexDefault.Reset();
+            chunk->patchIndexUpload.Reset();
+        });
 
-    m_pages.clear();
-    m_pages.shrink_to_fit();
+        page->chunks.Clear();
+        page->chunks = {};
+    });
+
+    m_pages.Clear();
+    m_pages = {};
     m_heightR16.clear();
     m_heightR16.shrink_to_fit();
     m_desc = {};
@@ -455,7 +461,7 @@ bool Terrain::Load(const std::wstring_view _path)
     return true;
 }
 
-void Terrain::Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+void Terrain::Upload(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     ASSERT(m_isOnCPU, "No CPU data to upload");
 
@@ -472,29 +478,34 @@ void Terrain::Upload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx re
     m_isOnGPU = true;
 }
 
-void Terrain::Free(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+void Terrain::Free(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     if (m_texSrvHandle.amount > 0) rendererCtx.freeSRVStatic(m_texSrvHandle);
     m_texSrvHandle = {};
 
     for (NSTexture::Texture& tex : m_textures) tex = NSTexture::Texture{};
 
-    for (auto& page : m_pages) for (auto& chunk : page.chunks)
-    {
-        chunk.vertexDefault.Reset();
-        chunk.vertexUpload.Reset();
-        chunk.triangleIndexDefault.Reset();
-        chunk.triangleIndexUpload.Reset();
-        chunk.patchIndexDefault.Reset();
-        chunk.patchIndexUpload.Reset();
-    }
+    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page){
+        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk)
+        {
+            chunk->vertexDefault.Reset();
+            chunk->vertexUpload.Reset();
+            chunk->triangleIndexDefault.Reset();
+            chunk->triangleIndexUpload.Reset();
+            chunk->patchIndexDefault.Reset();
+            chunk->patchIndexUpload.Reset();
+        });
 
-    m_pages.clear();
-    m_pages.shrink_to_fit();
+        page->chunks.Clear();
+        page->chunks = {};
+    });
+
+    m_pages.Clear();
+    m_pages = {};
 
     m_isOnGPU = false;
 }
-void Terrain::Unload(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+void Terrain::Unload(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     Free(cmdList, rendererCtx);
 }
@@ -507,17 +518,21 @@ void Terrain::ReleaseUploadBuffers()
         tex.chunks.shrink_to_fit();
     }
 
-    for (auto& page : m_pages) for (auto& chunk : page.chunks)
+    m_pages.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page)
     {
-        chunk.vertexUpload.Reset();
-        chunk.triangleIndexUpload.Reset();
-        chunk.patchIndexUpload.Reset();
-    }
+        page->chunks.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk)
+        {
+            chunk->vertexUpload.Reset();
+            chunk->triangleIndexUpload.Reset();
+            chunk->patchIndexUpload.Reset();
+        });
+    });
+
 
     m_isOnCPU = false;
 }
 
-void Terrain::BuildPageLayout(std::vector<TerrainPage>& out_Pages)
+void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
 {
     ASSERT(srcManifest.isPresent);
     ASSERT(pageManifest.isPresent);
@@ -545,7 +560,7 @@ void Terrain::BuildPageLayout(std::vector<TerrainPage>& out_Pages)
     const float uvPageWidth = 1.f / static_cast<float>(pageManifest.pageCountX);
     const float uvPageHeight = 1.f / static_cast<float>(pageManifest.pageCountZ);
 
-    out_Pages.assign(static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ, {});
+    out_Pages.Reserve(static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ);
 
     std::wstring folderName = NSTool::wformat(L"page_%02u_%02u", 0u, 0u);
     std::filesystem::path folderPath = (m_root / kSourcePagesFolderName / folderName);
@@ -560,80 +575,76 @@ void Terrain::BuildPageLayout(std::vector<TerrainPage>& out_Pages)
         for (uint32_t pageX{}; pageX < pageManifest.pageCountX; pageX++)
         {
             const size_t pageIndex = static_cast<size_t>(pageZ) * pageManifest.pageCountX + pageX;
-            TerrainPage& page = out_Pages[pageIndex];
+            std::shared_ptr<TerrainPage> page = out_Pages.Add();
 
-            page.key =
-            {
-                .gridX = pageX,
-                .gridZ = pageZ,
-                .index = pageIndex
-            };
-            page.heightSourceRect =
+            page->index = { pageX, pageZ };
+
+            page->heightSourceRect =
             {
                 .x = pageX * heightQuadsPerPageX,
                 .y = pageZ * heightQuadsPerPageZ,
                 .width = pageManifest.height.pageWidth,
                 .height = pageManifest.height.pageHeight
             };
-            page.diffuseSourceRect =
+            page->diffuseSourceRect =
             {
                 .x = pageX * pageManifest.diffuse.pageWidth,
                 .y = pageZ * pageManifest.diffuse.pageHeight,
                 .width = pageManifest.diffuse.pageWidth,
                 .height = pageManifest.diffuse.pageHeight
             };
-            page.worldRect =
+            page->worldRect =
             {
                 .x = -0.5f * srcManifest.worldWidth + static_cast<float>(pageX) * worldPageWidth,
                 .y = -0.5f * srcManifest.worldDepth + static_cast<float>(pageZ) * worldPageDepth,
                 .width = worldPageWidth,
                 .height = worldPageDepth,
             };
-            page.uvRect =
+            page->uvRect =
             {
                 .x = static_cast<float>(pageX) * uvPageWidth,
                 .y = static_cast<float>(pageZ) * uvPageHeight,
                 .width = uvPageWidth,
                 .height = uvPageHeight
             };
-            page.bounds.aabb =
+            page->bound = NSMath::SBoundAABB
             {
                 .min = {
-                    page.worldRect.x,
+                    page->worldRect.x,
                     0.f,
-                    page.worldRect.y
+                    page->worldRect.y
                 },
                 .max = {
-                    page.worldRect.x + page.worldRect.width,
+                    page->worldRect.x + page->worldRect.width,
                     srcManifest.maxHeight,
-                    page.worldRect.y + page.worldRect.height,
+                    page->worldRect.y + page->worldRect.height,
                 }
             };
 
-            page.isOnCPU = false;
-            page.isOnGPU = false;
+            page->isOnCPU = false;
+            page->isOnGPU = false;
 
-            WritePageName(pathToHeightmapBin, folderNameOffset, page.key.gridX, page.key.gridZ);
-            WritePageName(pathToDiffuseBin, folderNameOffset, page.key.gridX, page.key.gridZ);
+            WritePageName(pathToHeightmapBin, folderNameOffset, page->index.gridX, page->index.gridZ);
+            WritePageName(pathToDiffuseBin, folderNameOffset, page->index.gridX, page->index.gridZ);
 
-            page.heightTexturePage.path = pathToHeightmapBin;
-            page.diffuseTexturePage.path = pathToDiffuseBin;
+            page->heightTexturePage.path = pathToHeightmapBin;
+            page->diffuseTexturePage.path = pathToDiffuseBin;
 
-            if (std::filesystem::is_regular_file(page.heightTexturePage.path) and std::filesystem::is_regular_file(page.diffuseTexturePage.path))
+            if (std::filesystem::is_regular_file(page->heightTexturePage.path) and std::filesystem::is_regular_file(page->diffuseTexturePage.path))
             {
-                page.residency = TerrainPage::EPageResidency::Present;
+                page->residency = TerrainPage::EPageResidency::Present;
                 continue;
             }
-            else page.residency = TerrainPage::EPageResidency::Missing;
+            else page->residency = TerrainPage::EPageResidency::Missing;
         }
     }
 }
-void Terrain::UploadResidentPages(std::vector<TerrainPage>& pages, NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+void Terrain::UploadResidentPages(std::vector<TerrainPage>& pages, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     // TODO: Complete function
 }
 
-void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+void Terrain::BuildChunks(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     ASSERT(not m_heightR16.empty());
 
@@ -652,10 +663,9 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
         {
             const size_t chunkIndex = size_t(gz) * m_desc.chunkCountX + gx;
 
-            NSTerrain::ChunkKey key{
+            NSTerrain::ChunkIndex key{
                 .gridX = gx,
-                .gridZ = gz,
-                .index = chunkIndex
+                .gridZ = gz
             };
 
             std::vector<NSTerrain::Vertex> vertices;
@@ -746,15 +756,10 @@ void Terrain::BuildChunks(NSRenderer::GraphicsCommandList cmdList, NSRenderer::C
                 1.f / float(m_desc.chunkCountX),
                 1.f / float(m_desc.chunkCountZ)
             };
-            chunk.key = ChunkKey {
-                .gridX = gx,
-                .gridZ = gz,
-                .index = chunkIndex
-            };
-            chunk.bounds.aabb = NSMath::SBoundAABB {
-                .min = aabbMin,
-                .max = aabbMax
-            };
+            //chunk.bound = NSMath::SBoundAABB { // TODO: Should be for each page not for chucks of pages
+            //    .min = aabbMin,
+            //    .max = aabbMax
+            //};
 
             std::wstring chunkName = NSTool::wformat(L"NSTerrain::Terrain::Chunk%zu", chunkIndex);
 
@@ -1258,7 +1263,7 @@ NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std
 
     const UINT sourceRowPitch = manifest.pageWidth * manifest.bytesPerPixel;
 
-    return NSTexture::LoadTextureMemory(name, bytes.data(), sourceRowPitch, bytes.size(), NSTexture::MemoryLoadDesc
+    NSTexture::Texture tex = NSTexture::LoadTextureMemory(name, bytes.data(), sourceRowPitch, bytes.size(), NSTexture::MemoryLoadDesc
     {
         .texDesc {
             .textureType = type,
@@ -1269,5 +1274,8 @@ NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std
         },
         .width = manifest.pageWidth,
         .height = manifest.pageHeight
-    }, path);
+    });
+    tex.path = path;
+
+    return tex;
 }
