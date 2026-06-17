@@ -2,7 +2,7 @@
 
 namespace NSTexture
 {
-    enum EChannel : uint32_t
+    enum EChannel
     {
         ChUnknown = 0,
         ChR,
@@ -10,7 +10,6 @@ namespace NSTexture
         ChB,
         ChA,
         ChY,
-        ChForce32Bit = UINT32_MAX
     };
     constexpr size_t ChBegin = static_cast<size_t>(ChUnknown);
     constexpr size_t ChEnd = static_cast<size_t>(ChY) + 1u;
@@ -36,37 +35,36 @@ namespace NSTexture
         return channelNames[static_cast<size_t>(channel)];
     }
 
-    enum class EType : UINT {
-        EType_NONE = 0,
-        EType_DIFFUSE = 1,
-        EType_SPECULAR = 2,
-        EType_AMBIENT = 3,
-        EType_EMISSIVE = 4,
-        EType_HEIGHT = 5,
-        EType_NORMALS = 6,
-        EType_SHININESS = 7,
-        EType_OPACITY = 8,
-        EType_DISPLACEMENT = 9,
-        EType_LIGHTMAP = 10,
-        EType_REFLECTION = 11,
-        EType_BASE_COLOR = 12,
-        EType_NORMAL_CAMERA = 13,
-        EType_EMISSION_COLOR = 14,
-        EType_METALNESS = 15,
-        EType_DIFFUSE_ROUGHNESS = 16,
-        EType_AMBIENT_OCCLUSION = 17,
-        EType_UNKNOWN = 18,
-        EType_SHEEN = 19,
-        EType_CLEARCOAT = 20,
-        EType_TRANSMISSION = 21,
-        EType_MAYA_BASE = 22,
-        EType_MAYA_SPECULAR = 23,
-        EType_MAYA_SPECULAR_COLOR = 24,
-        EType_MAYA_SPECULAR_ROUGHNESS = 25,
-        EType_ANISOTROPY = 26,
-        EType_GLTF_METALLIC_ROUGHNESS = 27,
-        EType_MAX = 28,
-        EType_Force32Bit = UINT_MAX
+    enum class EType {
+        NONE = 0,
+        DIFFUSE,
+        SPECULAR,
+        AMBIENT,
+        EMISSIVE,
+        HEIGHT,
+        NORMALS,
+        SHININESS,
+        OPACITY,
+        DISPLACEMENT,
+        LIGHTMAP,
+        REFLECTION,
+        BASE_COLOR,
+        NORMAL_CAMERA,
+        EMISSION_COLOR,
+        METALNESS,
+        DIFFUSE_ROUGHNESS,
+        AMBIENT_OCCLUSION,
+        UNKNOWN,
+        SHEEN,
+        CLEARCOAT,
+        TRANSMISSION,
+        MAYA_BASE,
+        MAYA_SPECULAR,
+        MAYA_SPECULAR_COLOR,
+        MAYA_SPECULAR_ROUGHNESS,
+        ANISOTROPY,
+        GLTF_METALLIC_ROUGHNESS,
+        MAX,
     };
 
     enum class ERowPitchMode
@@ -144,7 +142,7 @@ namespace NSTexture
 
     struct TextureDesc
     {
-        EType textureType = EType::EType_UNKNOWN;
+        EType textureType = EType::UNKNOWN;
         DXGI_FORMAT format = DXGI_FORMAT::DXGI_FORMAT_UNKNOWN;
         UINT bytesPerPixel = 0u;
         double alphaThresholdPercent = 0.f;

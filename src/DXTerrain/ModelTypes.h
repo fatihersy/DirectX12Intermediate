@@ -47,23 +47,25 @@ namespace NSModel
     };
 
     enum class EModelFlag : uint32_t {
-        MODEL_FLAG_NONE = 0,
-        MODEL_FLAG_PBR_MODEL,
-        MODEL_FLAG_ATMOSPHERE,
-        MODEL_FLAG_GENERATE_ENV_CUBEMAP,
-        MODEL_FLAG_MAX,
+        UNDEFINED            = 0,
+        PBR_MODEL            = 1 << 0,
+        STATIC               = 1 << 1,
+        DYNAMIC              = 1 << 2,
+        ATMOSPHERE           = 1 << 3,
+        GENERATE_ENV_CUBEMAP = 1 << 4,
+        MAX                  = 1 << 5,
         Force32Bit = UINT32_MAX,
     };
 
     enum class EPrimitive : uint32_t {
-        PRIMITIVE_TYPE_NONE,
-        PRIMITIVE_TYPE_DOME,
-        PRIMITIVE_TYPE_SPHERE,
-        PRIMITIVE_TYPE_CUBE,
-        PRIMITIVE_TYPE_PLANE,
-        PRIMITIVE_TYPE_CYLINDER,
-        PRIMITIVE_TYPE_CONE,
-        PRIMITIVE_TYPE_MAX,
+        NONE,
+        DOME,
+        SPHERE,
+        CUBE,
+        PLANE,
+        CYLINDER,
+        CONE,
+        MAX,
     };
 
     struct AddCtx
@@ -77,14 +79,14 @@ namespace NSModel
 
     template<typename T>
     struct PrimitiveTraits {
-        static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_NONE;
+        static constexpr EPrimitive type = EPrimitive::NONE;
     };
 
     template<>
     struct PrimitiveTraits<SDome> {
         PrimitiveTraits(SDome desc) : desc(desc) {};
         SDome desc{};
-        static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_DOME;
+        static constexpr EPrimitive type = EPrimitive::DOME;
     };
     static_assert(offsetof(PrimitiveTraits<SDome>, desc) == 0);
 
@@ -92,7 +94,7 @@ namespace NSModel
     struct PrimitiveTraits<SSphere> {
         PrimitiveTraits(SSphere desc) : desc(desc) {};
         SSphere desc{};
-        static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_SPHERE;
+        static constexpr EPrimitive type = EPrimitive::SPHERE;
     };
     static_assert(offsetof(PrimitiveTraits<SSphere>, desc) == 0);
 
@@ -100,7 +102,7 @@ namespace NSModel
     struct PrimitiveTraits<SCube> {
         PrimitiveTraits(SCube desc) : desc(desc) {};
         SCube desc{};
-        static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_CUBE;
+        static constexpr EPrimitive type = EPrimitive::CUBE;
     };
     static_assert(offsetof(PrimitiveTraits<SCube>, desc) == 0);
 
@@ -108,7 +110,7 @@ namespace NSModel
     struct PrimitiveTraits<SPlane> {
         PrimitiveTraits(SPlane desc) : desc(desc) {};
         SPlane desc{};
-        static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_PLANE;
+        static constexpr EPrimitive type = EPrimitive::PLANE;
     };
     static_assert(offsetof(PrimitiveTraits<SPlane>, desc) == 0);
 
@@ -116,7 +118,7 @@ namespace NSModel
     struct PrimitiveTraits<SCylinder> {
         PrimitiveTraits(SCylinder desc) : desc(desc) {};
         SCylinder desc{};
-        static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_CYLINDER;
+        static constexpr EPrimitive type = EPrimitive::CYLINDER;
     };
     static_assert(offsetof(PrimitiveTraits<SCylinder>, desc) == 0);
 
@@ -124,9 +126,9 @@ namespace NSModel
     struct PrimitiveTraits<SCone> {
         PrimitiveTraits(SCone desc) : desc(desc) {};
         SCone desc{};
-        static constexpr EPrimitive type = EPrimitive::PRIMITIVE_TYPE_CONE;
+        static constexpr EPrimitive type = EPrimitive::CONE;
     };
     static_assert(offsetof(PrimitiveTraits<SCone>, desc) == 0);
 
-    template<typename T> concept IsPrimitiveMesh = PrimitiveTraits<std::decay_t<T>>::type != EPrimitive::PRIMITIVE_TYPE_NONE;
+    template<typename T> concept IsPrimitiveMesh = PrimitiveTraits<std::decay_t<T>>::type != EPrimitive::NONE;
 }

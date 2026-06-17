@@ -4,7 +4,7 @@
 
 #include "TextureTypes.h"
 
-#include "DescripterTypes.h"
+#include "DescriptorTypes.h"
 
 namespace NSTexture
 {
@@ -53,24 +53,24 @@ namespace NSTexture
     {
         switch (tType)
         {
-        case NSTexture::EType::EType_DIFFUSE: return "Diffuse";
-        case NSTexture::EType::EType_SPECULAR: return "Specular";
-        case NSTexture::EType::EType_AMBIENT: return "Ambient";
-        case NSTexture::EType::EType_EMISSIVE: return "Emissive";
-        case NSTexture::EType::EType_HEIGHT: return "Height";
-        case NSTexture::EType::EType_NORMALS: return "Normals";
-        case NSTexture::EType::EType_SHININESS: return "Shininess";
-        case NSTexture::EType::EType_OPACITY: return "Opacity";
-        case NSTexture::EType::EType_DISPLACEMENT: return "Displacement";
-        case NSTexture::EType::EType_LIGHTMAP: return "Lightmap";
-        case NSTexture::EType::EType_REFLECTION: return "Reflection";
-        case NSTexture::EType::EType_BASE_COLOR: return "Base Color";
-        case NSTexture::EType::EType_NORMAL_CAMERA: return "Normal Camera";
-        case NSTexture::EType::EType_EMISSION_COLOR: return "Emission Color";
-        case NSTexture::EType::EType_METALNESS: return "Metalness";
-        case NSTexture::EType::EType_DIFFUSE_ROUGHNESS: return "Diffuse Roughness";
-        case NSTexture::EType::EType_AMBIENT_OCCLUSION: return "Ambient Occlusion";
-        case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS: return "GLTF Metallic Roughness";
+        case NSTexture::EType::DIFFUSE: return "Diffuse";
+        case NSTexture::EType::SPECULAR: return "Specular";
+        case NSTexture::EType::AMBIENT: return "Ambient";
+        case NSTexture::EType::EMISSIVE: return "Emissive";
+        case NSTexture::EType::HEIGHT: return "Height";
+        case NSTexture::EType::NORMALS: return "Normals";
+        case NSTexture::EType::SHININESS: return "Shininess";
+        case NSTexture::EType::OPACITY: return "Opacity";
+        case NSTexture::EType::DISPLACEMENT: return "Displacement";
+        case NSTexture::EType::LIGHTMAP: return "Lightmap";
+        case NSTexture::EType::REFLECTION: return "Reflection";
+        case NSTexture::EType::BASE_COLOR: return "Base Color";
+        case NSTexture::EType::NORMAL_CAMERA: return "Normal Camera";
+        case NSTexture::EType::EMISSION_COLOR: return "Emission Color";
+        case NSTexture::EType::METALNESS: return "Metalness";
+        case NSTexture::EType::DIFFUSE_ROUGHNESS: return "Diffuse Roughness";
+        case NSTexture::EType::AMBIENT_OCCLUSION: return "Ambient Occlusion";
+        case NSTexture::EType::GLTF_METALLIC_ROUGHNESS: return "GLTF Metallic Roughness";
         default: return "Unknown";
         }
     }
@@ -78,24 +78,24 @@ namespace NSTexture
     {
         switch (tType)
         {
-        case NSTexture::EType::EType_DIFFUSE: return L"Diffuse";
-        case NSTexture::EType::EType_SPECULAR: return L"Specular";
-        case NSTexture::EType::EType_AMBIENT: return L"Ambient";
-        case NSTexture::EType::EType_EMISSIVE: return L"Emissive";
-        case NSTexture::EType::EType_HEIGHT: return L"Height";
-        case NSTexture::EType::EType_NORMALS: return L"Normals";
-        case NSTexture::EType::EType_SHININESS: return L"Shininess";
-        case NSTexture::EType::EType_OPACITY: return L"Opacity";
-        case NSTexture::EType::EType_DISPLACEMENT: return L"Displacement";
-        case NSTexture::EType::EType_LIGHTMAP: return L"Lightmap";
-        case NSTexture::EType::EType_REFLECTION: return L"Reflection";
-        case NSTexture::EType::EType_BASE_COLOR: return L"Base Color";
-        case NSTexture::EType::EType_NORMAL_CAMERA: return L"Normal Camera";
-        case NSTexture::EType::EType_EMISSION_COLOR: return L"Emission Color";
-        case NSTexture::EType::EType_METALNESS: return L"Metalness";
-        case NSTexture::EType::EType_DIFFUSE_ROUGHNESS: return L"Diffuse Roughness";
-        case NSTexture::EType::EType_AMBIENT_OCCLUSION: return L"Ambient Occlusion";
-        case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS: return L"GLTF Metallic Roughness";
+        case NSTexture::EType::DIFFUSE: return L"Diffuse";
+        case NSTexture::EType::SPECULAR: return L"Specular";
+        case NSTexture::EType::AMBIENT: return L"Ambient";
+        case NSTexture::EType::EMISSIVE: return L"Emissive";
+        case NSTexture::EType::HEIGHT: return L"Height";
+        case NSTexture::EType::NORMALS: return L"Normals";
+        case NSTexture::EType::SHININESS: return L"Shininess";
+        case NSTexture::EType::OPACITY: return L"Opacity";
+        case NSTexture::EType::DISPLACEMENT: return L"Displacement";
+        case NSTexture::EType::LIGHTMAP: return L"Lightmap";
+        case NSTexture::EType::REFLECTION: return L"Reflection";
+        case NSTexture::EType::BASE_COLOR: return L"Base Color";
+        case NSTexture::EType::NORMAL_CAMERA: return L"Normal Camera";
+        case NSTexture::EType::EMISSION_COLOR: return L"Emission Color";
+        case NSTexture::EType::METALNESS: return L"Metalness";
+        case NSTexture::EType::DIFFUSE_ROUGHNESS: return L"Diffuse Roughness";
+        case NSTexture::EType::AMBIENT_OCCLUSION: return L"Ambient Occlusion";
+        case NSTexture::EType::GLTF_METALLIC_ROUGHNESS: return L"GLTF Metallic Roughness";
         default: return L"Unknown";
         }
     }
@@ -103,40 +103,40 @@ namespace NSTexture
     {
         switch (tType)
         {
-        case NSTexture::EType::EType_DIFFUSE:
-        case NSTexture::EType::EType_BASE_COLOR:
-        case NSTexture::EType::EType_SPECULAR:
-        case NSTexture::EType::EType_AMBIENT:
-        case NSTexture::EType::EType_EMISSIVE:
-        case NSTexture::EType::EType_EMISSION_COLOR:
-        case NSTexture::EType::EType_MAYA_BASE:
-        case NSTexture::EType::EType_MAYA_SPECULAR_COLOR:
+        case NSTexture::EType::DIFFUSE:
+        case NSTexture::EType::BASE_COLOR:
+        case NSTexture::EType::SPECULAR:
+        case NSTexture::EType::AMBIENT:
+        case NSTexture::EType::EMISSIVE:
+        case NSTexture::EType::EMISSION_COLOR:
+        case NSTexture::EType::MAYA_BASE:
+        case NSTexture::EType::MAYA_SPECULAR_COLOR:
             return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 
-        case NSTexture::EType::EType_NORMALS:
-        case NSTexture::EType::EType_NORMAL_CAMERA:
-        case NSTexture::EType::EType_METALNESS:
-        case NSTexture::EType::EType_DIFFUSE_ROUGHNESS:
-        case NSTexture::EType::EType_AMBIENT_OCCLUSION:
-        case NSTexture::EType::EType_SHININESS:
-        case NSTexture::EType::EType_OPACITY:
-        case NSTexture::EType::EType_LIGHTMAP:
-        case NSTexture::EType::EType_REFLECTION:
-        case NSTexture::EType::EType_SHEEN:
-        case NSTexture::EType::EType_CLEARCOAT:
-        case NSTexture::EType::EType_TRANSMISSION:
-        case NSTexture::EType::EType_MAYA_SPECULAR:
-        case NSTexture::EType::EType_MAYA_SPECULAR_ROUGHNESS:
-        case NSTexture::EType::EType_ANISOTROPY:
-        case NSTexture::EType::EType_GLTF_METALLIC_ROUGHNESS:
+        case NSTexture::EType::NORMALS:
+        case NSTexture::EType::NORMAL_CAMERA:
+        case NSTexture::EType::METALNESS:
+        case NSTexture::EType::DIFFUSE_ROUGHNESS:
+        case NSTexture::EType::AMBIENT_OCCLUSION:
+        case NSTexture::EType::SHININESS:
+        case NSTexture::EType::OPACITY:
+        case NSTexture::EType::LIGHTMAP:
+        case NSTexture::EType::REFLECTION:
+        case NSTexture::EType::SHEEN:
+        case NSTexture::EType::CLEARCOAT:
+        case NSTexture::EType::TRANSMISSION:
+        case NSTexture::EType::MAYA_SPECULAR:
+        case NSTexture::EType::MAYA_SPECULAR_ROUGHNESS:
+        case NSTexture::EType::ANISOTROPY:
+        case NSTexture::EType::GLTF_METALLIC_ROUGHNESS:
             return DXGI_FORMAT_R8G8B8A8_UNORM;
 
-        case NSTexture::EType::EType_HEIGHT:
-        case NSTexture::EType::EType_DISPLACEMENT:
+        case NSTexture::EType::HEIGHT:
+        case NSTexture::EType::DISPLACEMENT:
             return DXGI_FORMAT_R16_UNORM;
 
-        case NSTexture::EType::EType_UNKNOWN:
-        case NSTexture::EType::EType_NONE:
+        case NSTexture::EType::UNKNOWN:
+        case NSTexture::EType::NONE:
 
         default:
             return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;

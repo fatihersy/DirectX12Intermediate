@@ -162,31 +162,36 @@ private:
     T bits{};
 };
 
-template<typename TEnum> requires std::is_enum_v<TEnum>
+template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
 constexpr undertype<TEnum> operator| (TEnum lhs, TEnum rhs) {
-    return undertype<TEnum>(lhs) | undertype<TEnum>(rhs);
+    return Flag<TEnum>::toRaw(lhs) | Flag<TEnum>::toRaw(rhs);
 }
-template<typename TEnum> requires std::is_enum_v<TEnum>
+template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
 constexpr undertype<TEnum> operator& (TEnum lhs, TEnum rhs) {
     return Flag<TEnum>::toRaw(lhs) & Flag<TEnum>::toRaw(rhs);
 }
-template<typename TEnum> requires std::is_enum_v<TEnum>
+template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
 constexpr undertype<TEnum> operator^ (TEnum lhs, TEnum rhs) {
     return Flag<TEnum>::toRaw(lhs) & Flag<TEnum>::toRaw(rhs);
 }
-template<typename TEnum> requires std::is_enum_v<TEnum>
+template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
 constexpr undertype<TEnum> operator~(TEnum val) {
     return ~Flag<TEnum>::toRaw(val);
 }
 
-//#include "EntityTypes.h"
-//#include "core/Math.h"
-//#include "StepTimer.h"
-//#include "Logger.h"
-//#include "Tools.h"
-//#include "AllocatorTypes.h"
-//#include "RendererTypes.h"
-//#include "ModelTypes.h"
-//#include "Texture.h"
-//#include "TerrainTypes.h"
-//#include "SceneTypes.h"
+enum class ELoopConditionFlag : uint32_t
+{
+    UNDEFINED = 0,
+    CONTINUE  = 1 << 0,
+    BREAK     = 1 << 1,
+    SUCCESS   = 1 << 2,
+    Force32Bit = UINT32_MAX
+};
+
+struct LoopCondition
+{
+    LoopCondition(){}
+    LoopCondition(ELoopConditionFlag f) : condition(f) {}
+
+    Flag<ELoopConditionFlag> condition;
+};

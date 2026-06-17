@@ -139,8 +139,8 @@ namespace NSMath
 
     struct ICullable
     {
-        ObserverKey key;
-        BoundingBox bound;
+        ObserverKey ICullable_Id;
+        BoundingBox ICullable_Bound;
     };
 
     struct SFrustum

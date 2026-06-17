@@ -28,8 +28,7 @@ private:
 
     void LoadPipeline();
     void LoadAssets();
-    void UpdateKeyBindings();
-    void UpdateMouseBindings();
+    void UpdateBindings();
 
     StepTimer m_timer;
     Scene m_scene;

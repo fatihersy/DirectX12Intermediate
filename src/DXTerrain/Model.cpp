@@ -161,7 +161,7 @@ void Model::ResetUploadHeaps()
     isOnCPU = false;
 }
 
-void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach)
+void Model::Draw(std::function<LoopCondition(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach)
 {
     DirectX::XMMATRIX globalRotation = DirectX::XMMatrixRotationRollPitchYaw(m_rotation.x, m_rotation.y, m_rotation.z);
     DirectX::XMMATRIX globalPosition = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&m_position));
@@ -174,17 +174,18 @@ void Model::Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRI
         const DirectX::XMMATRIX posMatrix = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat3(&mesh.m_position));
         const DirectX::XMMATRIX worldMatrix = scaleMatrix * rotQMatrix * posMatrix * globalRotation * globalPosition;
 
-        forEach(mesh, meshIndex, worldMatrix);
+        if (forEach(mesh, meshIndex, worldMatrix).condition.HasLeastOne(ELoopConditionFlag::BREAK)) break;
 
         meshIndex++;
     }
 }
-void Model::ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach)
+void Model::ForEach(std::function<LoopCondition(Mesh& mesh, UINT meshIndex)> forEach)
 {
     uint32_t meshIndex{};
     for (Mesh& mesh : m_meshes)
     {
-        forEach(mesh, meshIndex);
+        if(forEach(mesh, meshIndex).condition.HasLeastOne(ELoopConditionFlag::BREAK)) break;
+
         meshIndex++;
     }
 }
@@ -562,7 +563,7 @@ Mesh& Model::CreateMeshFromMemory(std::wstring_view name, const std::vector<NSMo
 
 Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel::EPrimitive type, void* pDesc)
 {
-    ASSERT(pDesc and not name.empty() and type > NSModel::EPrimitive::PRIMITIVE_TYPE_NONE and type < NSModel::EPrimitive::PRIMITIVE_TYPE_MAX);
+    ASSERT(pDesc and not name.empty() and type > NSModel::EPrimitive::NONE and type < NSModel::EPrimitive::MAX);
 
     UnloadGPU(rendererCtx);
     ResetUploadHeaps();
@@ -571,7 +572,7 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel:
 
     switch (type)
     {
-    case NSModel::EPrimitive::PRIMITIVE_TYPE_DOME:
+    case NSModel::EPrimitive::DOME:
     {
         const NSModel::SDome* desc = reinterpret_cast<const NSModel::SDome*>(pDesc);
 
@@ -580,7 +581,7 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel:
 
         return std::move(*this);
     }
-    case NSModel::EPrimitive::PRIMITIVE_TYPE_SPHERE:
+    case NSModel::EPrimitive::SPHERE:
     {
         const NSModel::SSphere* desc = reinterpret_cast<const NSModel::SSphere*>(pDesc);
 
@@ -589,7 +590,7 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel:
 
         return std::move(*this);
     }
-    case NSModel::EPrimitive::PRIMITIVE_TYPE_CUBE:
+    case NSModel::EPrimitive::CUBE:
     {
         const NSModel::SCube* desc = reinterpret_cast<const NSModel::SCube*>(pDesc);
 
@@ -598,7 +599,7 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel:
 
         return std::move(*this);
     }
-    case NSModel::EPrimitive::PRIMITIVE_TYPE_PLANE:
+    case NSModel::EPrimitive::PLANE:
     {
         const NSModel::SPlane* desc = reinterpret_cast<const NSModel::SPlane*>(pDesc);
 
@@ -607,7 +608,7 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel:
 
         return std::move(*this);
     }
-    case NSModel::EPrimitive::PRIMITIVE_TYPE_CYLINDER:
+    case NSModel::EPrimitive::CYLINDER:
     {
         const NSModel::SCylinder* desc = reinterpret_cast<const NSModel::SCylinder*>(pDesc);
 
@@ -616,7 +617,7 @@ Model&& Model::_As(NSRenderer::Ctx rendererCtx, std::wstring_view name, NSModel:
 
         return std::move(*this);
     }
-    case NSModel::EPrimitive::PRIMITIVE_TYPE_CONE:
+    case NSModel::EPrimitive::CONE:
     {
         const NSModel::SCone* desc = reinterpret_cast<const NSModel::SCone*>(pDesc);
 

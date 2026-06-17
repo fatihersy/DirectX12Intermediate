@@ -4,7 +4,7 @@
 #include "core/EntityTypes.h"
 
 #include "AllocatorTypes.h"
-#include "DescripterTypes.h"
+#include "DescriptorTypes.h"
 
 namespace NSBarrier
 {
@@ -232,8 +232,9 @@ namespace NSRenderer
 {
     enum class ERendererFlag : uint32_t
     {
-        MODE_WIREFRAME = 0,
-        MAX,
+        UNDEFINED      = 0,
+        MODE_WIREFRAME = 1 << 0,
+        MAX            = 1 << 1,
         Force32Bit = UINT32_MAX
     };
 
@@ -263,9 +264,9 @@ namespace NSRenderer
     };
 
     enum class ERegModelFlag : uint32_t {
-        MODEL_FLAG_NONE = 0,
-        MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE = 1,
-        MODEL_FLAG_MAX,
+        UNDEFINED             = 0,
+        UNSEEN_TO_ENV_CAPTURE = 1 << 0,
+        MAX                   = 1 << 1,
         Force32Bit = UINT32_MAX,
     };
 
@@ -423,7 +424,7 @@ namespace NSScene
 
 namespace NSRenderPass
 {
-    enum class RenderPassID : uint32_t
+    enum class RenderPassID
     {
         PASSID_Z = 0u,
         PASSID_ATMOSPHERE,
@@ -432,7 +433,6 @@ namespace NSRenderPass
         PASSID_TERRAIN,
         PASSID_DEBUG,
         PASSID_MAX,
-        PASSID_Force32Bit = UINT32_MAX
     };
 
     struct DebugUtils {

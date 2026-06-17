@@ -136,7 +136,7 @@ namespace NSTexture
     }
     Texture LoadTextureWIC(std::wstring_view name, IWICBitmapDecoder* decoder, WICLoadDesc desc)
     {
-        ASSERT(static_cast<int>(desc.texDesc.textureType) < static_cast<int>(EType::EType_MAX));
+        ASSERT(static_cast<int>(desc.texDesc.textureType) < static_cast<int>(EType::MAX));
         ASSERT(desc.texDesc.format != DXGI_FORMAT_UNKNOWN);
         ASSERT(desc.texDesc.mipLevels == 1u, "LoadTexture currently uploads only the first mip");
         ASSERT(desc.texDesc.bytesPerPixel == BytesPerPixel(desc.texDesc.format));
@@ -196,7 +196,7 @@ namespace NSTexture
 
     Texture LoadTextureEXR(std::wstring_view name, std::filesystem::path path, EXRLoadDesc desc)
     {
-        ASSERT(static_cast<int>(desc.texDesc.textureType) < static_cast<int>(EType::EType_MAX));
+        ASSERT(static_cast<int>(desc.texDesc.textureType) < static_cast<int>(EType::MAX));
         ASSERT(desc.texDesc.localRowPitchMode != ERowPitchMode::UNDEFINED);
 
         if (desc.texDesc.format == DXGI_FORMAT_UNKNOWN)
@@ -780,7 +780,7 @@ namespace NSTexture
         ASSERT(desc.width > 0u);
         ASSERT(desc.height > 0u);
         ASSERT(srcRowPitch > 0u);
-        ASSERT(desc.texDesc.textureType != EType::EType_UNKNOWN);
+        ASSERT(desc.texDesc.textureType != EType::UNKNOWN);
         ASSERT(desc.texDesc.format != DXGI_FORMAT_UNKNOWN);
         ASSERT(desc.texDesc.localRowPitchMode != ERowPitchMode::UNDEFINED);
         ASSERT(desc.texDesc.uploadRowPitchMode != ERowPitchMode::UNDEFINED);

@@ -8,7 +8,7 @@ HRESULT Material::LoadTexture(ID3D12Device14* device, IWICBitmapDecoder* decoder
 {
     NSTexture::EType tType = static_cast<NSTexture::EType>(textureType);
 
-    ASSERT(device and decoder and tType > NSTexture::EType::EType_NONE and tType < NSTexture::EType::EType_MAX);
+    ASSERT(device and decoder and tType > NSTexture::EType::NONE and tType < NSTexture::EType::MAX);
 
     const std::wstring_view textureName = m_name.empty()
         ? std::wstring_view(L"Material")
@@ -52,11 +52,11 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
         cmdList.ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
     }
 
-    m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(NSTexture::EType::EType_MAX));
+    m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(NSTexture::EType::MAX));
 
-    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> srcRange(static_cast<size_t>(NSTexture::EType::EType_MAX), rendererCtx.fallbackSRV.get().cpuAddr);
+    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> srcRange(static_cast<size_t>(NSTexture::EType::MAX), rendererCtx.fallbackSRV.get().cpuAddr);
 
-    auto destRange = ArraySequence<static_cast<size_t>(NSTexture::EType::EType_MAX)>([&](auto I)
+    auto destRange = ArraySequence<static_cast<size_t>(NSTexture::EType::MAX)>([&](auto I)
     {
         return rendererCtx.offsetSRV(m_srvHandle, static_cast<uint32_t>(I)).cpuAddr;
     });

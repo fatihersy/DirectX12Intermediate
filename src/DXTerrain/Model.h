@@ -59,7 +59,7 @@ public:
             {
                 ASSERT(false, "Unsupported collision type");
             }
-        }, bound);
+        }, ICullable_Bound);
 
         return std::move(*this);
     }
@@ -118,8 +118,8 @@ public:
         return _As(rendererCtx, L"self", desc.type, static_cast<void*>(std::addressof(desc)));
     }
 
-    void Draw(std::function<void(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
-    void ForEach(std::function<void(Mesh& mesh, UINT meshIndex)> forEach);
+    void Draw(std::function<LoopCondition(Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)> forEach);
+    void ForEach(std::function<LoopCondition(Mesh& mesh, UINT meshIndex)> forEach);
 
     std::array<ObserverKey, static_cast<size_t>(NSRenderer::EnvironmentCubemap::NUM_FACES)> envCameraKeys;
 

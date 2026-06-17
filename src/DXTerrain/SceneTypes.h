@@ -7,12 +7,11 @@
 
 namespace NSScene
 {
-    struct TerrainPage
+    struct TerrainPage : public NSMath::ICullable
     {
         EntityKey<TerrainPage> m_id;
         NSTerrain::PageIndex index;
         ObserverKey m_registerKey;
-        NSMath::BoundingBox bound;
 
         bool isVisibleTEMP{};
     };
@@ -24,13 +23,13 @@ namespace NSScene
         bool isInitialized{};
     };
 
-    enum class EIncludeCull : uint32_t
+    enum class EIncCullFlag : uint32_t
     {
-        STATIC_OBJECTS,
-        DYNAMIC_OBJECTS,
-        MODELS,
-        TERRAIN,
-        ALL,
+        UNDEFINED           = 0,
+        STATIC_OBJECTS      = 1 << 0,
+        DYNAMIC_OBJECTS     = 1 << 1,
+        TERRAIN             = 1 << 2,
+        ALL                 = 1 << 3,
         Force32Bit = UINT32_MAX
     };
 
@@ -41,8 +40,8 @@ namespace NSScene
 
         std::vector<NSMath::ICullable> m_culledObjects;
 
-        Flag<EIncludeCull> flag;
-        uint32_t generation{};
+        Flag<EIncCullFlag> flag;
+        uint64_t generation{};
     private:
     };
 
@@ -75,9 +74,9 @@ namespace NSScene
 
             viewMatrix = DirectX::XMMatrixLookAtLH(camEye, DirectX::XMVectorAdd(camEye, camFwd), camUp);
         }
-        bool FindCull(Flag<NSScene::EIncludeCull> flag, ObserverKey sceneKey, std::weak_ptr<NSScene::CullResult> result);
 
         EntityMap<CullResult> cullResults;
+        uint64_t generation{};
 
         float camYaw{};
         float camPitch{};
@@ -96,7 +95,7 @@ namespace NSScene
         virtual NSScene::Terrain& GetTerrain() = 0;
         virtual std::shared_ptr<NSScene::Camera> GetMainCamera() = 0;
 
-        virtual std::weak_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncludeCull> flag, ObserverKey excludeKey = {}) = 0;
+        virtual std::shared_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncCullFlag> flag, ObserverKey excludeKey = {}) = 0;
 
         static constexpr float FAR_CLIP = 20000.f;
         static constexpr float NEAR_CLIP = 0.1f;

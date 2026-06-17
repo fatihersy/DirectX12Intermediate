@@ -65,7 +65,7 @@ Json TextureManifestToJson(const TextureManifest& manifest)
 
     for (NSTexture::EChannel channel : manifest.channels)
     {
-        if (channel != NSTexture::ChUnknown and channel != NSTexture::ChForce32Bit)
+        if (channel != NSTexture::ChUnknown and static_cast<size_t>(channel) < NSTexture::ChEnd)
         {
             channelsStr.push_back(NSTexture::GetChannelName(channel));
         }
@@ -348,7 +348,7 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
     std::wstring pageNameHeightmap = L"page_00_00::HeightmapBin";
     std::wstring pageNameDiffuse = L"page_00_00::DiffuseBin";
 
-    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page)
+    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
     {
         ASSERT(page->residency == TerrainPage::EPageResidency::Present, "Page:(%d,%d) is missing or corrupted", page->index.gridX, page->index.gridZ);
 
@@ -359,17 +359,19 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
             pageNameHeightmap,
             page->heightTexturePage.path,
             pageManifest.height,
-            NSTexture::EType::EType_HEIGHT
+            NSTexture::EType::HEIGHT
         );
 
         page->diffuseTexturePage = LoadPageTextureBin(
             pageNameDiffuse,
             page->diffuseTexturePage.path,
             pageManifest.diffuse,
-            NSTexture::EType::EType_DIFFUSE
+            NSTexture::EType::DIFFUSE
         );
 
         page->residency = TerrainPage::EPageResidency::Loaded;
+
+        return ELoopConditionFlag::CONTINUE;
     });
 
     m_isInitialized = true;
@@ -387,8 +389,9 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     if (m_texSrvHandle.amount > 0) rendererCtx.freeSRVStatic(m_texSrvHandle);
     m_texSrvHandle = {};
 
-    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page){
-        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk)
+    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
+    {
+        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk) -> LoopCondition
         {
             chunk->vertexDefault.Reset();
             chunk->vertexUpload.Reset();
@@ -396,10 +399,14 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
             chunk->triangleIndexUpload.Reset();
             chunk->patchIndexDefault.Reset();
             chunk->patchIndexUpload.Reset();
+
+            return ELoopConditionFlag::CONTINUE;
         });
 
         page->chunks.Clear();
         page->chunks = {};
+
+        return ELoopConditionFlag::CONTINUE;
     });
 
     m_pages.Clear();
@@ -427,7 +434,7 @@ bool Terrain::Load(const std::wstring_view _path)
     {
         heightmap = NSTexture::LoadTextureEXR(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EXRLoadDesc {
             .texDesc {
-                .textureType = NSTexture::EType::EType_HEIGHT,
+                .textureType = NSTexture::EType::HEIGHT,
                 .format = DXGI_FORMAT_R16_UNORM,
                 .localRowPitchMode = NSTexture::ERowPitchMode::TIGHT,
                 .uploadRowPitchMode = NSTexture::ERowPitchMode::DX_ALIGN
@@ -436,7 +443,7 @@ bool Terrain::Load(const std::wstring_view _path)
         });
     }
     else {
-        heightmap = NSTexture::LoadTexture(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EType::EType_HEIGHT);
+        heightmap = NSTexture::LoadTexture(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EType::HEIGHT);
     }
 
     ASSERT(heightmap.desc.format == DXGI_FORMAT_R16_UNORM);
@@ -485,8 +492,9 @@ void Terrain::Free(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx renderer
 
     for (NSTexture::Texture& tex : m_textures) tex = NSTexture::Texture{};
 
-    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page){
-        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk)
+    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
+    {
+        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk) -> LoopCondition
         {
             chunk->vertexDefault.Reset();
             chunk->vertexUpload.Reset();
@@ -494,10 +502,14 @@ void Terrain::Free(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx renderer
             chunk->triangleIndexUpload.Reset();
             chunk->patchIndexDefault.Reset();
             chunk->patchIndexUpload.Reset();
+
+            return ELoopConditionFlag::CONTINUE;
         });
 
         page->chunks.Clear();
         page->chunks = {};
+
+        return ELoopConditionFlag::CONTINUE;
     });
 
     m_pages.Clear();
@@ -518,16 +530,19 @@ void Terrain::ReleaseUploadBuffers()
         tex.chunks.shrink_to_fit();
     }
 
-    m_pages.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page)
+    m_pages.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
     {
-        page->chunks.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk)
+        page->chunks.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk) -> LoopCondition
         {
             chunk->vertexUpload.Reset();
             chunk->triangleIndexUpload.Reset();
             chunk->patchIndexUpload.Reset();
-        });
-    });
 
+            return ELoopConditionFlag::CONTINUE;
+        });
+
+        return ELoopConditionFlag::CONTINUE;
+    });
 
     m_isOnCPU = false;
 }
@@ -578,6 +593,7 @@ void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
             std::shared_ptr<TerrainPage> page = out_Pages.Add();
 
             page->index = { pageX, pageZ };
+            page->ICullable_Id = page->m_id;
 
             page->heightSourceRect =
             {
@@ -607,7 +623,7 @@ void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
                 .width = uvPageWidth,
                 .height = uvPageHeight
             };
-            page->bound = NSMath::SBoundAABB
+            page->ICullable_Bound = NSMath::SBoundAABB
             {
                 .min = {
                     page->worldRect.x,
@@ -961,17 +977,11 @@ bool Terrain::LoadSourceManifest()
     srcManifest.diffuse = JsonToTextureManifest(json.at(srcManifest.kJsonObj_diffuse));
 
     const bool isNameValid = !srcManifest.name.empty();
-
     const bool isPageCountXValid = (srcManifest.pageCountX > 0u);
-
     const bool isPageCountZValid = (srcManifest.pageCountZ > 0u);
-
     const bool isWorldWidthValid = (srcManifest.worldWidth > 0.f);
-
     const bool isWorldDepthValid = (srcManifest.worldDepth > 0.f);
-
     const bool isMaxHeightValid = (srcManifest.maxHeight > 0.f);
-
     const bool isValid = isNameValid and isPageCountXValid and isPageCountZValid and isWorldWidthValid and isWorldDepthValid and isMaxHeightValid;
 
     srcManifest.isPresent = isValid;
@@ -1121,7 +1131,7 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
     NSTexture::Texture heightTexture = NSTexture::LoadTextureEXR(
         L"NSTerrain::Terrain::Heightmap",
         heightmapPath.generic_wstring(),
-        BuildEXRLoadDesc(srcManifest.heightmap, NSTexture::EType::EType_HEIGHT)
+        BuildEXRLoadDesc(srcManifest.heightmap, NSTexture::EType::HEIGHT)
     );
 
     ASSERT(heightTexture.width > 1u and heightTexture.height > 1u);
@@ -1192,7 +1202,7 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
     NSTexture::Texture diffuseTexture = NSTexture::LoadTextureEXR(
         L"NSTerrain::Terrain::DiffuseSource",
         diffusePath.generic_wstring(),
-        BuildEXRLoadDesc(srcManifest.diffuse, NSTexture::EType::EType_DIFFUSE)
+        BuildEXRLoadDesc(srcManifest.diffuse, NSTexture::EType::DIFFUSE)
     );
 
     ASSERT(diffuseTexture.width > 1u and diffuseTexture.height > 1u);

@@ -17,10 +17,12 @@ Scene::~Scene() {}
 
 void Scene::OnDestroy(NSRenderer::Ctx rendererCtx)
 {
-    m_models.ForEach([&rendererCtx](EntityID id, std::shared_ptr<Model> model)
+    m_models.ForEach([&rendererCtx](EntityID id, std::shared_ptr<Model> model) -> LoopCondition
     {
         model->ResetUploadHeaps();
         model->UnloadGPU(rendererCtx);
+
+        return ELoopConditionFlag::CONTINUE;
     });
 }
 
@@ -55,58 +57,59 @@ void Scene::UpdateCamera(NSScene::Camera& camera)
     camera.viewMatrix = DirectX::XMMatrixLookAtLH(camera.camEye, lookAt, camera.camUp);
 }
 
-std::weak_ptr<NSScene::CullResult> Scene::Cull(ObserverKey camKey, Flag<NSScene::EIncludeCull> flag, ObserverKey excludeKey)
+std::shared_ptr<NSScene::CullResult> Scene::Cull(ObserverKey camKey, Flag<NSScene::EIncCullFlag> flag, ObserverKey excludeKey)
 {
     ASSERT(m_cameras.Contains(camKey));
 
     std::shared_ptr<NSScene::Camera> camera = m_cameras.Get(camKey);
-    std::shared_ptr<NSScene::CullResult> result = camera->cullResults.Add();
 
+    std::shared_ptr<NSScene::CullResult> results;
+
+    camera->cullResults.ForEach([this, &flag, &results, &camera](EntityID, std::shared_ptr<NSScene::CullResult> cacheResult) -> LoopCondition
+    {
+        if (cacheResult->culledSceneKey != m_id or not cacheResult->flag.HasExact(flag)) return ELoopConditionFlag::CONTINUE;
+
+        results = cacheResult;
+
+        return ELoopConditionFlag::BREAK;
+    });
+
+    if (not results)
+    {
+        results = camera->cullResults.Add();
+    }
+    else if (results->generation >= camera->generation) return results;
+
+    results->generation = camera->generation;
     NSMath::SFrustum frustum(camera->viewMatrix * camera->projMatrix);
 
-    if (flag.HasLeastAll(NSScene::EIncludeCull::STATIC_OBJECTS | NSScene::EIncludeCull::DYNAMIC_OBJECTS))
+    if (flag.HasLeastOne(NSScene::EIncCullFlag::STATIC_OBJECTS | NSScene::EIncCullFlag::DYNAMIC_OBJECTS))
     {
-        m_models.ForEach([&frustum, &camera, &result](EntityID, std::shared_ptr<::Model> model)
+        m_models.ForEach([&frustum, &camera, &results, &flag](EntityID, std::shared_ptr<::Model> model) -> LoopCondition
         {
-            DirectX::XMFLOAT3 fPos = model->GetPosition();
-            DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&fPos);
+            if (not model->m_flags.HasLeastOne(NSModel::EModelFlag::STATIC | NSModel::EModelFlag::DYNAMIC)) return ELoopConditionFlag::CONTINUE;
 
-            if (frustum.TestBounds(model->bound))
+            if (frustum.TestBounds(model->ICullable_Bound))
             {
-                result->m_culledObjects.push_back(DE_REF(model));
+                results->m_culledObjects.push_back(DE_REF(model));
             }
+            return ELoopConditionFlag::CONTINUE;
+        });
+    }
+    if (flag.HasLeastOne(NSScene::EIncCullFlag::TERRAIN))
+    {
+        m_terrain.pages.ForEach([&frustum, &camera, &results](EntityID, std::shared_ptr<NSScene::TerrainPage> page) -> LoopCondition
+        {
+            if (frustum.TestBounds(page->ICullable_Bound))
+            {
+                results->m_culledObjects.push_back(DE_REF(page));
+            }
+
+            return ELoopConditionFlag::CONTINUE;
         });
     }
 
-    return result;
-}
-
-bool NSScene::Camera::FindCull(Flag<NSScene::EIncludeCull> flag, ObserverKey sceneKey, std::weak_ptr<NSScene::CullResult> pResult)
-{
-    bool found{};
-
-    if (auto result = pResult.lock())
-    {
-        cullResults.ForEach([this, &sceneKey, &flag, &found, &pResult](EntityID, std::shared_ptr<CullResult> cacheResult)
-        {
-            if (cacheResult->culledSceneKey == sceneKey and cacheResult->flag.HasExact(flag))
-            {
-                found = true;
-                pResult = cacheResult;
-                return;
-            }
-        });
-    }
-
-    return found;
-}
-
-void Scene::ForEachModel(std::function<void(Model& model)> ForEach)
-{
-    m_models.ForEach([&ForEach](EntityID, std::shared_ptr<Model> model)
-    {
-        ForEach(DE_REF(model));
-    });
+    return results;
 }
 
 void Scene::SetupCameraInfiniteProjection(NSScene::Camera& camera, float fovY, float aspect, float nearZ)

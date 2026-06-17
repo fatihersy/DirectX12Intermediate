@@ -1,4 +1,5 @@
 #pragma once
+#include "core/Defines.h"
 
 using EntityID = uint32_t;
 using TypeID = uint32_t;
@@ -67,18 +68,18 @@ struct EntityMap
 
         return map.at(id);
     }
-    void ForEach(std::function<void(EntityID, std::shared_ptr<T>)> eval)
+    void ForEach(std::function<LoopCondition(EntityID, std::shared_ptr<T>)> eval)
     {
         for (auto& [key, val] : map)
         {
-            eval(key, val);
+            if (eval(key, val).condition.HasLeastOne(ELoopConditionFlag::BREAK)) break;
         }
     }
-    void ForEach(std::function<void(EntityID, std::shared_ptr<const T>)> eval) const
+    void ForEach(std::function<LoopCondition(EntityID, std::shared_ptr<const T>)> eval) const
     {
         for (const auto& [key, val] : map)
         {
-            eval(key, val);
+            if (eval(key, val).condition.HasLeastOne(ELoopConditionFlag::BREAK)) break;
         }
     }
     bool Contains(ObserverKey key) const

@@ -13,7 +13,7 @@ using namespace NSRenderPass;
 GeometryPass::GeometryPass(ID3D12Device14* device, Blackboard& blackboard, NSRenderer::Ctx rendererCtx)
     : m_pipeline(GraphicsPipeline(device, L"GeometryPass::Graphics", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
     {
-        constexpr UINT kModelTexCount = static_cast<UINT>(NSTexture::EType::EType_MAX);
+        constexpr UINT kModelTexCount = static_cast<UINT>(NSTexture::EType::MAX);
         CD3DX12_DESCRIPTOR_RANGE1 srvRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kModelTexCount, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC);
         CD3DX12_DESCRIPTOR_RANGE1 envCubemapRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, kModelTexCount, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
         CD3DX12_DESCRIPTOR_RANGE1 brdfLUTRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, kModelTexCount + 1, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE);
@@ -185,52 +185,51 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
     std::weak_ptr<NSScene::Camera> wpMainCamera = scene.GetMainCamera();
     ASSERT(wpMainCamera.lock(), "Main camera is invalid");
 
-    auto mainCamera = wpMainCamera.lock();
+    auto mainCam = wpMainCamera.lock();
 
-    scene.Cull(mainCamera->m_id, NSScene::EIncludeCull::ALL);
+    std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS);
 
-    mainCamera->cullResults.ForEach([&](EntityID, std::shared_ptr<NSScene::CullResult> result)
+    for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
-        for (NSMath::ICullable cullable : result->m_culledObjects)
+        ASSERT(scene.m_models.Contains(culled.ICullable_Id));
+        std::shared_ptr<Model> sceModel = scene.m_models.Get(culled.ICullable_Id);
+
+        if (not sceModel->m_flags.HasLeastOne(NSModel::EModelFlag::PBR_MODEL)) continue;
+
+        ASSERT(regModels.Contains(sceModel->m_registerKey));
+        std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(sceModel->m_registerKey);
+
+        cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_CUBEMAP_SRV, regModel->m_envCubemap.srvHandle.gpuAddr);
+
+        sceModel->Draw([this, &rendererCtx, &cmdList, &sceModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix) -> LoopCondition
         {
-            ASSERT(scene.m_models.Contains(cullable.key.entID));
-            std::shared_ptr<Model> sceneModel = scene.m_models.Get(cullable.key);
+            NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
+            MeshConstants& meshCB = allocCtx.As<MeshConstants>();
 
-            if (not sceneModel->m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
+            DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
+            DirectX::XMVECTOR det;
+            DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
+            DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
 
-            ASSERT(regModels.Contains(sceneModel->m_registerKey));
-            std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(sceneModel->m_registerKey);
+            meshCB.baseColor = mesh.material.m_baseColor;
+            meshCB.metallic = mesh.material.m_metallic;
+            meshCB.roughness = mesh.material.m_roughness;
+            meshCB.opacity = mesh.material.m_opacity;
+            meshCB.textureFlags = mesh.material.GetFlags();
 
-            cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_ENV_CUBEMAP_SRV, regModel->m_envCubemap.srvHandle.gpuAddr);
+            cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
 
-            sceneModel->Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
-            {
-                NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
-                MeshConstants& meshCB = allocCtx.As<MeshConstants>();
+            if (mesh.material.m_isOnGPU) {
+                cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_MODEL_TEX_SRV, mesh.material.m_srvHandle.gpuAddr);
+            }
 
-                DirectX::XMStoreFloat4x4(&meshCB.worldMatrix, worldMatrix);
-                DirectX::XMVECTOR det;
-                DirectX::XMMATRIX worldInverse = DirectX::XMMatrixInverse(&det, worldMatrix);
-                DirectX::XMStoreFloat3x4(&meshCB.normalMatrix, worldInverse);
+            cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
+            cmdList.IASetIndexBuffer(&mesh.indexBufferView);
+            cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
 
-                meshCB.baseColor = mesh.material.m_baseColor;
-                meshCB.metallic = mesh.material.m_metallic;
-                meshCB.roughness = mesh.material.m_roughness;
-                meshCB.opacity = mesh.material.m_opacity;
-                meshCB.textureFlags = mesh.material.GetFlags();
-
-                cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_MESH, allocCtx.gpuAddr);
-
-                if (mesh.material.m_isOnGPU) {
-                    cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_MODEL_TEX_SRV, mesh.material.m_srvHandle.gpuAddr);
-                }
-
-                cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
-                cmdList.IASetIndexBuffer(&mesh.indexBufferView);
-                cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
-            });
-        }
-    });
+            return ELoopConditionFlag::CONTINUE;
+        });
+    }
 }
 void GeometryPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {}
@@ -525,19 +524,21 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_ATMOSPHERE, atmosCBAC.gpuAddr);
     cmdList.SetGraphicsRootDescriptorTable(IDX_ROOT_DESC_TABLE_SRV, rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_TRANSMITTANCE).gpuAddr);
 
-    MemberRef<Model> skyDome = std::nullopt;
+    std::shared_ptr<Model> skyDome;
 
-    scene.ForEachModel([&skyDome](Model& model)
+    scene.m_models.ForEach([&skyDome](EntityID, std::shared_ptr<Model> model) -> LoopCondition
     {
-        if (model.m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE) and model.isOnGPU) {
+        if (model->m_flags.HasLeastAll(NSModel::EModelFlag::ATMOSPHERE) and model->isOnGPU)
+        {
             skyDome = model;
-            return;
+            return ELoopConditionFlag::BREAK;
         }
+        return ELoopConditionFlag::CONTINUE;
     });
 
-    if (not skyDome.has_value()) return;
+    ASSERT(skyDome, "Unable to find sky dome or skydome didn't uploaded to gpu yet");
 
-    skyDome->get().Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+    skyDome->Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix) -> LoopCondition
     {
         NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
         MeshConstants meshCB = allocCtx.As<MeshConstants>();
@@ -557,6 +558,8 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
         cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
         cmdList.IASetIndexBuffer(&mesh.indexBufferView);
         cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+
+        return ELoopConditionFlag::CONTINUE;
     });
 }
 void AtmospherePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
@@ -900,27 +903,27 @@ void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackb
 
     EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-    scene.m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model)
+    scene.m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model) -> LoopCondition
     {
         std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(model->m_registerKey);
 
-        if (not model->m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP)) return;
+        if (not model->m_flags.HasLeastOne(NSModel::EModelFlag::GENERATE_ENV_CUBEMAP)) return ELoopConditionFlag::CONTINUE;
 
         if (regModel->isDirty)
         {
             Capture(DE_REF(model), scene, blackboard, rendererCtx, cmdList);
-            return;
+            return ELoopConditionFlag::CONTINUE;
         }
-        else
+
+        for (NSRenderer::Model::Neighbor& neighbor : regModel->objsInFrustum)
         {
-            for (NSRenderer::Model::Neighbor& neighbor : regModel->objsInFrustum)
+            if (not NSMath::Float3Equals(neighbor.position, model->GetPosition()))
             {
-                if (not NSMath::Float3Equals(neighbor.position, model->GetPosition()))
-                {
-                    regModel->isDirty = true;
-                }
+                regModel->isDirty = true;
             }
         }
+
+        return ELoopConditionFlag::CONTINUE;
     });
 }
 
@@ -1003,19 +1006,19 @@ void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Bl
             m_geomPipeline.Bind(cmdList);
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_CAPTURE, captureCBAC.gpuAddr);
 
-            std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(camera->m_id, NSScene::EIncludeCull::STATIC_OBJECTS | NSScene::EIncludeCull::DYNAMIC_OBJECTS, inModel.m_id).lock();
+            std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(camera->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS | NSScene::EIncCullFlag::DYNAMIC_OBJECTS, inModel.m_id);
 
             for (NSMath::ICullable culled : cullResult->m_culledObjects)
             {
-                ASSERT(scene.m_models.Contains(culled.key));
-                std::shared_ptr<::Model> sceneModel = scene.m_models.Get(culled.key);
+                ASSERT(scene.m_models.Contains(culled.ICullable_Id));
+                std::shared_ptr<::Model> sceneModel = scene.m_models.Get(culled.ICullable_Id);
 
-                ASSERT(regModels.Contains(culled.key));
+                ASSERT(regModels.Contains(sceneModel->m_registerKey));
                 std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(sceneModel->m_registerKey);
 
-                if (regModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) continue;
+                if (regModel->m_flags.HasLeastOne(NSRenderer::ERegModelFlag::UNSEEN_TO_ENV_CAPTURE)) continue;
 
-                sceneModel->Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+                sceneModel->Draw([this, &rendererCtx, &cmdList](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix) -> LoopCondition
                 {
                     NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstants));
                     MeshConstants& meshCB = allocCtx.As<MeshConstants>();
@@ -1035,6 +1038,8 @@ void EnvironmentCubemapPass::Capture(Model& inModel, NSScene::IScene& _scene, Bl
                     cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
                     cmdList.IASetIndexBuffer(&mesh.indexBufferView);
                     cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+
+                    return ELoopConditionFlag::CONTINUE;
                 });
             }
         }
@@ -1298,10 +1303,10 @@ TerrainPass::~TerrainPass()
 TerrainPass& TerrainPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory)
 {
 
-    m_textures[static_cast<size_t>(ETexture::GRASS)] = LoadTexture(L"TerrainPass::GrassTex", L"terrain/grass.jpg", NSTexture::EType::EType_DIFFUSE);
-    m_textures[static_cast<size_t>(ETexture::ROCK)] = LoadTexture(L"TerrainPass::RockTex", L"terrain/rock.jpg", NSTexture::EType::EType_DIFFUSE);
-    m_textures[static_cast<size_t>(ETexture::SNOW)] = LoadTexture(L"TerrainPass::SnowTex", L"terrain/snow.jpg", NSTexture::EType::EType_DIFFUSE);
-    m_textures[static_cast<size_t>(ETexture::DIRT)] = LoadTexture(L"TerrainPass::DirtTex", L"terrain/dirt.jpg", NSTexture::EType::EType_DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::GRASS)] = LoadTexture(L"TerrainPass::GrassTex", L"terrain/grass.jpg", NSTexture::EType::DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::ROCK)] = LoadTexture(L"TerrainPass::RockTex", L"terrain/rock.jpg", NSTexture::EType::DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::SNOW)] = LoadTexture(L"TerrainPass::SnowTex", L"terrain/snow.jpg", NSTexture::EType::DIFFUSE);
+    m_textures[static_cast<size_t>(ETexture::DIRT)] = LoadTexture(L"TerrainPass::DirtTex", L"terrain/dirt.jpg", NSTexture::EType::DIFFUSE);
     //m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)] = NSTexture::LoadTextureWIC(L"TerrainPass::TerrainDiffuseTex", L"terrain/diffuse.png", NSTexture::WICLoadDesc {
     //    .texDesc = {
     //        .textureType = NSTexture::EType::EType_DIFFUSE,
@@ -1376,21 +1381,7 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.RSSetScissorRects(1, &scissor);
 
     std::shared_ptr<NSScene::Camera> camera = scene.GetMainCamera();
-    std::weak_ptr<NSScene::CullResult> _cullResult;
-    camera->cullResults.ForEach([&_cullResult, &scene](EntityID, std::shared_ptr<NSScene::CullResult> result)
-    {
-        if (result->culledSceneKey == scene.m_id and result->flag.HasExact(NSScene::EIncludeCull::TERRAIN))
-        {
-            _cullResult = result;
-        }
-    });
-    if (_cullResult.expired())
-    {
-        _cullResult = scene.Cull(camera->m_id, NSScene::EIncludeCull::TERRAIN);
-    }
-
-    ASSERT(not _cullResult.expired(), "Unable to get cull results");
-    std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
+    std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(camera->m_id, NSScene::EIncCullFlag::TERRAIN);
 
     const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
     const EntityMap<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
@@ -1429,16 +1420,16 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
         ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
-        ASSERT(regPages.Contains(culled.key), "Every Page keys must meet with an element");
+        ASSERT(scePages.Contains(culled.ICullable_Id), "Culled element doesn't meet with a scene page");
 
-        std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(culled.key);
+        std::shared_ptr<const NSScene::TerrainPage> scePage = scePages.Get(culled.ICullable_Id);
 
-        regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk)
+        ASSERT(regPages.Contains(scePage->m_registerKey), "Every Page keys must meet with an element");
+
+        std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(scePage->m_registerKey);
+
+        regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk) -> LoopCondition
         {
-            ASSERT(regPage->chunks.Contains(chunk->m_id), "Chunk doesn't meet with an element");
-
-            std::shared_ptr<const NSTerrain::TerrainChunk> regChunk = regPage->chunks.Get(chunk->m_id);
-
             NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
             {
                 TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
@@ -1448,8 +1439,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
                 cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
                 cbuffer.tessFactorScale = 1.f;
                 cbuffer.textureTilingFactor = 64.f;
-                cbuffer.chunkUVOffset = regChunk->chunkUVOffset;
-                cbuffer.chunkUVScale = regChunk->chunkUVScale;
+                cbuffer.chunkUVOffset = chunk->chunkUVOffset;
+                cbuffer.chunkUVScale = chunk->chunkUVScale;
                 cbuffer.heightmapSrvIndex = heightmapSrvIndex;
                 cbuffer.terrainDiffuseSrvIndex = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset.index;
                 cbuffer.splatSrvIndices[0] = m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset.index;
@@ -1460,9 +1451,11 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
-            cmdList.IASetVertexBuffers(0, 1, &regChunk->vertexBufferView);
-            cmdList.IASetIndexBuffer(&regChunk->patchIndexBufferView);
-            cmdList.DrawIndexedInstanced(regChunk->patchIndexCount, 1, 0, 0, 0);
+            cmdList.IASetVertexBuffers(0, 1, &chunk->vertexBufferView);
+            cmdList.IASetIndexBuffer(&chunk->patchIndexBufferView);
+            cmdList.DrawIndexedInstanced(chunk->patchIndexCount, 1, 0, 0, 0);
+
+            return ELoopConditionFlag::CONTINUE;
         });
     }
 
@@ -1691,14 +1684,7 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
             AddLine(p3, p0, color);
         };
 
-        std::weak_ptr<NSScene::CullResult> _cullResult;
-        if (not mainCam->FindCull(NSScene::EIncludeCull::TERRAIN, scene.m_id, _cullResult))
-        {
-            _cullResult = scene.Cull(mainCam->m_id, NSScene::EIncludeCull::TERRAIN);
-        }
-        ASSERT(not _cullResult.expired(), "Unable to cull terrain");
-
-        std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
+        std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
         const XMFLOAT4 hiddenChunkColor{ 0.65f, 0.12f, 0.10f, 1.0f };
         const XMFLOAT4 visibleChunkColor{ 0.10f, 0.85f, 0.25f, 1.0f };
@@ -1706,23 +1692,25 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
 
         for (NSMath::ICullable culled : cullResult->m_culledObjects)
         {
-            ASSERT(terrain.pages.Contains(culled.key), "Invalid Terrain page key");
-            std::shared_ptr<NSScene::TerrainPage> page = terrain.pages.Get(culled.key);
+            ASSERT(terrain.pages.Contains(culled.ICullable_Id), "Invalid Terrain page key");
+            std::shared_ptr<NSScene::TerrainPage> page = terrain.pages.Get(culled.ICullable_Id);
 
-            ASSERT(not std::holds_alternative<NSMath::SBoundAABB>(page->bound), "Terrain page has an unsupported bounding type");
+            ASSERT(std::holds_alternative<NSMath::SBoundAABB>(page->ICullable_Bound), "Terrain page has an unsupported bounding type");
 
-            auto& aabb = std::get<NSMath::SBoundAABB>(page->bound);
+            auto& aabb = std::get<NSMath::SBoundAABB>(page->ICullable_Bound);
             page->isVisibleTEMP = true;
 
             AddAabbTop(aabb, visibleChunkColor);
         }
-        terrain.pages.ForEach([&](EntityID, std::shared_ptr<const NSScene::TerrainPage> page)
+        terrain.pages.ForEach([&](EntityID, std::shared_ptr<const NSScene::TerrainPage> page) -> LoopCondition
         {
-            if (page->isVisibleTEMP) return;
+            if (page->isVisibleTEMP) return ELoopConditionFlag::CONTINUE;
 
-            auto& bound = std::get<NSMath::SBoundAABB>(page->bound);
+            auto& bound = std::get<NSMath::SBoundAABB>(page->ICullable_Bound);
 
             AddAabbTop(bound, hiddenChunkColor);
+
+            return ELoopConditionFlag::CONTINUE;
         });
 
         const XMVECTOR frustumEye = mainCam->camEye;
@@ -1819,15 +1807,17 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
     float minZ = std::numeric_limits<float>::max();
     float maxZ = std::numeric_limits<float>::lowest();
 
-    terrain.pages.ForEach([&minX, &maxX, &minZ, &maxZ](EntityID, std::shared_ptr<const NSScene::TerrainPage> page)
+    terrain.pages.ForEach([&minX, &maxX, &minZ, &maxZ](EntityID, std::shared_ptr<const NSScene::TerrainPage> page) -> LoopCondition
     {
-        ASSERT(std::holds_alternative<NSMath::SBoundAABB>(page->bound), "Terrain page has an unsupported bounding type");
-        auto boundingBox = std::get<NSMath::SBoundAABB>(page->bound);
+        ASSERT(std::holds_alternative<NSMath::SBoundAABB>(page->ICullable_Bound), "Terrain page has an unsupported bounding type");
+        auto boundingBox = std::get<NSMath::SBoundAABB>(page->ICullable_Bound);
 
         minX = std::min(minX, boundingBox.min.x);
         maxX = std::max(maxX, boundingBox.max.x);
         minZ = std::min(minZ, boundingBox.min.z);
         maxZ = std::max(maxZ, boundingBox.max.z);
+
+        return ELoopConditionFlag::CONTINUE;
     });
 
     const float centerX = (minX + maxX) * 0.5f;
@@ -2095,14 +2085,7 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         );
         ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
 
-        std::weak_ptr<NSScene::CullResult> _cullResult;
-        if (not mainCam->FindCull(NSScene::EIncludeCull::TERRAIN, scene.m_id, _cullResult))
-        {
-            _cullResult = scene.Cull(mainCam->m_id, NSScene::EIncludeCull::TERRAIN);
-        }
-        ASSERT(not _cullResult.expired(), "Unable to cull terrain");
-
-        std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
+        std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
         const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
         const EntityMap<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
@@ -2116,11 +2099,15 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
             ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
-            ASSERT(regPages.Contains(culled.key), "Every Page keys must meet with an element");
+            ASSERT(scePages.Contains(culled.ICullable_Id), "Culled element doesn't meet with a scene page");
 
-            std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(culled.key);
+            std::shared_ptr<const NSScene::TerrainPage> scePage = scePages.Get(culled.ICullable_Id);
 
-            regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk)
+            ASSERT(regPages.Contains(scePage->m_registerKey), "Every Page keys must meet with an element");
+
+            std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(scePage->m_registerKey);
+
+            regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk) -> LoopCondition
             {
                 NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
                 {
@@ -2146,6 +2133,8 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                 cmdList.IASetVertexBuffers(0, 1, &chunk->vertexBufferView);
                 cmdList.IASetIndexBuffer(&chunk->patchIndexBufferView);
                 cmdList.DrawIndexedInstanced(chunk->patchIndexCount, 1, 0, 0, 0);
+
+                return ELoopConditionFlag::CONTINUE;
             });
         }
     }
@@ -2161,26 +2150,19 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
 
         EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-        std::weak_ptr<NSScene::CullResult> _cullResult;
-        if (not mainCam->FindCull(NSScene::EIncludeCull::STATIC_OBJECTS | NSScene::EIncludeCull::DYNAMIC_OBJECTS, scene.m_id, _cullResult))
-        {
-            _cullResult = scene.Cull(mainCam->m_id, NSScene::EIncludeCull::STATIC_OBJECTS | NSScene::EIncludeCull::DYNAMIC_OBJECTS);
-        }
-        ASSERT(not _cullResult.expired(), "Unable to cull terrain");
-
-        std::shared_ptr<NSScene::CullResult> cullResult = _cullResult.lock();
+        std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS | NSScene::EIncCullFlag::DYNAMIC_OBJECTS);
 
         for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
-            ASSERT(scene.m_models.Contains(culled.key), "Invalid model key");
-            std::shared_ptr<Model> sceneModel = scene.m_models.Get(culled.key);
+            ASSERT(scene.m_models.Contains(culled.ICullable_Id), "Invalid model key");
+            std::shared_ptr<Model> sceneModel = scene.m_models.Get(culled.ICullable_Id);
 
-            if (not sceneModel->m_flags.HasLeastOne(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL)) continue;
+            if (not sceneModel->m_flags.HasLeastOne(NSModel::EModelFlag::PBR_MODEL)) continue;
 
             ASSERT(regModels.Contains(sceneModel->m_registerKey), "Invalid model key");
             std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(sceneModel->m_registerKey);
 
-            sceneModel->Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix)
+            sceneModel->Draw([this, &rendererCtx, &cmdList, &sceneModel](Mesh& mesh, UINT meshIndex, DirectX::XMMATRIX worldMatrix) -> LoopCondition
             {
                 NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(MeshConstantsZPrepass));
                 MeshConstantsZPrepass& meshCB = allocCtx.As<MeshConstantsZPrepass>();
@@ -2192,6 +2174,8 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                 cmdList.IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
                 cmdList.IASetIndexBuffer(&mesh.indexBufferView);
                 cmdList.DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+
+                return ELoopConditionFlag::CONTINUE;
             });
         }
     }

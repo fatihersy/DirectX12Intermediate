@@ -202,13 +202,16 @@ void app::LoadAssets()
             };
             mainCam->SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
 
-            this->m_renderer.GetTerrain().GetPages().ForEach([this](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page)
+            this->m_renderer.GetTerrain().GetPages().ForEach([this](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page) -> LoopCondition
             {
-                m_scene.m_terrain.pages.Add(std::make_shared<NSScene::TerrainPage>(NSScene::TerrainPage{
-                    .index = page->index,
-                    .m_registerKey = page->key,
-                    .bound = page->bound
-                }));
+                auto scenePage = std::make_shared<NSScene::TerrainPage>();
+                scenePage->index = page->index;
+                scenePage->m_registerKey = page->m_id;
+                scenePage->ICullable_Bound = page->ICullable_Bound;
+                scenePage->ICullable_Id = scenePage->m_id;
+                m_scene.m_terrain.pages.Add(scenePage);
+
+                return ELoopConditionFlag::CONTINUE;
             });
 
             m_scene.m_terrain.isInitialized = true;
@@ -227,10 +230,10 @@ void app::LoadAssets()
                 ctx
             );
 
-            skyDome->m_flags.Set(NSModel::EModelFlag::MODEL_FLAG_ATMOSPHERE);
+            skyDome->m_flags.Set(NSModel::EModelFlag::ATMOSPHERE);
 
             skyDome->UploadGPU(ctx, cmdList);
-            skyDome->m_registerKey = ctx.registerModel(skyDome->m_name, skyDome->m_id, cmdList, NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)->m_id;
+            skyDome->m_registerKey = ctx.registerModel(skyDome->m_name, skyDome->m_id, cmdList, NSRenderer::ERegModelFlag::UNSEEN_TO_ENV_CAPTURE)->m_id;
         }
 
         {
@@ -267,12 +270,14 @@ void app::LoadAssets()
                     desc,
                     ctx
                 );
-                model->m_flags.Set(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP);
-                model->m_flags.Set(NSModel::EModelFlag::MODEL_FLAG_PBR_MODEL);
+                model->m_flags.Set(NSModel::EModelFlag::GENERATE_ENV_CUBEMAP);
+                model->m_flags.Set(NSModel::EModelFlag::PBR_MODEL);
+                model->m_flags.Set(NSModel::EModelFlag::STATIC);
 
-                ASSERT(std::holds_alternative<NSMath::SBoundSphere>(model->bound), "Model has an unsupported bounding type");
+                model->ICullable_Id = model->m_id;
 
-                auto& modelBB = std::get<NSMath::SBoundSphere>(model->bound);
+                ASSERT(std::holds_alternative<NSMath::SBoundSphere>(model->ICullable_Bound), "Model has an unsupported bounding type");
+                auto& modelBB = std::get<NSMath::SBoundSphere>(model->ICullable_Bound);
 
                 modelBB.radius = desc.desc.radius;
                 modelBB.sliceCount = desc.desc.sliceCount;
@@ -284,19 +289,21 @@ void app::LoadAssets()
 
         const DirectX::XMMATRIX envCamProj = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, 1.f, m_scene.NEAR_CLIP, m_scene.FAR_CLIP);
 
-        m_scene.ForEachModel([this, &ctx, &sDomeKey, &envCamProj](Model& model)
+        m_scene.m_models.ForEach([this, &ctx, &sDomeKey, &envCamProj](EntityID, std::shared_ptr<Model> model) -> LoopCondition
         {
-            if (model.m_flags.HasLeastAll(NSModel::EModelFlag::MODEL_FLAG_GENERATE_ENV_CUBEMAP))
+            if(model->m_flags.HasLeastOne(NSModel::EModelFlag::ATMOSPHERE)) return ELoopConditionFlag::CONTINUE;
+
+            if (model->m_flags.HasLeastAll(NSModel::EModelFlag::GENERATE_ENV_CUBEMAP))
             {
-                model.envCameraKeys[0] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 1, 0, 0, 0 }, { 0, 1, 0, 0 }}))->m_id;
-                model.envCameraKeys[1] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), {-1, 0, 0, 0 }, { 0, 1, 0, 0 }}))->m_id;
-                model.envCameraKeys[2] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0, 1, 0, 0 }, { 0, 0,-1, 0 }}))->m_id;
-                model.envCameraKeys[3] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0,-1, 0, 0 }, { 0, 0, 1, 0 }}))->m_id;
-                model.envCameraKeys[4] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0, 0, 1, 0 }, { 0, 1, 0, 0 }}))->m_id;
-                model.envCameraKeys[5] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model.GetPosition(), { 0, 0,-1, 0 }, { 0, 1, 0, 0 }}))->m_id;
+                model->envCameraKeys[0] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model->GetPosition(), { 1, 0, 0, 0 }, { 0, 1, 0, 0 }}))->m_id;
+                model->envCameraKeys[1] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model->GetPosition(), {-1, 0, 0, 0 }, { 0, 1, 0, 0 }}))->m_id;
+                model->envCameraKeys[2] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model->GetPosition(), { 0, 1, 0, 0 }, { 0, 0,-1, 0 }}))->m_id;
+                model->envCameraKeys[3] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model->GetPosition(), { 0,-1, 0, 0 }, { 0, 0, 1, 0 }}))->m_id;
+                model->envCameraKeys[4] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model->GetPosition(), { 0, 0, 1, 0 }, { 0, 1, 0, 0 }}))->m_id;
+                model->envCameraKeys[5] = m_scene.m_cameras.Add(std::make_shared<NSScene::Camera>(NSScene::Camera{envCamProj, model->GetPosition(), { 0, 0,-1, 0 }, { 0, 1, 0, 0 }}))->m_id;
             }
 
-            model.ForEach([model, &ctx](Mesh& mesh, UINT meshIndex)
+            model->ForEach([model, &ctx](Mesh& mesh, UINT meshIndex) -> LoopCondition
             {
                 // Pre upload
                 {
@@ -341,15 +348,19 @@ void app::LoadAssets()
                         ));
                     }
                 }
+
+                return ELoopConditionFlag::CONTINUE;
             });
+
+            return ELoopConditionFlag::CONTINUE;
         });
 
         ASSERT(ctx.barrierBatch.get().Execute(NSBarrier::kApp_beginModelLoad, cmdList));
 
-        m_scene.m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model)
+        m_scene.m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model) -> LoopCondition
         {
             model->UploadGPU(ctx, cmdList, false);
-            std::shared_ptr<NSRenderer::Model> regModel = ctx.registerModel(model->m_name, model->m_id, cmdList, NSRenderer::ERegModelFlag::MODEL_FLAG_NONE);
+            std::shared_ptr<NSRenderer::Model> regModel = ctx.registerModel(model->m_name, model->m_id, cmdList, NSRenderer::ERegModelFlag::UNDEFINED);
             model->m_registerKey = regModel->m_id;
 
             ctx.barrierBatch.get().Add(NSBarrier::kApp_endModelLoad, CD3DX12_RESOURCE_BARRIER::Transition(
@@ -357,6 +368,8 @@ void app::LoadAssets()
                 D3D12_RESOURCE_STATE_COMMON,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
             ));
+
+            return ELoopConditionFlag::CONTINUE;
         });
 
         ASSERT(ctx.barrierBatch.get().Execute(NSBarrier::kApp_endModelLoad, cmdList));
@@ -375,8 +388,7 @@ void app::OnUpdate()
 {
     m_timer.Tick(NULL);
 
-    app::UpdateKeyBindings();
-    app::UpdateMouseBindings();
+    app::UpdateBindings();
 
     m_scene.OnUpdate();
 };
@@ -432,9 +444,11 @@ void app::ToggleFullScreen()
     OnResize(monitorWidth, monitorHeight);
 };
 
-void app::UpdateKeyBindings()
+void app::UpdateBindings()
 {
     auto kbState = m_keyboard->GetState();
+    auto mouseState = m_mouse->GetState();
+
     m_keyboardTracker.Update(kbState);
 
     if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::F1))
@@ -460,9 +474,10 @@ void app::UpdateKeyBindings()
 
     // Camera Movement
     {
-        DirectX::XMVECTOR move = DirectX::XMVectorZero();
-
         std::shared_ptr<NSScene::Camera> mainCam = m_scene.GetMainCamera();
+
+        DirectX::XMVECTOR move = DirectX::XMVectorZero();
+        bool moved{};
 
         if (kbState.W) {
             move = DirectX::XMVectorAdd(move, mainCam->camFwd);
@@ -491,31 +506,39 @@ void app::UpdateKeyBindings()
             move = DirectX::XMVector3Normalize(move);
             move = DirectX::XMVectorScale(move, mainCam->camSpeed * static_cast<FLOAT>(m_timer.GetElapsedSeconds()));
             mainCam->camEye = DirectX::XMVectorAdd(mainCam->camEye, move);
+
+            moved = true;
         }
 
-        if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::NumPad1))
+        if (mouseState.positionMode == DirectX::Mouse::MODE_RELATIVE)
         {
-            NSRenderPass::IRenderPass& zPrepass = m_renderer.GetPass(NSRenderPass::RenderPassID::PASSID_Z);
-            zPrepass.SetIsEnabled(not zPrepass.IsEnabled());
+            FLOAT dx = static_cast<FLOAT>(mouseState.x) * mainCam->lookSensitivity;
+            FLOAT dy = static_cast<FLOAT>(mouseState.y) * mainCam->lookSensitivity;
+
+            if (std::abs(dx) > DirectX::g_XMEpsilon.f[0])
+            {
+                mainCam->camYaw += dx;
+                moved = true;
+            }
+            if (std::abs(dy) > DirectX::g_XMEpsilon.f[0])
+            {
+                mainCam->camPitch -= dy;
+                mainCam->camPitch = std::clamp(mainCam->camPitch, -89.f, 89.f);
+                moved = true;
+            }
+
+            m_mouse->ResetScrollWheelValue();
+        }
+
+        if (moved)
+        {
+            mainCam->generation++;
         }
     }
-}
-void app::UpdateMouseBindings()
-{
-    auto mouseState = m_mouse->GetState();
 
-    std::shared_ptr<NSScene::Camera> mainCam = m_scene.GetMainCamera();
-
-    if (mouseState.positionMode == DirectX::Mouse::MODE_RELATIVE)
+    if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::NumPad1))
     {
-        FLOAT dx = static_cast<FLOAT>(mouseState.x) * mainCam->lookSensitivity;
-        FLOAT dy = static_cast<FLOAT>(mouseState.y) * mainCam->lookSensitivity;
-
-        mainCam->camYaw += dx;
-        mainCam->camPitch -= dy;
-
-        mainCam->camPitch = std::clamp(mainCam->camPitch, -89.f, 89.f);
-
-        m_mouse->ResetScrollWheelValue();
+        NSRenderPass::IRenderPass& zPrepass = m_renderer.GetPass(NSRenderPass::RenderPassID::PASSID_Z);
+        zPrepass.SetIsEnabled(not zPrepass.IsEnabled());
     }
 }

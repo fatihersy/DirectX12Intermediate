@@ -543,7 +543,7 @@ std::shared_ptr<NSRenderer::Model> Renderer::RegisterModel(std::wstring_view mod
     {
         // Cubemap Texture
         {
-            D3D12_RESOURCE_FLAGS flags = rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
+            D3D12_RESOURCE_FLAGS flags = rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::UNSEEN_TO_ENV_CAPTURE)
                 ? D3D12_RESOURCE_FLAG_NONE
                 : D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
@@ -562,7 +562,7 @@ std::shared_ptr<NSRenderer::Model> Renderer::RegisterModel(std::wstring_view mod
 
             constexpr float clearColor[] = { 0.f, 0.f, 0.f, 1.f };
             D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_R16G16B16A16_FLOAT, clearColor);
-            const D3D12_CLEAR_VALUE* pOptimizedClearValue = rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)
+            const D3D12_CLEAR_VALUE* pOptimizedClearValue = rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::UNSEEN_TO_ENV_CAPTURE)
                 ? nullptr
                 : &clearVal;
 
@@ -606,7 +606,7 @@ std::shared_ptr<NSRenderer::Model> Renderer::RegisterModel(std::wstring_view mod
         }
 
         // RTVs
-        if (not rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
+        if (not rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::UNSEEN_TO_ENV_CAPTURE)) {
             rendererModel->m_envCubemap.rtvHandle = AllocRTVStatic(rendererModel->m_envCubemap.NUM_FACES);
             for (UINT face = 0u; face < rendererModel->m_envCubemap.NUM_FACES; face++)
             {
@@ -661,7 +661,7 @@ std::shared_ptr<NSRenderer::Model> Renderer::RegisterModel(std::wstring_view mod
         }
 
         // UAVs
-        if (not rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::MODEL_FLAG_UNSEEN_TO_ENV_CAPTURE)) {
+        if (not rendererModel->m_flags.HasLeastAll(NSRenderer::ERegModelFlag::UNSEEN_TO_ENV_CAPTURE)) {
             const UINT uavCount = rendererModel->m_envCubemap.MIP_COUNT - 1u;
             rendererModel->m_envCubemap.uavHandle = AllocSRVStatic(uavCount);
 
@@ -824,7 +824,7 @@ void Renderer::CreateFallbackTexture()
 
     Execute([&fbTex, &fbHandle, &device](NSRenderer::Ctx ctx, NSDX12::GraphicsCommandList cmdList)
     {
-        fbTex.desc.textureType = NSTexture::EType::EType_DIFFUSE;
+        fbTex.desc.textureType = NSTexture::EType::DIFFUSE;
         fbTex.width = 64;
         fbTex.height = 64;
         fbTex.desc.format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;

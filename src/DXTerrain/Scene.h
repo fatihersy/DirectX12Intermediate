@@ -23,7 +23,7 @@ public:
         return m_models.Contains(entKey);
     }
 
-    std::weak_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncludeCull> flag, ObserverKey excludeKey = {}) override;
+    std::shared_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncCullFlag> flag, ObserverKey excludeKey = {}) override;
 
     NSScene::Terrain& GetTerrain() override {
         return m_terrain;
@@ -63,8 +63,6 @@ public:
 
         return false;
     }
-
-    void ForEachModel(std::function<void(Model& model)> ForEach);
 
     void SetupCameraInfiniteProjection(NSScene::Camera& camera, float fovY, float aspect, float nearZ);
 
