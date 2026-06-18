@@ -1,11 +1,12 @@
 #include "stdafx.h"
 #include "RenderPass.h"
 
+#include "TerrainTypes.h"
+
 #include "IApp.h"
 #include "DXSampleHelper.h"
 #include "Blackboard.h"
 #include "Scene.h"
-#include "Terrain.h"
 #include "Texture.h"
 
 using namespace NSRenderPass;
@@ -182,10 +183,7 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
 
     EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-    std::weak_ptr<NSScene::Camera> wpMainCamera = scene.GetMainCamera();
-    ASSERT(wpMainCamera.lock(), "Main camera is invalid");
-
-    auto mainCam = wpMainCamera.lock();
+    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
 
     std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS);
 
@@ -1417,6 +1415,9 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
     const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
+    D3D12_INDEX_BUFFER_VIEW ibView = terrain.GetSharedPatchIndexBufferView();
+    cmdList.IASetIndexBuffer(&ibView);
+
     for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
         ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
@@ -1426,39 +1427,37 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
         ASSERT(regPages.Contains(scePage->m_registerKey), "Every Page keys must meet with an element");
 
-        std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(scePage->m_registerKey);
+        std::shared_ptr<NSTerrain::TerrainPage> regPage = std::const_pointer_cast<NSTerrain::TerrainPage>(regPages.Get(scePage->m_registerKey));
 
-        regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk) -> LoopCondition
+        std::shared_ptr<NSTerrain::GPUSlot> slot = const_cast<NSTerrain::ITerrainView&>(terrain).GetGPUSlot(regPage->m_id, cmdList, rendererCtx);
+
+        if (slot != nullptr && slot->isReady)
         {
             NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
             {
                 TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
                 DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
                 cbuffer.maxHeight = desc.maxHeight;
-                cbuffer.worldTexelSpacingX = worldTexelSpacingX;
-                cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
+                cbuffer.worldTexelSpacingX = desc.worldWidth / 16384.f;
+                cbuffer.worldTexelSpacingZ = desc.worldDepth / 16384.f;
                 cbuffer.tessFactorScale = 1.f;
                 cbuffer.textureTilingFactor = 64.f;
-                cbuffer.chunkUVOffset = chunk->chunkUVOffset;
-                cbuffer.chunkUVScale = chunk->chunkUVScale;
-                cbuffer.heightmapSrvIndex = heightmapSrvIndex;
-                cbuffer.terrainDiffuseSrvIndex = m_textures[static_cast<size_t>(ETexture::TERRAIN_DIFFUSE)].srvOffset.index;
+                cbuffer.chunkUVOffset = { 0.f, 0.f };
+                cbuffer.chunkUVScale = { 1.f, 1.f };
+                cbuffer.heightmapSrvIndex = slot->heightmapSRVIndex;
+                cbuffer.terrainDiffuseSrvIndex = slot->diffuseSRVIndex;
                 cbuffer.splatSrvIndices[0] = m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset.index;
                 cbuffer.splatSrvIndices[1] = m_textures[static_cast<size_t>(ETexture::ROCK)].srvOffset.index;
                 cbuffer.splatSrvIndices[2] = m_textures[static_cast<size_t>(ETexture::SNOW)].srvOffset.index;
                 cbuffer.splatSrvIndices[3] = m_textures[static_cast<size_t>(ETexture::DIRT)].srvOffset.index;
-            };
+            }
 
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
-            cmdList.IASetVertexBuffers(0, 1, &chunk->vertexBufferView);
-            cmdList.IASetIndexBuffer(&chunk->patchIndexBufferView);
-            cmdList.DrawIndexedInstanced(chunk->patchIndexCount, 1, 0, 0, 0);
-
-            return ELoopConditionFlag::CONTINUE;
-        });
+            cmdList.IASetVertexBuffers(0, 1, &slot->vertexBufferView);
+            cmdList.DrawIndexedInstanced(terrain.GetSharedPatchIndexCount(), 1, 0, 0, 0);
+        }
     }
-
 };
 void TerrainPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {
@@ -2096,6 +2095,9 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
         const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
 
+        D3D12_INDEX_BUFFER_VIEW ibView = terrain.GetSharedPatchIndexBufferView();
+        cmdList.IASetIndexBuffer(&ibView);
+
         for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
             ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
@@ -2105,37 +2107,36 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
 
             ASSERT(regPages.Contains(scePage->m_registerKey), "Every Page keys must meet with an element");
 
-            std::shared_ptr<const NSTerrain::TerrainPage> regPage = regPages.Get(scePage->m_registerKey);
+            std::shared_ptr<NSTerrain::TerrainPage> regPage = std::const_pointer_cast<NSTerrain::TerrainPage>(regPages.Get(scePage->m_registerKey));
 
-            regPage->chunks.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainChunk> chunk) -> LoopCondition
+            std::shared_ptr<NSTerrain::GPUSlot> slot = const_cast<NSTerrain::ITerrainView&>(terrain).GetGPUSlot(regPage->m_id, cmdList, rendererCtx);
+
+            if (slot != nullptr && slot->isReady)
             {
                 NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
                 {
                     TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
                     DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
                     cbuffer.maxHeight = desc.maxHeight;
-                    cbuffer.worldTexelSpacingX = worldTexelSpacingX;
-                    cbuffer.worldTexelSpacingZ = worldTexelSpacingZ;
+                    cbuffer.worldTexelSpacingX = desc.worldWidth / 16384.f;
+                    cbuffer.worldTexelSpacingZ = desc.worldDepth / 16384.f;
                     cbuffer.tessFactorScale = 1.f;
                     cbuffer.textureTilingFactor = 64.f;
-                    cbuffer.chunkUVOffset = chunk->chunkUVOffset;
-                    cbuffer.chunkUVScale = chunk->chunkUVScale;
-                    cbuffer.heightmapSrvIndex = heightmapSrvIndex;
-                    cbuffer.terrainDiffuseSrvIndex = rendererCtx.fallbackSRV.get().index;
-                    cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.get().index;
-                    cbuffer.splatSrvIndices[1] = rendererCtx.fallbackSRV.get().index;
-                    cbuffer.splatSrvIndices[2] = rendererCtx.fallbackSRV.get().index;
-                    cbuffer.splatSrvIndices[3] = rendererCtx.fallbackSRV.get().index;
-                };
+                    cbuffer.chunkUVOffset = { 0.f, 0.f };
+                    cbuffer.chunkUVScale = { 1.f, 1.f };
+                    cbuffer.heightmapSrvIndex = slot->heightmapSRVIndex;
+                    cbuffer.terrainDiffuseSrvIndex = rendererCtx.fallbackSRV.index;
+                    cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.index;
+                    cbuffer.splatSrvIndices[1] = rendererCtx.fallbackSRV.index;
+                    cbuffer.splatSrvIndices[2] = rendererCtx.fallbackSRV.index;
+                    cbuffer.splatSrvIndices[3] = rendererCtx.fallbackSRV.index;
+                }
 
                 cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
-                cmdList.IASetVertexBuffers(0, 1, &chunk->vertexBufferView);
-                cmdList.IASetIndexBuffer(&chunk->patchIndexBufferView);
-                cmdList.DrawIndexedInstanced(chunk->patchIndexCount, 1, 0, 0, 0);
-
-                return ELoopConditionFlag::CONTINUE;
-            });
+                cmdList.IASetVertexBuffers(0, 1, &slot->vertexBufferView);
+                cmdList.DrawIndexedInstanced(terrain.GetSharedPatchIndexCount(), 1, 0, 0, 0);
+            }
         }
     }
 

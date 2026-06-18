@@ -24,6 +24,9 @@ void Scene::OnDestroy(NSRenderer::Ctx rendererCtx)
 
         return ELoopConditionFlag::CONTINUE;
     });
+
+    m_models.Clear();
+    m_cameras.Clear();
 }
 
 void Scene::OnUpdate()

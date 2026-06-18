@@ -256,7 +256,7 @@ namespace NSRenderer
 
         bool isOnGPU{};
         bool isDirty{};
-        uint32_t generation{};
+        uint64_t generation{};
 
         static constexpr UINT PER_FACE_RESOLUTION = 128u;
         static constexpr UINT NUM_FACES = 6u;
@@ -326,6 +326,14 @@ namespace NSRenderer
         ComPtr<ID3D12Resource2>& outDSV;
     };
 
+    struct RendererDescription
+    {
+        HWND wnd = nullptr;
+        UINT width{};
+        UINT height{};
+        uint32_t streamingDistance{};
+    };
+
     struct Ctx
     {
         Ctx(
@@ -342,7 +350,7 @@ namespace NSRenderer
             FnConstAlloc_t fn_constAlloc,
             FnRendererModelRegister_t fn_registerModel,
             FnRendererModelUnload_t fn_unloadModel,
-            std::reference_wrapper<const NSDescriptor::Handle> in_fallbackSRV,
+            NSDescriptor::Handle in_fallbackSRV,
             std::reference_wrapper<NSBarrier::IBarrierBatch> in_barrierBatch,
             FnRendererFlagHasLeastOne_t fn_RendererFlagHasLeastOne,
             FnRendererFlagHasLeastAll_t fn_RendererFlagHasLeastAll,
@@ -350,7 +358,8 @@ namespace NSRenderer
             FnRendererFlagEmpty_t fn_RendererFlagEmpty,
             FnRendererFlagSet_t fn_RendererFlagSet,
             FnRendererFlagUnSet_t fn_RendererFlagUnSet,
-            FnRendererFlagToggle_t fn_RendererFlagToggle
+            FnRendererFlagToggle_t fn_RendererFlagToggle,
+            RendererDescription inRendererDesc
         )
         :   allocSRVRing(std::move(fn_allocSRVRing)),
             allocSRVStatic(std::move(fn_allocSRVStatic)),
@@ -373,7 +382,8 @@ namespace NSRenderer
             rendererFlagEmpty(fn_RendererFlagEmpty),
             rendererFlagSet(fn_RendererFlagSet),
             rendererFlagUnSet(fn_RendererFlagUnSet),
-            rendererFlagToggle(fn_RendererFlagToggle)
+            rendererFlagToggle(fn_RendererFlagToggle),
+            rendererDesc(inRendererDesc)
         {};
 
         FnDescAlloc_t allocSRVRing;
@@ -389,7 +399,7 @@ namespace NSRenderer
         FnConstAlloc_t constAlloc;
         FnRendererModelRegister_t registerModel;
         FnRendererModelUnload_t unloadModel;
-        std::reference_wrapper<const NSDescriptor::Handle> fallbackSRV;
+        const NSDescriptor::Handle fallbackSRV;
         std::reference_wrapper<NSBarrier::IBarrierBatch> barrierBatch;
         FnRendererFlagHasLeastOne_t rendererFlagHasLeastOne;
         FnRendererFlagHasLeastAll_t rendererFlagHasLeastAll;
@@ -398,6 +408,7 @@ namespace NSRenderer
         FnRendererFlagSet_t rendererFlagSet;
         FnRendererFlagUnSet_t rendererFlagUnSet;
         FnRendererFlagToggle_t rendererFlagToggle;
+        RendererDescription rendererDesc;
     };
 }
 

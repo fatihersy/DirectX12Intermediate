@@ -16,7 +16,7 @@ public:
     Renderer() {}
     ~Renderer();
 
-    void Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, HWND wnd, UINT width, UINT height);
+    void Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSRenderer::RendererDescription desc);
 
     void BeginFrame();
     void DrawScene(NSScene::IScene& scene);
@@ -116,7 +116,7 @@ public:
                 return this->RegisterModel(modelName, key, cmdList, flag);
             },
             [this](ObserverKey key) { this->UnloadModel(key); },
-            std::cref(m_fallbackTextureSRVhandle),
+            m_fallbackTextureSRVhandle,
             GetBarrierBatch(),
             [this](Flag<NSRenderer::ERendererFlag> flag) -> bool { return this->m_flag.HasLeastOne(flag); },
             [this](Flag<NSRenderer::ERendererFlag> flag) -> bool { return this->m_flag.HasLeastAll(flag); },
@@ -124,7 +124,8 @@ public:
             [this]()                                     -> bool { return this->m_flag.Empty(); },
             [this](Flag<NSRenderer::ERendererFlag> flag) -> void { this->m_flag.Set(flag); },
             [this](Flag<NSRenderer::ERendererFlag> flag) -> void { this->m_flag.UnSet(flag); },
-            [this](Flag<NSRenderer::ERendererFlag> flag) -> void { this->m_flag.Toggle(flag); }
+            [this](Flag<NSRenderer::ERendererFlag> flag) -> void { this->m_flag.Toggle(flag); },
+            m_desc
         );
     }
     NSRenderPass::DebugUtils& GetDebugUtils() {
@@ -151,7 +152,7 @@ private:
 
     ComPtr<ID3D12Fence1> m_fence;
     HANDLE m_fenceEvent = nullptr;
-    UINT32 m_fenceGeneration{};
+    UINT64 m_fenceGeneration{};
 
     ConstantAllocator m_constantAllocator;
 
@@ -174,8 +175,7 @@ private:
 
     std::unique_ptr<ShaderCompiler> m_shaderCompiler;
 
-    uint32_t m_width{};
-    uint32_t m_height{};
+    NSRenderer::RendererDescription m_desc;
 
     void DrawDebugImage(NSScene::IScene& scene);
 

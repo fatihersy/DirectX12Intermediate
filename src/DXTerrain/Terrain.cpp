@@ -324,6 +324,8 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
         m_desc.pageCountZ = srcManifest.pageCountZ;
     }
 
+    ASSERT(srcManifest.pageCountX < 100 and srcManifest.pageCountZ < 100, "Too many pages tried to create");
+
     if (PagesExists())
     {
         LoadPagesManifest();
@@ -343,36 +345,227 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
     ASSERT(pageManifest.isPresent);
     ASSERT(m_pages.Size() == static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ);
 
-    ASSERT(srcManifest.pageCountX < 100 and srcManifest.pageCountZ < 100, "Too many pages tried to create");
-
-    std::wstring pageNameHeightmap = L"page_00_00::HeightmapBin";
-    std::wstring pageNameDiffuse = L"page_00_00::DiffuseBin";
-
-    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
+    // Dynamic Pool Calculation
+    uint32_t streamingDistance = rendererCtx.rendererDesc.streamingDistance;
+    uint32_t poolSize = 58; // Default to 58 slots (for R = 2000m)
+    if (streamingDistance > 0)
     {
-        ASSERT(page->residency == TerrainPage::EPageResidency::Present, "Page:(%d,%d) is missing or corrupted", page->index.gridX, page->index.gridZ);
+        float pArea = 512.f * 512.f;
+        float sArea = DirectX::XM_PI * static_cast<float>(streamingDistance * streamingDistance);
+        poolSize = static_cast<uint32_t>(std::ceil(sArea / pArea) * 1.2f);
+    }
 
-        WritePageName(pageNameHeightmap, 0u, page->index.gridX, page->index.gridZ);
-        WritePageName(pageNameDiffuse, 0u, page->index.gridX, page->index.gridZ);
+    m_gpuPool.Clear();
+    m_slotKeys.clear();
+    m_slotKeys.reserve(poolSize);
+    m_pageToSlot.assign(static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ, -1);
 
-        page->heightTexturePage = LoadPageTextureBin(
-            pageNameHeightmap,
-            page->heightTexturePage.path,
-            pageManifest.height,
-            NSTexture::EType::HEIGHT
+    const UINT vertexBufferSize = pageManifest.height.pageWidth * pageManifest.height.pageHeight * sizeof(Vertex);
+
+    for (uint32_t i = 0; i < poolSize; ++i)
+    {
+        auto slot = m_gpuPool.Add();
+        m_slotKeys.push_back(slot->m_id);
+
+        slot->virtualPageIndex = -1;
+        slot->lastFrameVisible = 0;
+        slot->isReady = false;
+
+        slot->srvHandle = rendererCtx.allocSRVStatic(2u);
+        slot->heightmapSRVIndex = rendererCtx.offsetSRV(slot->srvHandle, 0u).index;
+        slot->diffuseSRVIndex = rendererCtx.offsetSRV(slot->srvHandle, 1u).index;
+
+        std::wstring slotName = NSTool::wformat(L"NSTerrain::Terrain::GPUSlot_%u", i);
+
+        // 1. Heightmap Default Heap Texture
+        {
+            const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
+            D3D12_RESOURCE_DESC resDesc{};
+            resDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            resDesc.Width = pageManifest.height.pageWidth;
+            resDesc.Height = pageManifest.height.pageHeight;
+            resDesc.DepthOrArraySize = 1;
+            resDesc.MipLevels = 1;
+            resDesc.Format = pageManifest.height.format;
+            resDesc.SampleDesc.Count = 1;
+            resDesc.SampleDesc.Quality = 0;
+            resDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            resDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &props,
+                D3D12_HEAP_FLAG_NONE,
+                &resDesc,
+                D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
+                nullptr,
+                IID_PPV_ARGS(&slot->heightmapDefault)
+            ));
+            slot->heightmapDefault->SetName(NSTool::wformat(L"%s::HeightmapDefault", slotName.c_str()).c_str());
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.Format = pageManifest.height.format;
+            srvDesc.Texture2D.MostDetailedMip = 0u;
+            srvDesc.Texture2D.MipLevels = 1u;
+            srvDesc.Texture2D.PlaneSlice = 0u;
+            srvDesc.Texture2D.ResourceMinLODClamp = 0.f;
+
+            m_device->CreateShaderResourceView(slot->heightmapDefault.Get(), &srvDesc, rendererCtx.offsetSRV(slot->srvHandle, 0u).cpuAddr);
+        }
+
+        // 2. Diffuse Default Heap Texture
+        {
+            const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
+            D3D12_RESOURCE_DESC resDesc{};
+            resDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            resDesc.Width = pageManifest.diffuse.pageWidth;
+            resDesc.Height = pageManifest.diffuse.pageHeight;
+            resDesc.DepthOrArraySize = 1;
+            resDesc.MipLevels = 1;
+            resDesc.Format = pageManifest.diffuse.format;
+            resDesc.SampleDesc.Count = 1;
+            resDesc.SampleDesc.Quality = 0;
+            resDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            resDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &props,
+                D3D12_HEAP_FLAG_NONE,
+                &resDesc,
+                D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
+                nullptr,
+                IID_PPV_ARGS(&slot->diffuseDefault)
+            ));
+            slot->diffuseDefault->SetName(NSTool::wformat(L"%s::DiffuseDefault", slotName.c_str()).c_str());
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.Format = pageManifest.diffuse.format;
+            srvDesc.Texture2D.MostDetailedMip = 0u;
+            srvDesc.Texture2D.MipLevels = 1u;
+            srvDesc.Texture2D.PlaneSlice = 0u;
+            srvDesc.Texture2D.ResourceMinLODClamp = 0.f;
+
+            m_device->CreateShaderResourceView(slot->diffuseDefault.Get(), &srvDesc, rendererCtx.offsetSRV(slot->srvHandle, 1u).cpuAddr);
+        }
+
+        // 3. Vertex Default Heap Buffer
+        {
+            const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
+            const CD3DX12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
+
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &props,
+                D3D12_HEAP_FLAG_NONE,
+                &resDesc,
+                D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+                nullptr,
+                IID_PPV_ARGS(&slot->vertexDefault)
+            ));
+            slot->vertexDefault->SetName(NSTool::wformat(L"%s::VertexDefault", slotName.c_str()).c_str());
+
+            slot->vertexBufferView.BufferLocation = slot->vertexDefault->GetGPUVirtualAddress();
+            slot->vertexBufferView.SizeInBytes = vertexBufferSize;
+            slot->vertexBufferView.StrideInBytes = sizeof(Vertex);
+        }
+
+        // 4. Vertex Upload Heap Buffer
+        {
+            const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
+            const CD3DX12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
+
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &props,
+                D3D12_HEAP_FLAG_NONE,
+                &resDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr,
+                IID_PPV_ARGS(&slot->vertexUpload)
+            ));
+            slot->vertexUpload->SetName(NSTool::wformat(L"%s::VertexUpload", slotName.c_str()).c_str());
+        }
+    }
+
+    // Shared Patch Index Buffer Creation
+    std::vector<uint32_t> patchIndices;
+    patchIndices.reserve(512 * 512 * 4);
+    for (uint32_t z = 0; z < 512; ++z)
+    {
+        for (uint32_t x = 0; x < 512; ++x)
+        {
+            const uint32_t bottomLeft  = z * 513 + x;
+            const uint32_t bottomRight = bottomLeft + 1;
+            const uint32_t topLeft     = bottomLeft + 513;
+            const uint32_t topRight    = topLeft + 1;
+
+            patchIndices.push_back(bottomLeft);
+            patchIndices.push_back(bottomRight);
+            patchIndices.push_back(topRight);
+            patchIndices.push_back(topLeft);
+        }
+    }
+    m_sharedPatchIndexCount = static_cast<uint32_t>(patchIndices.size());
+    const UINT indexBufferSize = m_sharedPatchIndexCount * sizeof(uint32_t);
+
+    // Create Upload Index Buffer
+    {
+        const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
+        const CD3DX12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &props,
+            D3D12_HEAP_FLAG_NONE,
+            &resDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&m_sharedPatchIndexUpload)
+        ));
+        m_sharedPatchIndexUpload->SetName(L"NSTerrain::Terrain::m_sharedPatchIndexUpload");
+
+        void* ppData = nullptr;
+        ThrowIfFailed(m_sharedPatchIndexUpload->Map(0u, nullptr, &ppData));
+        memcpy(ppData, patchIndices.data(), indexBufferSize);
+        m_sharedPatchIndexUpload->Unmap(0u, nullptr);
+    }
+
+    // Create Default Index Buffer
+    {
+        const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
+        const CD3DX12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &props,
+            D3D12_HEAP_FLAG_NONE,
+            &resDesc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&m_sharedPatchIndexDefault)
+        ));
+        m_sharedPatchIndexDefault->SetName(L"NSTerrain::Terrain::m_sharedPatchIndexDefault");
+
+        m_sharedPatchIndexBufferView.BufferLocation = m_sharedPatchIndexDefault->GetGPUVirtualAddress();
+        m_sharedPatchIndexBufferView.SizeInBytes = indexBufferSize;
+        m_sharedPatchIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
+    }
+
+    // Copy to Default and Transition
+    {
+        CD3DX12_RESOURCE_BARRIER preCopy = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_sharedPatchIndexDefault.Get(),
+            D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_COPY_DEST
         );
+        cmdList.ResourceBarrier(1u, &preCopy);
 
-        page->diffuseTexturePage = LoadPageTextureBin(
-            pageNameDiffuse,
-            page->diffuseTexturePage.path,
-            pageManifest.diffuse,
-            NSTexture::EType::DIFFUSE
+        cmdList.CopyResource(m_sharedPatchIndexDefault.Get(), m_sharedPatchIndexUpload.Get());
+
+        CD3DX12_RESOURCE_BARRIER postCopy = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_sharedPatchIndexDefault.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_INDEX_BUFFER
         );
-
-        page->residency = TerrainPage::EPageResidency::Loaded;
-
-        return ELoopConditionFlag::CONTINUE;
-    });
+        cmdList.ResourceBarrier(1u, &postCopy);
+    }
 
     m_isInitialized = true;
     return true;
@@ -389,22 +582,35 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     if (m_texSrvHandle.amount > 0) rendererCtx.freeSRVStatic(m_texSrvHandle);
     m_texSrvHandle = {};
 
+    m_gpuPool.ForEach([&](EntityID, std::shared_ptr<GPUSlot> slot) -> LoopCondition
+    {
+        if (slot->srvHandle.amount > 0) rendererCtx.freeSRVStatic(slot->srvHandle);
+        slot->srvHandle = {};
+
+        slot->heightmapDefault.Reset();
+        slot->diffuseDefault.Reset();
+        slot->vertexDefault.Reset();
+        slot->vertexUpload.Reset();
+
+        return ELoopConditionFlag::CONTINUE;
+    });
+
+    m_gpuPool.Clear();
+    m_slotKeys.clear();
+    m_pageToSlot.clear();
+
+    m_sharedPatchIndexDefault.Reset();
+    m_sharedPatchIndexUpload.Reset();
+    m_sharedPatchIndexBufferView = {};
+    m_sharedPatchIndexCount = 0;
+
     m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
     {
-        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk) -> LoopCondition
-        {
-            chunk->vertexDefault.Reset();
-            chunk->vertexUpload.Reset();
-            chunk->triangleIndexDefault.Reset();
-            chunk->triangleIndexUpload.Reset();
-            chunk->patchIndexDefault.Reset();
-            chunk->patchIndexUpload.Reset();
-
-            return ELoopConditionFlag::CONTINUE;
-        });
-
-        page->chunks.Clear();
-        page->chunks = {};
+        page->heightTexturePage.defaultBuffer.Reset();
+        page->heightTexturePage.uploadBuffer.Reset();
+        page->diffuseTexturePage.defaultBuffer.Reset();
+        page->diffuseTexturePage.uploadBuffer.Reset();
+        page->vertices.clear();
 
         return ELoopConditionFlag::CONTINUE;
     });
@@ -494,21 +700,6 @@ void Terrain::Free(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx renderer
 
     m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
     {
-        page->chunks.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk) -> LoopCondition
-        {
-            chunk->vertexDefault.Reset();
-            chunk->vertexUpload.Reset();
-            chunk->triangleIndexDefault.Reset();
-            chunk->triangleIndexUpload.Reset();
-            chunk->patchIndexDefault.Reset();
-            chunk->patchIndexUpload.Reset();
-
-            return ELoopConditionFlag::CONTINUE;
-        });
-
-        page->chunks.Clear();
-        page->chunks = {};
-
         return ELoopConditionFlag::CONTINUE;
     });
 
@@ -532,15 +723,6 @@ void Terrain::ReleaseUploadBuffers()
 
     m_pages.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
     {
-        page->chunks.ForEach([](EntityID, std::shared_ptr<NSTerrain::TerrainChunk> chunk) -> LoopCondition
-        {
-            chunk->vertexUpload.Reset();
-            chunk->triangleIndexUpload.Reset();
-            chunk->patchIndexUpload.Reset();
-
-            return ELoopConditionFlag::CONTINUE;
-        });
-
         return ELoopConditionFlag::CONTINUE;
     });
 
@@ -654,260 +836,6 @@ void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
             else page->residency = TerrainPage::EPageResidency::Missing;
         }
     }
-}
-void Terrain::UploadResidentPages(std::vector<TerrainPage>& pages, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
-{
-    // TODO: Complete function
-}
-
-void Terrain::BuildChunks(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
-{
-    ASSERT(not m_heightR16.empty());
-
-    const uint32_t vertsPerEdge = m_desc.vertsPerChunkEdge;
-    const uint32_t quadsPerEdge = vertsPerEdge - 1;
-
-    const uint32_t totalVertsX = m_desc.chunkCountX * quadsPerEdge + 1;
-    const uint32_t totalVertsZ = m_desc.chunkCountZ * quadsPerEdge + 1;
-
-    //m_chunks.clear();
-    //m_chunks.shrink_to_fit();
-
-    for (uint32_t gz = 0; gz < m_desc.chunkCountZ; ++gz)
-    {
-        for (uint32_t gx = 0; gx < m_desc.chunkCountX; ++gx)
-        {
-            const size_t chunkIndex = size_t(gz) * m_desc.chunkCountX + gx;
-
-            NSTerrain::ChunkIndex key{
-                .gridX = gx,
-                .gridZ = gz
-            };
-
-            std::vector<NSTerrain::Vertex> vertices;
-            std::vector<uint32_t> triIndices;
-            std::vector<uint32_t> patchIndices;
-
-            vertices.reserve(size_t(vertsPerEdge) * vertsPerEdge);
-            triIndices.reserve(size_t(quadsPerEdge) * quadsPerEdge * 6);
-            patchIndices.reserve(size_t(quadsPerEdge) * quadsPerEdge * 4);
-
-            DirectX::XMFLOAT3 aabbMin{
-                std::numeric_limits<float>::max(),
-                std::numeric_limits<float>::max(),
-                std::numeric_limits<float>::max()
-            };
-
-            DirectX::XMFLOAT3 aabbMax{
-                std::numeric_limits<float>::lowest(),
-                std::numeric_limits<float>::lowest(),
-                std::numeric_limits<float>::lowest()
-            };
-
-            for (uint32_t localZ = 0; localZ < vertsPerEdge; ++localZ)
-            {
-                for (uint32_t localX = 0; localX < vertsPerEdge; ++localX)
-                {
-                    const uint32_t globalX = gx * quadsPerEdge + localX;
-                    const uint32_t globalZ = gz * quadsPerEdge + localZ;
-
-                    const float u = float(globalX) / float(totalVertsX - 1);
-                    const float v = float(globalZ) / float(totalVertsZ - 1);
-
-                    const float x = u * m_desc.worldWidth - 0.5f * m_desc.worldWidth;
-                    const float z = v * m_desc.worldDepth - 0.5f * m_desc.worldDepth;
-                    const float y = SampleHeight(u, v) * m_desc.maxHeight;
-
-                    NSTerrain::Vertex vertex{};
-                    vertex.position = { x, y, z };
-                    vertex.texCoord = { u, v };
-
-                    vertices.push_back(vertex);
-
-                    aabbMin.x = std::min(aabbMin.x, x);
-                    aabbMin.y = std::min(aabbMin.y, y);
-                    aabbMin.z = std::min(aabbMin.z, z);
-
-                    aabbMax.x = std::max(aabbMax.x, x);
-                    aabbMax.y = std::max(aabbMax.y, y);
-                    aabbMax.z = std::max(aabbMax.z, z);
-                }
-            }
-
-            for (uint32_t z = 0; z < quadsPerEdge; ++z)
-            {
-                for (uint32_t x = 0; x < quadsPerEdge; ++x)
-                {
-                    const uint32_t bottomLeft  = z * vertsPerEdge + x;
-                    const uint32_t bottomRight = bottomLeft + 1;
-                    const uint32_t topLeft     = bottomLeft + vertsPerEdge;
-                    const uint32_t topRight    = topLeft + 1;
-
-                    // Triangle list, CCW when viewed from above.
-                    triIndices.push_back(bottomLeft);
-                    triIndices.push_back(topLeft);
-                    triIndices.push_back(bottomRight);
-
-                    triIndices.push_back(bottomRight);
-                    triIndices.push_back(topLeft);
-                    triIndices.push_back(topRight);
-
-                    // 4-control-point patch order:
-                    // bottom-left, bottom-right, top-right, top-left.
-                    patchIndices.push_back(bottomLeft);
-                    patchIndices.push_back(bottomRight);
-                    patchIndices.push_back(topRight);
-                    patchIndices.push_back(topLeft);
-                }
-            }
-
-            TerrainChunk chunk{};
-            chunk.triangleIndexCount = static_cast<uint32_t>(triIndices.size());
-            chunk.patchIndexCount = static_cast<uint32_t>(patchIndices.size());
-            chunk.chunkUVOffset = {
-                float(gx) / float(m_desc.chunkCountX),
-                float(gz) / float(m_desc.chunkCountZ)
-            };
-            chunk.chunkUVScale = {
-                1.f / float(m_desc.chunkCountX),
-                1.f / float(m_desc.chunkCountZ)
-            };
-            //chunk.bound = NSMath::SBoundAABB { // TODO: Should be for each page not for chucks of pages
-            //    .min = aabbMin,
-            //    .max = aabbMax
-            //};
-
-            std::wstring chunkName = NSTool::wformat(L"NSTerrain::Terrain::Chunk%zu", chunkIndex);
-
-            auto createUplBufferAndUpload = [this](std::wstring_view name, size_t dataSize, void* data, ComPtr<ID3D12Resource>& buffer)
-            {
-                const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_UPLOAD);
-                const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
-
-                if (not buffer)
-                {
-                    ThrowIfFailed(m_device->CreateCommittedResource(
-                        &props,
-                        D3D12_HEAP_FLAG_NONE,
-                        &desc,
-                        D3D12_RESOURCE_STATE_GENERIC_READ,
-                        nullptr,
-                        IID_PPV_ARGS(&buffer)
-                    ));
-                    buffer->SetName(name.data());
-                }
-
-                void* ppData = nullptr;
-                ThrowIfFailed(buffer->Map(0u, nullptr, reinterpret_cast<void**>(&ppData)));
-                memcpy(ppData, data, dataSize);
-                buffer->Unmap(0u, nullptr);
-            };
-            auto createDefBuffer = [this](std::wstring_view name, size_t dataSize, ComPtr<ID3D12Resource>& buffer)
-            {
-                const CD3DX12_HEAP_PROPERTIES props(D3D12_HEAP_TYPE_DEFAULT);
-                const CD3DX12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
-
-                if (not buffer)
-                {
-                    ThrowIfFailed(m_device->CreateCommittedResource(
-                        &props,
-                        D3D12_HEAP_FLAG_NONE,
-                        &desc,
-                        D3D12_RESOURCE_STATE_COMMON,
-                        nullptr,
-                        IID_PPV_ARGS(&buffer)
-                    ));
-                    buffer->SetName(name.data());
-                }
-            };
-
-            // Vertices
-            {
-                size_t dataSize = vertices.size() * sizeof(NSTerrain::Vertex);
-                createUplBufferAndUpload(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"vertexUpload").c_str(), dataSize, vertices.data(), chunk.vertexUpload);
-                createDefBuffer(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"vertexDefault").c_str(), dataSize, chunk.vertexDefault);
-                chunk.vertexBufferView.BufferLocation = chunk.vertexDefault->GetGPUVirtualAddress();
-                chunk.vertexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
-                chunk.vertexBufferView.StrideInBytes = sizeof(NSTerrain::Vertex);
-            }
-
-            // Triangle indices
-            {
-                size_t dataSize = chunk.triangleIndexCount * sizeof(UINT);
-                createUplBufferAndUpload(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"triangleIndexUpload").c_str(), dataSize, triIndices.data(), chunk.triangleIndexUpload);
-                createDefBuffer(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"triangleIndexDefault").c_str(), dataSize, chunk.triangleIndexDefault);
-                chunk.triangleIndexBufferView.BufferLocation = chunk.triangleIndexDefault->GetGPUVirtualAddress();
-                chunk.triangleIndexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
-                chunk.triangleIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
-            }
-
-            // Patch indices
-            {
-                size_t dataSize = chunk.patchIndexCount * sizeof(UINT);
-                createUplBufferAndUpload(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"patchIndexUpload").c_str(), dataSize, patchIndices.data(), chunk.patchIndexUpload);
-                createDefBuffer(NSTool::wformat(L"%s::%s", chunkName.c_str(), L"patchIndexDefault").c_str(), dataSize, chunk.patchIndexDefault);
-                chunk.patchIndexBufferView.BufferLocation = chunk.patchIndexDefault->GetGPUVirtualAddress();
-                chunk.patchIndexBufferView.SizeInBytes = static_cast<UINT>(dataSize);
-                chunk.patchIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
-            }
-
-            // Barriers
-            {
-                std::vector<D3D12_RESOURCE_BARRIER> preCopy;
-                preCopy.reserve(3);
-
-                preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.vertexDefault.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST));
-                preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.triangleIndexDefault.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST));
-                preCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.patchIndexDefault.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST));
-
-                cmdList.ResourceBarrier(static_cast<UINT>(preCopy.size()), preCopy.data());
-            }
-
-            cmdList.CopyResource(chunk.vertexDefault.Get(), chunk.vertexUpload.Get());
-            cmdList.CopyResource(chunk.triangleIndexDefault.Get(), chunk.triangleIndexUpload.Get());
-            cmdList.CopyResource(chunk.patchIndexDefault.Get(), chunk.patchIndexUpload.Get());
-
-            // Barriers
-            {
-                std::vector<D3D12_RESOURCE_BARRIER> postCopy;
-                postCopy.reserve(3);
-
-                postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.vertexDefault.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
-                postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.triangleIndexDefault.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
-                postCopy.push_back(CD3DX12_RESOURCE_BARRIER::Transition(chunk.patchIndexDefault.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
-
-                cmdList.ResourceBarrier(static_cast<UINT>(postCopy.size()), postCopy.data());
-            }
-
-            const uint32_t expectedVertexCount = vertsPerEdge * vertsPerEdge;
-            const uint32_t expectedQuadCount = (vertsPerEdge - 1) * (vertsPerEdge - 1);
-            const uint32_t expectedTriIndexCount = expectedQuadCount * 2 * 3;
-            const uint32_t expectedPatchIndexCount = expectedQuadCount * 4;
-
-            ASSERT(vertices.size() == expectedVertexCount);
-            ASSERT(triIndices.size() == expectedTriIndexCount);
-            ASSERT(patchIndices.size() == expectedPatchIndexCount);
-            ASSERT(aabbMin.x <= aabbMax.x);
-            ASSERT(aabbMin.y <= aabbMax.y);
-            ASSERT(aabbMin.z <= aabbMax.z);
-
-            //m_pages.push_back(std::move(chunk));
-        }
-    }
-
-    //ASSERT(m_chunks.size() == static_cast<size_t>(m_desc.chunkCountX) * m_desc.chunkCountZ);
-
-    //TerrainChunk& fstchunk = m_chunks[0];
-    //DirectX::XMFLOAT3& fstAabbMin = fstchunk.bounds.aabb.min;
-    //DirectX::XMFLOAT3& fstAabbMax = fstchunk.bounds.aabb.max;
-    //ASSERT(NSMath::fLessEqual(fstAabbMax.y, m_desc.maxHeight));
-    //ASSERT(NSMath::fGreaterThan(fstAabbMax.y, fstAabbMin.y));
-
-    //TerrainChunk& lstchunk = m_chunks[m_chunks.size() - 1u];
-    //DirectX::XMFLOAT3& lstAabbMin = lstchunk.bounds.aabb.min;
-    //DirectX::XMFLOAT3& lstAabbMax = lstchunk.bounds.aabb.max;
-    //ASSERT(NSMath::fLessEqual(lstAabbMax.y, m_desc.maxHeight));
-    //ASSERT(NSMath::fGreaterThan(lstAabbMax.y, lstAabbMin.y));
 }
 float Terrain::SampleHeight(float u, float v) const
 {
@@ -1288,4 +1216,210 @@ NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std
     tex.path = path;
 
     return tex;
+}
+
+std::shared_ptr<GPUSlot> Terrain::GetGPUSlot(ObserverKey pageKey, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+{
+    ASSERT(m_pages.Contains(pageKey));
+    auto page = m_pages.Get(pageKey);
+
+    m_currentFrame++;
+
+    if (page->gpuSlotKey.entID == InvalidEntityID)
+    {
+        page->gpuSlotKey = ClaimSlotForPage(pageKey);
+    }
+
+    auto slot = m_gpuPool.Get(page->gpuSlotKey);
+    slot->lastFrameVisible = m_currentFrame;
+
+    if (not slot->isReady)
+    {
+        if (page->residency == TerrainPage::EPageResidency::Present || page->residency == TerrainPage::EPageResidency::Missing)
+        {
+            page->residency = TerrainPage::EPageResidency::Loading;
+
+            std::wstring pageNameHeightmap = NSTool::wformat(L"page_%02u_%02u::HeightmapBin", page->index.gridX, page->index.gridZ);
+            std::wstring pageNameDiffuse = NSTool::wformat(L"page_%02u_%02u::DiffuseBin", page->index.gridX, page->index.gridZ);
+
+            std::shared_ptr<TerrainPage> pagePtr = page;
+
+            std::thread([this, pagePtr, pageNameHeightmap, pageNameDiffuse]()
+            {
+                pagePtr->heightTexturePage = this->LoadPageTextureBin(
+                    pageNameHeightmap,
+                    pagePtr->heightTexturePage.path,
+                    this->pageManifest.height,
+                    NSTexture::EType::HEIGHT
+                );
+
+                pagePtr->diffuseTexturePage = this->LoadPageTextureBin(
+                    pageNameDiffuse,
+                    pagePtr->diffuseTexturePage.path,
+                    this->pageManifest.diffuse,
+                    NSTexture::EType::DIFFUSE
+                );
+
+                const uint32_t pageWidth = this->pageManifest.height.pageWidth;
+                const uint32_t pageHeight = this->pageManifest.height.pageHeight;
+                pagePtr->vertices.resize(static_cast<size_t>(pageWidth) * pageHeight);
+
+                const float worldPageWidth = this->srcManifest.worldWidth / static_cast<float>(this->pageManifest.pageCountX);
+                const float worldPageDepth = this->srcManifest.worldDepth / static_cast<float>(this->pageManifest.pageCountZ);
+
+                for (uint32_t z = 0; z < pageHeight; ++z)
+                {
+                    for (uint32_t x = 0; x < pageWidth; ++x)
+                    {
+                        const float uLocal = static_cast<float>(x) / static_cast<float>(pageWidth - 1);
+                        const float vLocal = static_cast<float>(z) / static_cast<float>(pageHeight - 1);
+
+                        const float uGlobal = pagePtr->uvRect.x + uLocal * pagePtr->uvRect.width;
+                        const float vGlobal = pagePtr->uvRect.y + vLocal * pagePtr->uvRect.height;
+
+                        const float worldX = pagePtr->worldRect.x + uLocal * worldPageWidth;
+                        const float worldZ = pagePtr->worldRect.y + vLocal * worldPageDepth;
+                        const float worldY = this->SampleHeight(uGlobal, vGlobal) * this->m_desc.maxHeight;
+
+                        Vertex& v = pagePtr->vertices[static_cast<size_t>(z) * pageWidth + x];
+                        v.position = { worldX, worldY, worldZ };
+                        v.texCoord = { uGlobal, vGlobal };
+                    }
+                }
+
+                pagePtr->residency = TerrainPage::EPageResidency::Loaded;
+            }).detach();
+        }
+        else if (page->residency == TerrainPage::EPageResidency::Loaded)
+        {
+            CopyPageToGPU(page, slot, cmdList, rendererCtx);
+        }
+    }
+
+    return slot;
+}
+
+ObserverKey Terrain::ClaimSlotForPage(ObserverKey pageKey)
+{
+    std::shared_ptr<GPUSlot> chosenSlot = nullptr;
+    m_gpuPool.ForEach([&](EntityID, std::shared_ptr<GPUSlot> slot) -> LoopCondition
+    {
+        if (slot->virtualPageIndex == -1)
+        {
+            chosenSlot = slot;
+            return ELoopConditionFlag::BREAK;
+        }
+        return ELoopConditionFlag::CONTINUE;
+    });
+
+    if (chosenSlot == nullptr)
+    {
+        uint64_t oldestTime = std::numeric_limits<uint64_t>::max();
+        m_gpuPool.ForEach([&](EntityID, std::shared_ptr<GPUSlot> slot) -> LoopCondition
+        {
+            if (slot->lastFrameVisible < oldestTime)
+            {
+                oldestTime = slot->lastFrameVisible;
+                chosenSlot = slot;
+            }
+            return ELoopConditionFlag::CONTINUE;
+        });
+
+        ASSERT(chosenSlot != nullptr);
+        EvictSlot(chosenSlot);
+    }
+
+    auto page = m_pages.Get(pageKey);
+    chosenSlot->virtualPageIndex = static_cast<int>(page->index.gridZ * pageManifest.pageCountX + page->index.gridX);
+    chosenSlot->mappedPageKey = pageKey;
+    chosenSlot->isReady = false;
+
+    return chosenSlot->m_id;
+}
+
+void Terrain::EvictSlot(std::shared_ptr<GPUSlot> slot)
+{
+    if (m_pages.Contains(slot->mappedPageKey))
+    {
+        auto oldPage = m_pages.Get(slot->mappedPageKey);
+        oldPage->gpuSlotKey = {};
+        oldPage->isOnGPU = false;
+
+        if (oldPage->residency == TerrainPage::EPageResidency::Loaded)
+        {
+            oldPage->vertices.clear();
+            oldPage->vertices.shrink_to_fit();
+            oldPage->heightTexturePage.defaultBuffer.Reset();
+            oldPage->diffuseTexturePage.defaultBuffer.Reset();
+            oldPage->residency = TerrainPage::EPageResidency::Present;
+        }
+    }
+    slot->virtualPageIndex = -1;
+    slot->mappedPageKey = {};
+    slot->isReady = false;
+}
+
+void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<GPUSlot> slot, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+{
+    ASSERT(page->residency == TerrainPage::EPageResidency::Loaded);
+
+    // 1. Upload Heightmap Texture
+    {
+        NSTexture::Texture& heightmap = page->heightTexturePage;
+        heightmap.defaultBuffer = slot->heightmapDefault;
+        heightmap.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 0u);
+
+        heightmap.PopulateGPU(
+            cmdList, true,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+        );
+        heightmap.uploadBuffer.Reset();
+    }
+
+    // 2. Upload Diffuse Texture
+    {
+        NSTexture::Texture& diffuse = page->diffuseTexturePage;
+        diffuse.defaultBuffer = slot->diffuseDefault;
+        diffuse.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 1u);
+
+        diffuse.PopulateGPU(
+            cmdList, true,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+        );
+        diffuse.uploadBuffer.Reset();
+    }
+
+    // 3. Upload Vertex Buffer
+    {
+        ASSERT(not page->vertices.empty());
+        const UINT vertexBufferSize = static_cast<UINT>(page->vertices.size() * sizeof(Vertex));
+
+        void* ppData = nullptr;
+        ThrowIfFailed(slot->vertexUpload->Map(0u, nullptr, &ppData));
+        memcpy(ppData, page->vertices.data(), vertexBufferSize);
+        slot->vertexUpload->Unmap(0u, nullptr);
+
+        CD3DX12_RESOURCE_BARRIER preCopy = CD3DX12_RESOURCE_BARRIER::Transition(
+            slot->vertexDefault.Get(),
+            D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+            D3D12_RESOURCE_STATE_COPY_DEST
+        );
+        cmdList.ResourceBarrier(1u, &preCopy);
+
+        cmdList.CopyResource(slot->vertexDefault.Get(), slot->vertexUpload.Get());
+
+        CD3DX12_RESOURCE_BARRIER postCopy = CD3DX12_RESOURCE_BARRIER::Transition(
+            slot->vertexDefault.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
+        );
+        cmdList.ResourceBarrier(1u, &postCopy);
+    }
+
+    page->vertices.clear();
+    page->vertices.shrink_to_fit();
+
+    page->residency = TerrainPage::EPageResidency::Loaded;
+    page->isOnGPU = true;
+    slot->isReady = true;
 }

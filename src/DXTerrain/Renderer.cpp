@@ -81,13 +81,12 @@ public:
 private:
     std::map<std::string, std::vector<D3D12_RESOURCE_BARRIER>> m_entries;
 };
-void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, HWND wnd, UINT width, UINT height)
+void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSRenderer::RendererDescription desc)
 {
     m_factory = factory;
     m_device = device;
-    m_width = width;
-    m_height = height;
     m_wicFactory = wicFactory;
+    m_desc = desc;
 
     if (FAILED(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue1)))) return;
 
@@ -126,7 +125,7 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
         m_commandQueue->SetName(L"Renderer::m_commandQueue");
     }
 
-    CreateSwapChain(wnd, m_width, m_height);
+    CreateSwapChain(desc.wnd, m_desc.width, m_desc.height);
 
     m_rtvHeap = NSDescriptor::StaticHeap(device, L"Renderer::m_rtvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1024u, false);
     m_dsvHeap = NSDescriptor::StaticHeap(device, L"Renderer::m_dsvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1024u, false);
@@ -158,8 +157,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
         .format = DXGI_FORMAT_D32_FLOAT,
         .flags = D3D12_DSV_FLAG_NONE,
         .dimension = D3D12_DSV_DIMENSION::D3D12_DSV_DIMENSION_TEXTURE2D,
-        .width = m_width,
-        .height = m_height,
+        .width = m_desc.width,
+        .height = m_desc.height,
         .outDSV = m_depthStencil
     });
 
@@ -299,8 +298,8 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
         m_terrain = std::move(terrain);
     }
 
-    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, width);
-    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, height);
+    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, desc.width);
+    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, desc.height);
     m_blackboard.Set<std::reference_wrapper<const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain, std::cref(m_terrain));
 
     {
@@ -394,6 +393,8 @@ void Renderer::OnDestroy()
     ImGui_ImplDX12_Shutdown();
     ImGui::DestroyContext();
     m_imGuiSrvHeap.Reset();
+
+    m_blackboard = Blackboard{};
 }
 
 void Renderer::Execute(FnRendererExecutionBody Record)
@@ -767,12 +768,12 @@ void Renderer::Resize(UINT width, UINT height)
         m_device->CreateDepthStencilView(m_depthStencil.Get(), &desc, m_dsHandle.cpuAddr);
     }
 
-    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, m_width);
-    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, m_height);
+    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, m_desc.width);
+    m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, m_desc.height);
 
     for (auto& pass : m_passes)
     {
-        pass->OnResize(m_width, m_height, GetCtx());
+        pass->OnResize(m_desc.width, m_desc.height, GetCtx());
     }
 }
 void Renderer::CreateSwapChain(HWND hwnd, UINT width, UINT height)

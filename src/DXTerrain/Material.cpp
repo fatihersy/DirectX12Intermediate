@@ -54,7 +54,7 @@ void Material::UploadGPU(ID3D12Device14* device, NSRenderer::Ctx rendererCtx, NS
 
     m_srvHandle = rendererCtx.allocSRVStatic(static_cast<uint32_t>(NSTexture::EType::MAX));
 
-    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> srcRange(static_cast<size_t>(NSTexture::EType::MAX), rendererCtx.fallbackSRV.get().cpuAddr);
+    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> srcRange(static_cast<size_t>(NSTexture::EType::MAX), rendererCtx.fallbackSRV.cpuAddr);
 
     auto destRange = ArraySequence<static_cast<size_t>(NSTexture::EType::MAX)>([&](auto I)
     {

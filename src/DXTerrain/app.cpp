@@ -148,7 +148,16 @@ void app::LoadPipeline()
         throw std::runtime_error("");
     }
 
-    m_renderer.Init(m_factory.Get(), im_device.Get(), im_wicFactory.Get(), plat.GetWindow(), im_width, im_height);
+    {
+        NSRenderer::RendererDescription desc {
+            .wnd = plat.GetWindow(),
+            .width = im_width,
+            .height = im_height,
+            .streamingDistance = 2000
+        };
+        m_renderer.Init(m_factory.Get(), im_device.Get(), im_wicFactory.Get(), desc);
+    }
+
 }
 void app::LoadAssets()
 {

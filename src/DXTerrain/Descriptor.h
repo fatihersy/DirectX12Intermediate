@@ -51,6 +51,10 @@ namespace NSDescriptor
         const ID3D12DescriptorHeap* Raw() const {
             return im_heap.Get();
         }
+        void Reset() {
+            im_heap.Reset();
+            im_device = nullptr;
+        }
 
     protected:
         ID3D12Device14* im_device = nullptr;
