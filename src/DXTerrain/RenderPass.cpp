@@ -1361,14 +1361,13 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
     Scene& scene = static_cast<Scene&>(_scene);
 
-    if (not scene.m_terrain.isInitialized) return;
+    if (not scene.m_terrainView->isInitialized()) return;
 
     auto optTerrainRef = blackboard.GetOpt
-        <std::reference_wrapper
-        <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
+        <std::shared_ptr
+        <NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
     );
-
-    ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
+    ASSERT(optTerrainRef.has_value() and optTerrainRef.value().get(), "TerrainPass must have terrain access through blackboard");
 
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
@@ -1378,12 +1377,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.RSSetViewports(1, &viewport);
     cmdList.RSSetScissorRects(1, &scissor);
 
-    std::shared_ptr<NSScene::Camera> camera = scene.GetMainCamera();
-    std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(camera->m_id, NSScene::EIncCullFlag::TERRAIN);
-
-    const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
-    const EntityMap<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
-    const EntityMap<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
+    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+    std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
     if (rendererCtx.rendererFlagHasLeastOne(NSRenderer::ERendererFlag::MODE_WIREFRAME))
     {
@@ -1402,37 +1397,34 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
 
         FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
 
-        XMStoreFloat4x4(&frameCB.view, camera->viewMatrix);
-        XMStoreFloat4x4(&frameCB.proj, camera->projMatrix);
-        XMStoreFloat3(&frameCB.eye, camera->camEye);
+        XMStoreFloat4x4(&frameCB.view, mainCam->viewMatrix);
+        XMStoreFloat4x4(&frameCB.proj, mainCam->projMatrix);
+        XMStoreFloat3(&frameCB.eye, mainCam->camEye);
         XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
         XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
     }
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
-    const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
+    const NSTerrain::TerrainDesc& desc = scene.m_terrainView->GetDesc();
     const float worldTexelSpacingX = 0.f; // TODO: Placeholder. Fix it later desc.worldWidth / static_cast<float>(desc.dimention - 1u);
     const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
-    const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
+    const uint32_t heightmapSrvIndex = scene.m_terrainView->GetHeightmapSRV().index;
 
-    D3D12_INDEX_BUFFER_VIEW ibView = terrain.GetSharedPatchIndexBufferView();
+    D3D12_INDEX_BUFFER_VIEW ibView = scene.m_terrainView->GetSharedPatchIndexBufferView();
     cmdList.IASetIndexBuffer(&ibView);
+
+    EntityMap<NSTerrain::StreamSlotView>& slotViews = scene.m_terrainView->GetSlotsView();
+    const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene.m_terrainView->GetSlots();
 
     for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
-        ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
-        ASSERT(scePages.Contains(culled.ICullable_Id), "Culled element doesn't meet with a scene page");
+        auto view = slotViews.Get(culled.ICullable_Id);
 
-        std::shared_ptr<const NSScene::TerrainPage> scePage = scePages.Get(culled.ICullable_Id);
-
-        ASSERT(regPages.Contains(scePage->m_registerKey), "Every Page keys must meet with an element");
-
-        std::shared_ptr<NSTerrain::TerrainPage> regPage = std::const_pointer_cast<NSTerrain::TerrainPage>(regPages.Get(scePage->m_registerKey));
-
-        std::shared_ptr<NSTerrain::GPUSlot> slot = const_cast<NSTerrain::ITerrainView&>(terrain).GetGPUSlot(regPage->m_id, cmdList, rendererCtx);
-
-        if (slot != nullptr && slot->isReady)
+        if (view != nullptr and view->residency == NSTerrain::StreamSlot::ESlotResidency::Loaded)
         {
+            auto slot = streamSlot.Get(view->slotKey);
+            auto page = scene.m_terrainView->GetPageLayout().Get(view->pageKey);
+
             NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
             {
                 TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
@@ -1442,8 +1434,9 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
                 cbuffer.worldTexelSpacingZ = desc.worldDepth / 16384.f;
                 cbuffer.tessFactorScale = 1.f;
                 cbuffer.textureTilingFactor = 64.f;
-                cbuffer.chunkUVOffset = { 0.f, 0.f };
-                cbuffer.chunkUVScale = { 1.f, 1.f };
+                cbuffer.chunkUVOffset = { page->uvRect.x, page->uvRect.y };
+                cbuffer.chunkUVScale  = { page->uvRect.width, page->uvRect.height };
+                cbuffer.pageHalo = NSTerrain::kHaloPixels;
                 cbuffer.heightmapSrvIndex = slot->heightmapSRVIndex;
                 cbuffer.terrainDiffuseSrvIndex = slot->diffuseSRVIndex;
                 cbuffer.splatSrvIndices[0] = m_textures[static_cast<size_t>(ETexture::GRASS)].srvOffset.index;
@@ -1455,7 +1448,7 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
             cmdList.IASetVertexBuffers(0, 1, &slot->vertexBufferView);
-            cmdList.DrawIndexedInstanced(terrain.GetSharedPatchIndexCount(), 1, 0, 0, 0);
+            cmdList.DrawIndexedInstanced(scene.m_terrainView->GetSharedPatchIndexCount(), 1, 0, 0, 0);
         }
     }
 };
@@ -1655,7 +1648,12 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
     Scene& scene = static_cast<Scene&>(_scene);
 
     const std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
-    NSScene::Terrain& terrain = scene.GetTerrain();
+
+    EntityMap<NSTerrain::StreamSlotView>& streamSlotViews = scene.m_terrainView->GetSlotsView();
+    //const EntityMap<NSTerrain::StreamSlot>& streamSlots = scene.m_terrainView->GetSlots();
+    const EntityMap<NSTerrain::TerrainPage>& pageLayout = scene.m_terrainView->GetPageLayout();
+    const NSTerrain::TerrainDesc& terrainDesc = scene.m_terrainView->GetDesc();
+
     {
         using namespace DirectX;
 
@@ -1689,22 +1687,26 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
         const XMFLOAT4 visibleChunkColor{ 0.10f, 0.85f, 0.25f, 1.0f };
         utils.m_debugLines.clear();
 
+        std::unordered_map<EntityID, bool> visiblePages;
+        visiblePages.reserve(pageLayout.Size());
+
         for (NSMath::ICullable culled : cullResult->m_culledObjects)
         {
-            ASSERT(terrain.pages.Contains(culled.ICullable_Id), "Invalid Terrain page key");
-            std::shared_ptr<NSScene::TerrainPage> page = terrain.pages.Get(culled.ICullable_Id);
+            ASSERT(streamSlotViews.Contains(culled.ICullable_Id), "Invalid Terrain page key");
+            std::shared_ptr<NSTerrain::StreamSlotView> slot = streamSlotViews.Get(culled.ICullable_Id);
+
+            ASSERT(std::holds_alternative<NSMath::SBoundAABB>(slot->ICullable_Bound), "Terrain page has an unsupported bounding type");
+            auto& bound = std::get<NSMath::SBoundAABB>(slot->ICullable_Bound);
+
+            AddAabbTop(bound, hiddenChunkColor);
+
+            visiblePages[slot->pageKey.entID] = true;
+        }
+        pageLayout.ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page) -> LoopCondition
+        {
+            if (visiblePages.contains(page->m_id.entID)) return ELoopConditionFlag::CONTINUE;
 
             ASSERT(std::holds_alternative<NSMath::SBoundAABB>(page->ICullable_Bound), "Terrain page has an unsupported bounding type");
-
-            auto& aabb = std::get<NSMath::SBoundAABB>(page->ICullable_Bound);
-            page->isVisibleTEMP = true;
-
-            AddAabbTop(aabb, visibleChunkColor);
-        }
-        terrain.pages.ForEach([&](EntityID, std::shared_ptr<const NSScene::TerrainPage> page) -> LoopCondition
-        {
-            if (page->isVisibleTEMP) return ELoopConditionFlag::CONTINUE;
-
             auto& bound = std::get<NSMath::SBoundAABB>(page->ICullable_Bound);
 
             AddAabbTop(bound, hiddenChunkColor);
@@ -1718,8 +1720,8 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
         const XMVECTOR frustumRight = XMVector3Normalize(XMVector3Cross(frustumUp, frustumFwd));
 
         const float terrainRadius = std::sqrt(
-            terrain.desc.worldWidth * terrain.desc.worldWidth +
-            terrain.desc.worldDepth * terrain.desc.worldDepth
+            terrainDesc.worldWidth * terrainDesc.worldWidth +
+            terrainDesc.worldDepth * terrainDesc.worldDepth
         ) * 0.5f;
         const float nearDist = std::max(XMVectorGetZ(mainCam->projMatrix.r[3]), 1.0f);
         const float farDist = std::max(terrainRadius * 1.5f, nearDist + 10.0f);
@@ -1797,16 +1799,16 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
     NSAllocator::Ctx frameAllocCtx = rendererCtx.constAlloc(sizeof(FrameConstants));
     FrameConstants& frameCB = frameAllocCtx.As<FrameConstants>();
 
-    const float terrainWidth = std::max(terrain.desc.worldWidth, 1.0f);
-    const float terrainDepth = std::max(terrain.desc.worldDepth, 1.0f);
-    const float terrainMaxHeight = std::max(terrain.desc.maxHeight, 1.0f);
+    const float terrainWidth = std::max(terrainDesc.worldWidth, 1.0f);
+    const float terrainDepth = std::max(terrainDesc.worldDepth, 1.0f);
+    const float terrainMaxHeight = std::max(terrainDesc.maxHeight, 1.0f);
 
     float minX = std::numeric_limits<float>::max();
     float maxX = std::numeric_limits<float>::lowest();
     float minZ = std::numeric_limits<float>::max();
     float maxZ = std::numeric_limits<float>::lowest();
 
-    terrain.pages.ForEach([&minX, &maxX, &minZ, &maxZ](EntityID, std::shared_ptr<const NSScene::TerrainPage> page) -> LoopCondition
+    pageLayout.ForEach([&minX, &maxX, &minZ, &maxZ](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page) -> LoopCondition
     {
         ASSERT(std::holds_alternative<NSMath::SBoundAABB>(page->ICullable_Bound), "Terrain page has an unsupported bounding type");
         auto boundingBox = std::get<NSMath::SBoundAABB>(page->ICullable_Bound);
@@ -2079,40 +2081,33 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
         auto optTerrainRef = blackboard.GetOpt
-            <std::reference_wrapper
-            <const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
+            <std::shared_ptr
+            <NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain
         );
         ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
 
         std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
-        const NSTerrain::ITerrainView& terrain = optTerrainRef->get().get();
-        const EntityMap<NSTerrain::TerrainPage>& regPages = terrain.GetPages();
-        const EntityMap<NSScene::TerrainPage>& scePages = scene.m_terrain.pages;
-
-        const NSTerrain::TerrainDesc& desc = terrain.GetDesc();
+        const NSTerrain::TerrainDesc& desc = scene.m_terrainView->GetDesc();
         const float worldTexelSpacingX = 0.f; // TODO: Placeholder. Fix it later desc.worldWidth / static_cast<float>(desc.dimention - 1u);
         const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
-        const uint32_t heightmapSrvIndex = terrain.GetHeightmapSRV().index;
+        const uint32_t heightmapSrvIndex = scene.m_terrainView->GetHeightmapSRV().index;
 
-        D3D12_INDEX_BUFFER_VIEW ibView = terrain.GetSharedPatchIndexBufferView();
+        D3D12_INDEX_BUFFER_VIEW ibView = scene.m_terrainView->GetSharedPatchIndexBufferView();
         cmdList.IASetIndexBuffer(&ibView);
+
+        EntityMap<NSTerrain::StreamSlotView>& slotViews = scene.m_terrainView->GetSlotsView();
+        const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene.m_terrainView->GetSlots();
 
         for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
-            ASSERT(scePages.Size() == regPages.Size(), "Scene and Reg vectors both must have their equavalent elements");
-            ASSERT(scePages.Contains(culled.ICullable_Id), "Culled element doesn't meet with a scene page");
+            auto view = slotViews.Get(culled.ICullable_Id);
 
-            std::shared_ptr<const NSScene::TerrainPage> scePage = scePages.Get(culled.ICullable_Id);
-
-            ASSERT(regPages.Contains(scePage->m_registerKey), "Every Page keys must meet with an element");
-
-            std::shared_ptr<NSTerrain::TerrainPage> regPage = std::const_pointer_cast<NSTerrain::TerrainPage>(regPages.Get(scePage->m_registerKey));
-
-            std::shared_ptr<NSTerrain::GPUSlot> slot = const_cast<NSTerrain::ITerrainView&>(terrain).GetGPUSlot(regPage->m_id, cmdList, rendererCtx);
-
-            if (slot != nullptr && slot->isReady)
+            if (view != nullptr and view->residency == NSTerrain::StreamSlot::ESlotResidency::Loaded)
             {
+                auto slot = streamSlot.Get(view->slotKey);
+                auto page = scene.m_terrainView->GetPageLayout().Get(view->pageKey);
+
                 NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
                 {
                     TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
@@ -2122,8 +2117,9 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                     cbuffer.worldTexelSpacingZ = desc.worldDepth / 16384.f;
                     cbuffer.tessFactorScale = 1.f;
                     cbuffer.textureTilingFactor = 64.f;
-                    cbuffer.chunkUVOffset = { 0.f, 0.f };
-                    cbuffer.chunkUVScale = { 1.f, 1.f };
+                    cbuffer.chunkUVOffset = { page->uvRect.x, page->uvRect.y };
+                    cbuffer.chunkUVScale  = { page->uvRect.width, page->uvRect.height };
+                    cbuffer.pageHalo = NSTerrain::kHaloPixels;
                     cbuffer.heightmapSrvIndex = slot->heightmapSRVIndex;
                     cbuffer.terrainDiffuseSrvIndex = rendererCtx.fallbackSRV.index;
                     cbuffer.splatSrvIndices[0] = rendererCtx.fallbackSRV.index;
@@ -2135,7 +2131,7 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                 cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
                 cmdList.IASetVertexBuffers(0, 1, &slot->vertexBufferView);
-                cmdList.DrawIndexedInstanced(terrain.GetSharedPatchIndexCount(), 1, 0, 0, 0);
+                cmdList.DrawIndexedInstanced(scene.m_terrainView->GetSharedPatchIndexCount(), 1, 0, 0, 0);
             }
         }
     }

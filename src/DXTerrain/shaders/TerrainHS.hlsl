@@ -31,7 +31,8 @@ struct TerrainConstants
     float2 chunkUVScale;
     uint heightmapSrvIndex;
     uint terrainDiffuseSrvIndex;
-    uint2 PADDING_1;
+    uint pageHalo;
+    uint PADDING_1;
     uint4 splatSrvIndices;
 };
 

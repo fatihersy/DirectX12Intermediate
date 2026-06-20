@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SceneTypes.h"
+#include "TerrainTypes.h"
 
 #include "Model.h"
 
@@ -12,7 +13,7 @@ public:
 
     EntityKey<Scene> m_id;
 
-    void OnInit(ID3D12Device14* device, IWICImagingFactory2* wicFactory, float timeOfDay);
+    void OnInit(NSRenderer::Ctx rendererCtx, ID3D12Device14* device, IWICImagingFactory2* wicFactory, std::shared_ptr<NSTerrain::ITerrainView> inTerrainView, float timeOfDay);
     void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
     void OnUpdate();
@@ -24,10 +25,6 @@ public:
     }
 
     std::shared_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncCullFlag> flag, ObserverKey excludeKey = {}) override;
-
-    NSScene::Terrain& GetTerrain() override {
-        return m_terrain;
-    }
     std::shared_ptr<NSScene::Camera> GetMainCamera() override {
         ASSERT(m_cameras.Contains(mainCameraKey), "Main camera did't initialized yet");
         return m_cameras.Get(mainCameraKey);
@@ -68,7 +65,7 @@ public:
 
     ID3D12Device14* m_device = nullptr;
     IWICImagingFactory2* m_wicFactory = nullptr;
-    NSScene::Terrain m_terrain{};
+    std::shared_ptr<NSTerrain::ITerrainView> m_terrainView{};
 
     EntityMap<Model> m_models;
     EntityMap<NSScene::Camera> m_cameras;

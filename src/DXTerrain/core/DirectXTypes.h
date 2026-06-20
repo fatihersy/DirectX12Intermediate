@@ -297,10 +297,19 @@ namespace NSDX12
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
         }
-    private:
+    protected:
         ID3D12GraphicsCommandList10* m_cmdList = nullptr;
     };
 
+    class CopyCommandList : public GraphicsCommandList
+    {
+    public:
+        explicit CopyCommandList(ID3D12GraphicsCommandList10* cmdList) : GraphicsCommandList(cmdList) {}
 
+        GraphicsCommandList Detach() {
+            return GraphicsCommandList(m_cmdList);
+        }
 
+        bool m_HasPendingCopy{};
+    };
 }

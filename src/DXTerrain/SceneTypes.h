@@ -2,27 +2,10 @@
 
 #include "core/EntityTypes.h"
 #include "core/Math.h"
-#include "TerrainTypes.h"
 #include "RendererTypes.h"
 
 namespace NSScene
 {
-    struct TerrainPage : public NSMath::ICullable
-    {
-        EntityKey<TerrainPage> m_id;
-        NSTerrain::PageIndex index;
-        ObserverKey m_registerKey;
-
-        bool isVisibleTEMP{};
-    };
-
-    struct Terrain
-    {
-        NSTerrain::TerrainDesc desc;
-        EntityMap<TerrainPage> pages;
-        bool isInitialized{};
-    };
-
     enum class EIncCullFlag : uint32_t
     {
         UNDEFINED           = 0,
@@ -81,7 +64,7 @@ namespace NSScene
         float camYaw{};
         float camPitch{};
 
-        float camSpeed = 100.f;
+        float camSpeed = 5.f;
         float lookSensitivity = .01f;
     };
 
@@ -92,9 +75,7 @@ namespace NSScene
 
         virtual bool ValidateKey(ObserverKey entKey) = 0;
 
-        virtual NSScene::Terrain& GetTerrain() = 0;
         virtual std::shared_ptr<NSScene::Camera> GetMainCamera() = 0;
-
         virtual std::shared_ptr<NSScene::CullResult> Cull(ObserverKey camKey, Flag<NSScene::EIncCullFlag> flag, ObserverKey excludeKey = {}) = 0;
 
         static constexpr float FAR_CLIP = 20000.f;

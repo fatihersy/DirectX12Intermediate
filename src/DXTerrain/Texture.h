@@ -21,8 +21,6 @@ namespace NSTexture
         UINT localRowPitch{};
         UINT uploadRowPitch{};
         TextureData chunks;
-        bool m_isOnGPU{};
-        bool m_isOnCPU{};
 
         void CopyPixels(std::byte* dst, size_t dstRowPitch, size_t bytesPerRow, bool consumeLocalData = false);
         void CopyPixels(std::byte* dst, size_t dstRowPitch, NSMath::SRectU32 cpyRect);
@@ -47,6 +45,10 @@ namespace NSTexture
         );
         void UnloadCPU();
         void UnloadGPU();
+
+        private:
+            bool m_isOnGPU{};
+            bool m_isOnCPU{};
     };
 
     inline const char* TextureTypeToString(NSTexture::EType tType)

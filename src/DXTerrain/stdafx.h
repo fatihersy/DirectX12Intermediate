@@ -13,6 +13,7 @@
 #include <DirectXMath.h>
 #include <libassert/assert.hpp>
 
+#include <system_error>
 #include <string>
 #include <vector>
 #include <wrl.h>
@@ -34,7 +35,7 @@
 #include <bitset>
 #include <typeinfo>
 #include <cstddef>
-#include <cstring>
 #include <fstream>
+#include <queue>
 
 #include "core/DirectXTypes.h"

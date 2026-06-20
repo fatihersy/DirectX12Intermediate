@@ -137,6 +137,69 @@ void WriteTexturePageBin(NSTexture::Texture& texture, const std::string& path, N
     ASSERT(file.good(), "Failed to finish writing terrain page texture");
 }
 
+static void WriteTexturePageBinHalo(
+    NSTexture::Texture& src,
+    const std::string& path,
+    int64_t coreX, int64_t coreY,
+    uint32_t coreW, uint32_t coreH,
+    uint32_t halo)
+{
+    ASSERT(src.desc.bytesPerPixel == NSTexture::BytesPerPixel(src.desc.format));
+    ASSERT(coreW > 0u and coreH > 0u);
+    ASSERT(not src.chunks.empty());
+
+    std::filesystem::path _path = path;
+    if (not std::filesystem::is_directory(_path.parent_path()))
+    {
+        std::filesystem::create_directory(_path.parent_path());
+    }
+
+    const size_t bpp = src.desc.bytesPerPixel;
+    const uint32_t fullW = coreW + 2u * halo;
+    const uint32_t fullH = coreH + 2u * halo;
+    const size_t rowPitch = static_cast<size_t>(fullW) * bpp;
+
+    std::vector<std::byte> pageBytes(rowPitch * fullH);
+
+    auto FindChunkRow = [&src](uint32_t sy) -> const std::byte*
+    {
+        for (const NSTexture::TextureChunk& chunk : src.chunks)
+        {
+            if (sy >= chunk.firstRow and sy - chunk.firstRow < chunk.rowCount)
+            {
+                return chunk.bytes.data() + static_cast<size_t>(sy - chunk.firstRow) * src.localRowPitch;
+            }
+        }
+        return nullptr;
+    };
+
+    const int64_t srcMaxX = static_cast<int64_t>(src.width) - 1;
+    const int64_t srcMaxY = static_cast<int64_t>(src.height) - 1;
+
+    for (uint32_t r = 0u; r < fullH; ++r)
+    {
+        const int64_t syRaw = coreY - static_cast<int64_t>(halo) + static_cast<int64_t>(r);
+        const uint32_t sy = static_cast<uint32_t>(std::clamp<int64_t>(syRaw, 0, srcMaxY));
+        const std::byte* srcRow = FindChunkRow(sy);
+        ASSERT(srcRow, "Halo extraction could not resolve a source row chunk");
+
+        std::byte* dstRow = pageBytes.data() + static_cast<size_t>(r) * rowPitch;
+
+        for (uint32_t c = 0u; c < fullW; ++c)
+        {
+            const int64_t sxRaw = coreX - static_cast<int64_t>(halo) + static_cast<int64_t>(c);
+            const uint32_t sx = static_cast<uint32_t>(std::clamp<int64_t>(sxRaw, 0, srcMaxX));
+            memcpy(dstRow + static_cast<size_t>(c) * bpp, srcRow + static_cast<size_t>(sx) * bpp, bpp);
+        }
+    }
+
+    std::ofstream file(_path, std::ios::binary | std::ios::trunc);
+    ASSERT(file.is_open(), "Failed to write terrain page texture");
+
+    file.write(reinterpret_cast<const char*>(pageBytes.data()), static_cast<std::streamsize>(pageBytes.size()));
+    ASSERT(file.good(), "Failed to finish writing terrain page texture");
+}
+
 template<typename StrClass>
 static void WritePageName(StrClass& pagePathStr, size_t pageNameOffset, uint32_t coordX, uint32_t coordZ)
 {
@@ -172,26 +235,18 @@ static void WritePageName(StrClass& pagePathStr, size_t pageNameOffset, uint32_t
 }
 
 Terrain::Terrain() {}
-Terrain::Terrain(ID3D12Device14* device) : m_device(device)
-{
-
-}
+Terrain::Terrain(ID3D12Device14* device) : m_device(device) {}
 
 Terrain::Terrain(Terrain&& other) noexcept
     : m_device(other.m_device)
     , m_desc(other.m_desc)
     , m_pages(std::move(other.m_pages))
-    , m_heightR16(std::move(other.m_heightR16))
     , m_textures(std::move(other.m_textures))
-    , m_isOnGPU(other.m_isOnGPU)
-    , m_isOnCPU(other.m_isOnCPU)
     , m_isInitialized(other.m_isInitialized)
 {
     other.m_device = nullptr;
     other.m_desc = {};
     other.m_textures.fill({});
-    other.m_isOnGPU = false;
-    other.m_isOnCPU = false;
     other.m_isInitialized = false;
 }
 
@@ -202,17 +257,12 @@ Terrain& Terrain::operator=(Terrain&& other) noexcept
         m_device = other.m_device;
         m_desc = other.m_desc;
         m_pages = std::move(other.m_pages);
-        m_heightR16 = std::move(other.m_heightR16);
         m_textures = std::move(other.m_textures);
-        m_isOnGPU = other.m_isOnGPU;
-        m_isOnCPU = other.m_isOnCPU;
         m_isInitialized = other.m_isInitialized;
 
         other.m_device = nullptr;
         other.m_desc = {};
         other.m_textures.fill({});
-        other.m_isOnGPU = false;
-        other.m_isOnCPU = false;
         other.m_isInitialized = false;
     }
 
@@ -227,6 +277,7 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
     }
 
     m_root = IApp::GetInstance()->im_assetsPath / root;
+    NSBarrier::IBarrierBatch& barrierBatch = rendererCtx.barrierBatch.get();
 
     ASSERT(std::filesystem::is_directory(m_root), "Couldn't find the Terrain root: %s", m_root.generic_string());
 
@@ -335,9 +386,16 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
         GeneratePageFromEXR();
     }
 
+    // pageManifest.*.pageWidth/Height are the FULL (uploaded) page-texture dimensions,
+    // including the halo gutter on every side. The vertex grid, patch layout and world
+    // mapping all operate on the CORE region (full minus the halo on both sides).
+    const uint32_t heightHalo = pageManifest.height.haloPixels;
+    const uint32_t heightCoreW = pageManifest.height.pageWidth - 2u * heightHalo;
+    const uint32_t heightCoreH = pageManifest.height.pageHeight - 2u * heightHalo;
+
     if (m_desc.vertsPerChunkEdge == 0u)
     {
-        m_desc.vertsPerChunkEdge = ((pageManifest.height.pageWidth - 1u) / m_desc.chunkCountX) + 1u;
+        m_desc.vertsPerChunkEdge = ((heightCoreW - 1u) / m_desc.chunkCountX) + 1u;
     }
 
     BuildPageLayout(m_pages);
@@ -347,29 +405,24 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
 
     // Dynamic Pool Calculation
     uint32_t streamingDistance = rendererCtx.rendererDesc.streamingDistance;
-    uint32_t poolSize = 58; // Default to 58 slots (for R = 2000m)
-    if (streamingDistance > 0)
-    {
-        float pArea = 512.f * 512.f;
-        float sArea = DirectX::XM_PI * static_cast<float>(streamingDistance * streamingDistance);
-        poolSize = static_cast<uint32_t>(std::ceil(sArea / pArea) * 1.2f);
-    }
+    ASSERT(streamingDistance > 0);
 
-    m_gpuPool.Clear();
-    m_slotKeys.clear();
-    m_slotKeys.reserve(poolSize);
-    m_pageToSlot.assign(static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ, -1);
+    float areaOfPage = static_cast<float>(heightCoreW) * static_cast<float>(heightCoreH);
+    float areaOfCircle = DirectX::XM_PI * static_cast<float>(streamingDistance * streamingDistance);
+    int poolSize = static_cast<uint32_t>(std::ceil(areaOfCircle) / areaOfPage);
 
-    const UINT vertexBufferSize = pageManifest.height.pageWidth * pageManifest.height.pageHeight * sizeof(Vertex);
+    m_gpuPool.Reserve(poolSize);
+    m_poolView.Reserve(poolSize);
+
+    const UINT vertexBufferSize = heightCoreW * heightCoreH * sizeof(Vertex);
+
+    m_pendingCopyCount = poolSize;
 
     for (uint32_t i = 0; i < poolSize; ++i)
     {
         auto slot = m_gpuPool.Add();
-        m_slotKeys.push_back(slot->m_id);
-
-        slot->virtualPageIndex = -1;
-        slot->lastFrameVisible = 0;
-        slot->isReady = false;
+        auto slotView = m_poolView.Add(std::make_shared<StreamSlotView>(StreamSlotView(slot->m_id)));
+        slotView->ICullable_Id = slotView->m_id;
 
         slot->srvHandle = rendererCtx.allocSRVStatic(2u);
         slot->heightmapSRVIndex = rendererCtx.offsetSRV(slot->srvHandle, 0u).index;
@@ -396,7 +449,7 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
                 &props,
                 D3D12_HEAP_FLAG_NONE,
                 &resDesc,
-                D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_COMMON,
                 nullptr,
                 IID_PPV_ARGS(&slot->heightmapDefault)
             ));
@@ -433,7 +486,7 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
                 &props,
                 D3D12_HEAP_FLAG_NONE,
                 &resDesc,
-                D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_COMMON,
                 nullptr,
                 IID_PPV_ARGS(&slot->diffuseDefault)
             ));
@@ -460,11 +513,17 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
                 &props,
                 D3D12_HEAP_FLAG_NONE,
                 &resDesc,
-                D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+                D3D12_RESOURCE_STATE_COMMON,
                 nullptr,
                 IID_PPV_ARGS(&slot->vertexDefault)
             ));
             slot->vertexDefault->SetName(NSTool::wformat(L"%s::VertexDefault", slotName.c_str()).c_str());
+
+            barrierBatch.Add(NSBarrier::kTerrain_terrainOnInit, CD3DX12_RESOURCE_BARRIER::Transition(
+                slot->vertexDefault.Get(),
+                D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
+            ));
 
             slot->vertexBufferView.BufferLocation = slot->vertexDefault->GetGPUVirtualAddress();
             slot->vertexBufferView.SizeInBytes = vertexBufferSize;
@@ -487,6 +546,8 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
             slot->vertexUpload->SetName(NSTool::wformat(L"%s::VertexUpload", slotName.c_str()).c_str());
         }
     }
+
+    barrierBatch.Execute(NSBarrier::kTerrain_terrainOnInit, cmdList);
 
     // Shared Patch Index Buffer Creation
     std::vector<uint32_t> patchIndices;
@@ -566,7 +627,6 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
         );
         cmdList.ResourceBarrier(1u, &postCopy);
     }
-
     m_isInitialized = true;
     return true;
 }
@@ -582,7 +642,7 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     if (m_texSrvHandle.amount > 0) rendererCtx.freeSRVStatic(m_texSrvHandle);
     m_texSrvHandle = {};
 
-    m_gpuPool.ForEach([&](EntityID, std::shared_ptr<GPUSlot> slot) -> LoopCondition
+    m_gpuPool.ForEach([&](EntityID, std::shared_ptr<StreamSlot> slot) -> LoopCondition
     {
         if (slot->srvHandle.amount > 0) rendererCtx.freeSRVStatic(slot->srvHandle);
         slot->srvHandle = {};
@@ -596,8 +656,6 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     });
 
     m_gpuPool.Clear();
-    m_slotKeys.clear();
-    m_pageToSlot.clear();
 
     m_sharedPatchIndexDefault.Reset();
     m_sharedPatchIndexUpload.Reset();
@@ -617,100 +675,115 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
 
     m_pages.Clear();
     m_pages = {};
-    m_heightR16.clear();
-    m_heightR16.shrink_to_fit();
     m_desc = {};
 
-    m_isOnGPU = false;
-    m_isOnCPU = false;
     m_isInitialized = false;
 }
 
-bool Terrain::Load(const std::wstring_view _path)
+void Terrain::Update(std::shared_ptr<NSDX12::CopyCommandList> cmdList, NSRenderer::Ctx rendererCtx)
 {
-    ASSERT(m_desc.worldWidth > 0.f and m_desc.worldDepth > 0.f and m_desc.maxHeight > 0.f and m_desc.chunkCountX > 0u and m_desc.chunkCountZ > 0u and m_desc.vertsPerChunkEdge > 1u);
+    Iterate();
 
-    NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
+    uint32_t uploadsThisFrame{0u};
 
-    std::wstring path(_path);
-    size_t dotPos = path.find_last_of('.');
-    ASSERT(dotPos != path.npos, "Extension extraction failed from the file");
-
-    if (_wcsicmp(path.c_str() + dotPos, L".exr") == 0)
+    if (m_pendingCopyCount)
     {
-        heightmap = NSTexture::LoadTextureEXR(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EXRLoadDesc {
-            .texDesc {
-                .textureType = NSTexture::EType::HEIGHT,
-                .format = DXGI_FORMAT_R16_UNORM,
-                .localRowPitchMode = NSTexture::ERowPitchMode::TIGHT,
-                .uploadRowPitchMode = NSTexture::ERowPitchMode::DX_ALIGN
-            },
-            .channels = {"Y"},
+        m_poolView.ForEach([&](EntityID, std::shared_ptr<StreamSlotView> view) -> LoopCondition
+        {
+            ASSERT(view->residency != StreamSlot::ESlotResidency::Unknown or view->residency != StreamSlot::ESlotResidency::Failed);
+
+            if (view->residency == StreamSlot::ESlotResidency::Loading)
+            {
+                auto page = m_pages.Get(view->pageKey);
+                auto slot = m_gpuPool.Get(view->slotKey);
+
+                if (page->residency == TerrainPage::EPageResidency::Present || page->residency == TerrainPage::EPageResidency::Loading)
+                    return ELoopConditionFlag::CONTINUE;
+
+                if (page->residency == TerrainPage::EPageResidency::Loaded)
+                {
+                    if (uploadsThisFrame >= m_maxUploadsPerFrame) return ELoopConditionFlag::CONTINUE;
+
+                    CopyPageToGPU(page, slot, cmdList->Detach(), rendererCtx);
+                    view->residency = StreamSlot::ESlotResidency::Loaded;
+                    page->residency = TerrainPage::EPageResidency::Present;
+                    uploadsThisFrame++;
+                    cmdList->m_HasPendingCopy = true;
+
+                    return ELoopConditionFlag::CONTINUE;
+                }
+
+                ASSERT(false, "Unable to load page");
+            }
+
+            if (view->residency == StreamSlot::ESlotResidency::Missing)
+            {
+                auto page = m_pages.Get(view->pageKey);
+                view->residency = StreamSlot::ESlotResidency::Loading;
+                page->residency = TerrainPage::EPageResidency::Loading;
+
+                m_streamPool.Submit([this, page]
+                {
+                    page->heightTexturePage = this->LoadPageTextureBin(
+                        page->heightTexturePage.name,
+                        page->heightTexturePage.path,
+                        this->pageManifest.height,
+                        NSTexture::EType::HEIGHT
+                    );
+                    page->diffuseTexturePage = this->LoadPageTextureBin(
+                        page->diffuseTexturePage.name,
+                        page->diffuseTexturePage.path,
+                        this->pageManifest.diffuse,
+                        NSTexture::EType::DIFFUSE
+                    );
+
+                    // pageWidth/Height from the manifest are the FULL (haloed) texture size;
+                    // the vertex grid spans only the core, and height reads are offset inward
+                    // by the halo gutter to land on the core texels.
+                    const uint32_t halo = this->pageManifest.height.haloPixels;
+                    const uint32_t pageWidth = this->pageManifest.height.pageWidth - 2u * halo;
+                    const uint32_t pageHeight = this->pageManifest.height.pageHeight - 2u * halo;
+                    const float worldPageWidth = this->srcManifest.worldWidth / static_cast<float>(this->pageManifest.pageCountX);
+                    const float worldPageDepth = this->srcManifest.worldDepth / static_cast<float>(this->pageManifest.pageCountZ);
+
+                    page->vertices.resize(static_cast<size_t>(pageWidth) * pageHeight);
+
+                    for (uint32_t z = 0; z < pageHeight; ++z)
+                    {
+                        for (uint32_t x = 0; x < pageWidth; ++x)
+                        {
+                            Vertex& v = page->vertices[static_cast<size_t>(z) * pageWidth + x];
+
+                            const float uLocal = static_cast<float>(x) / static_cast<float>(pageWidth - 1);
+                            const float vLocal = static_cast<float>(z) / static_cast<float>(pageHeight - 1);
+                            const UINT srcRow = z + halo;
+                            const UINT srcCol = x + halo;
+                            const UINT chunkIdx = srcRow / NSTexture::ROWS_AT_A_TIME;
+                            const UINT localRow = srcRow % NSTexture::ROWS_AT_A_TIME;
+
+                            const std::byte* pixelPtr = page->heightTexturePage.chunks[chunkIdx].bytes.data() + localRow * page->heightTexturePage.localRowPitch + srcCol * sizeof(uint16_t);
+                            const uint16_t rawHeight = *reinterpret_cast<const uint16_t*>(pixelPtr);
+                            const float heightScale = static_cast<float>(rawHeight) / std::numeric_limits<uint16_t>::max();
+
+                            const float worldY = heightScale * this->m_desc.maxHeight;
+                            const float worldX = page->worldRect.x + uLocal * worldPageWidth;
+                            const float worldZ = page->worldRect.y + vLocal * worldPageDepth;
+                            v.position = { worldX, worldY, worldZ };
+
+                            const float uGlobal = page->uvRect.x + uLocal * page->uvRect.width;
+                            const float vGlobal = page->uvRect.y + vLocal * page->uvRect.height;
+                            v.texCoord = { uGlobal, vGlobal };
+                        }
+                    }
+                    page->heightTexturePage.PopulateCPU(true);
+                    page->diffuseTexturePage.PopulateCPU(true);
+                    page->residency = TerrainPage::EPageResidency::Loaded;
+                });
+            }
+
+            return ELoopConditionFlag::CONTINUE;
         });
     }
-    else {
-        heightmap = NSTexture::LoadTexture(L"NSTerrain::Terrain::Heightmap", path, NSTexture::EType::HEIGHT);
-    }
-
-    ASSERT(heightmap.desc.format == DXGI_FORMAT_R16_UNORM);
-    ASSERT(heightmap.width > 1u);
-    ASSERT(heightmap.height > 1u);
-
-    ASSERT(heightmap.localRowPitch >= (heightmap.width * heightmap.desc.bytesPerPixel));
-    ASSERT(heightmap.uploadRowPitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0);
-
-    ASSERT(!heightmap.chunks.empty());
-
-    m_desc.heightmapDesc.width = heightmap.width;
-    m_desc.heightmapDesc.height = heightmap.height;
-
-    m_heightR16.resize(size_t(heightmap.width) * size_t(heightmap.height));
-
-    const size_t heightRowBytes = static_cast<size_t>(heightmap.width) * sizeof(uint16_t);
-    heightmap.CopyPixels(reinterpret_cast<std::byte*>(m_heightR16.data()), heightRowBytes, heightmap.localRowPitch);
-    heightmap.PopulateCPU(true);
-    m_isOnCPU = true;
-
-    return true;
-}
-
-void Terrain::Upload(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
-{
-    ASSERT(m_isOnCPU, "No CPU data to upload");
-
-    NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
-    ASSERT(heightmap.uploadBuffer, "m_isOnCPU set but upload buffer is not valid.");
-
-    m_texSrvHandle = rendererCtx.allocSRVStatic(1u);
-    heightmap.srvOffset = rendererCtx.offsetSRV(m_texSrvHandle, 0u);
-    heightmap.PopulateGPU(
-        cmdList, true,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-    );
-
-    m_isOnGPU = true;
-}
-
-void Terrain::Free(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
-{
-    if (m_texSrvHandle.amount > 0) rendererCtx.freeSRVStatic(m_texSrvHandle);
-    m_texSrvHandle = {};
-
-    for (NSTexture::Texture& tex : m_textures) tex = NSTexture::Texture{};
-
-    m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
-    {
-        return ELoopConditionFlag::CONTINUE;
-    });
-
-    m_pages.Clear();
-    m_pages = {};
-
-    m_isOnGPU = false;
-}
-void Terrain::Unload(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
-{
-    Free(cmdList, rendererCtx);
 }
 void Terrain::ReleaseUploadBuffers()
 {
@@ -725,8 +798,6 @@ void Terrain::ReleaseUploadBuffers()
     {
         return ELoopConditionFlag::CONTINUE;
     });
-
-    m_isOnCPU = false;
 }
 
 void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
@@ -740,17 +811,24 @@ void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
     ASSERT(srcManifest.pageCountZ == pageManifest.pageCountZ);
     ASSERT(pageManifest.pageCountX < 100u and pageManifest.pageCountZ < 100u);
 
-    ASSERT(pageManifest.height.pageWidth > 1u);
-    ASSERT(pageManifest.height.pageHeight > 1u);
-    ASSERT(pageManifest.diffuse.pageWidth > 0u);
-    ASSERT(pageManifest.diffuse.pageHeight > 0u);
+    const uint32_t heightHalo = pageManifest.height.haloPixels;
+    const uint32_t diffuseHalo = pageManifest.diffuse.haloPixels;
+    const uint32_t heightCoreW = pageManifest.height.pageWidth - 2u * heightHalo;
+    const uint32_t heightCoreH = pageManifest.height.pageHeight - 2u * heightHalo;
+    const uint32_t diffuseCoreW = pageManifest.diffuse.pageWidth - 2u * diffuseHalo;
+    const uint32_t diffuseCoreH = pageManifest.diffuse.pageHeight - 2u * diffuseHalo;
 
-    const uint32_t heightQuadsPerPageX = pageManifest.height.pageWidth - 1u;
-    const uint32_t heightQuadsPerPageZ = pageManifest.height.pageHeight - 1u;
+    ASSERT(heightCoreW > 1u);
+    ASSERT(heightCoreH > 1u);
+    ASSERT(diffuseCoreW > 0u);
+    ASSERT(diffuseCoreH > 0u);
+
+    const uint32_t heightQuadsPerPageX = heightCoreW - 1u;
+    const uint32_t heightQuadsPerPageZ = heightCoreH - 1u;
     ASSERT(heightQuadsPerPageX * pageManifest.pageCountX + 1u == pageManifest.height.sourceWidth);
     ASSERT(heightQuadsPerPageZ * pageManifest.pageCountZ + 1u == pageManifest.height.sourceHeight);
-    ASSERT(pageManifest.diffuse.pageWidth * pageManifest.pageCountX == pageManifest.diffuse.sourceWidth);
-    ASSERT(pageManifest.diffuse.pageHeight * pageManifest.pageCountZ == pageManifest.diffuse.sourceHeight);
+    ASSERT(diffuseCoreW * pageManifest.pageCountX == pageManifest.diffuse.sourceWidth);
+    ASSERT(diffuseCoreH * pageManifest.pageCountZ == pageManifest.diffuse.sourceHeight);
 
     const float worldPageWidth = srcManifest.worldWidth / static_cast<float>(pageManifest.pageCountX);
     const float worldPageDepth = srcManifest.worldDepth / static_cast<float>(pageManifest.pageCountZ);
@@ -781,15 +859,15 @@ void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
             {
                 .x = pageX * heightQuadsPerPageX,
                 .y = pageZ * heightQuadsPerPageZ,
-                .width = pageManifest.height.pageWidth,
-                .height = pageManifest.height.pageHeight
+                .width = heightCoreW,
+                .height = heightCoreH
             };
             page->diffuseSourceRect =
             {
-                .x = pageX * pageManifest.diffuse.pageWidth,
-                .y = pageZ * pageManifest.diffuse.pageHeight,
-                .width = pageManifest.diffuse.pageWidth,
-                .height = pageManifest.diffuse.pageHeight
+                .x = pageX * diffuseCoreW,
+                .y = pageZ * diffuseCoreH,
+                .width = diffuseCoreW,
+                .height = diffuseCoreH
             };
             page->worldRect =
             {
@@ -837,49 +915,6 @@ void Terrain::BuildPageLayout(EntityMap<TerrainPage>& out_Pages)
         }
     }
 }
-float Terrain::SampleHeight(float u, float v) const
-{
-    ASSERT(not m_heightR16.empty());
-    const NSTexture::Texture& heightmap = m_textures[static_cast<size_t>(TextureIDs::HEIGHTMAP)];
-    ASSERT(heightmap.width > 1u and heightmap.height > 1u, "Invalid heightmap dimensions");
-
-    u = NSMath::Saturate(u);
-    v = NSMath::Saturate(v);
-
-    const uint32_t width = heightmap.width;
-    const uint32_t depth = heightmap.height;
-    const float widthF = static_cast<float>(width);
-    const float depthF = static_cast<float>(depth);
-
-    const float x = u * (widthF - 1.f);
-    const float z = v * (depthF - 1.f);
-
-    const uint32_t x0 = static_cast<uint32_t>(std::floor(x));
-    const uint32_t z0 = static_cast<uint32_t>(std::floor(z));
-
-    const uint32_t x1 = std::min(x0 + 1u, width - 1u);
-    const uint32_t z1 = std::min(z0 + 1u, depth - 1u);
-
-    const float tx = x - static_cast<float>(x0);
-    const float tz = z - static_cast<float>(z0);
-
-    const auto At = [this, width](uint32_t sampleX, uint32_t sampleZ)
-    {
-        const uint16_t h = m_heightR16[size_t(sampleZ) * size_t(width) + size_t(sampleX)];
-        return static_cast<float>(h) / std::numeric_limits<uint16_t>::max();
-    };
-
-    const float h00 = At(x0, z0);
-    const float h10 = At(x1, z0);
-    const float h01 = At(x0, z1);
-    const float h11 = At(x1, z1);
-
-    const float hx0 = NSMath::Lerp(h00, h10, tx);
-    const float hx1 = NSMath::Lerp(h01, h11, tx);
-
-    return NSMath::Lerp(hx0, hx1, tz);
-}
-
 bool Terrain::LoadSourceManifest()
 {
     std::filesystem::path path = m_root / kSourceManifestFilesName;
@@ -994,6 +1029,8 @@ bool Terrain::PageMatchesSource()
 {
     if(not pageManifest.isPresent) return false;
 
+    if(pageManifest.cacheVersion != kPageGeneration) return false;
+
     return pageManifest.sourceManifestHash == ComputeSourceManifestHash();
 }
 std::string Terrain::ComputeSourceManifestHash()
@@ -1081,14 +1118,11 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
         {
             WritePageName(pagePathStr, pageNameOffset, pageX, pageZ);
 
-            WriteTexturePageBin(heightTexture, pagePathStr,
-                {
-                    .x = pageX * quadsPerPageX,
-                    .y = pageZ * quadsPerPageZ,
-                    .width = pageWidth,
-                    .height = pageHeight
-                },
-                NSTexture::ECopyPixelEdgeMode::CLAMP
+            WriteTexturePageBinHalo(heightTexture, pagePathStr,
+                static_cast<int64_t>(pageX) * quadsPerPageX,
+                static_cast<int64_t>(pageZ) * quadsPerPageZ,
+                pageWidth, pageHeight,
+                kHaloPixels
             );
         }
     }
@@ -1098,10 +1132,10 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
         .sourceWidth = quadsPerPageX * srcManifest.pageCountX + 1u,
         .sourceHeight = quadsPerPageZ * srcManifest.pageCountZ + 1u,
         .format = srcManifest.heightmap.format,
-        .pageWidth = pageWidth,
-        .pageHeight = pageHeight,
+        .pageWidth = pageWidth + 2u * kHaloPixels,
+        .pageHeight = pageHeight + 2u * kHaloPixels,
         .bytesPerPixel = NSTexture::BytesPerPixel(srcManifest.heightmap.format),
-        .haloPixels = 0u
+        .haloPixels = kHaloPixels
     };
 }
 
@@ -1135,23 +1169,23 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
 
     ASSERT(diffuseTexture.width > 1u and diffuseTexture.height > 1u);
 
-    const uint32_t pageWidth = diffuseTexture.width / srcManifest.pageCountX;
-    const uint32_t pageHeight = diffuseTexture.height / srcManifest.pageCountZ;
+    const uint32_t coreWidth = diffuseTexture.width / srcManifest.pageCountX;
+    const uint32_t coreHeight = diffuseTexture.height / srcManifest.pageCountZ;
 
     if (diffuseTexture.width % srcManifest.pageCountX != 0u || diffuseTexture.height % srcManifest.pageCountZ != 0u)
     {
         g_FWarn("Diffuse texture size adjusted during page generation (original: %u x %u, page-covered: %u x %u)",
-            diffuseTexture.width, diffuseTexture.height, pageWidth * srcManifest.pageCountX, pageHeight * srcManifest.pageCountZ);
+            diffuseTexture.width, diffuseTexture.height, coreWidth * srcManifest.pageCountX, coreHeight * srcManifest.pageCountZ);
     }
 
     PageTextureManifest manifest {
         .sourceWidth = diffuseTexture.width,
         .sourceHeight = diffuseTexture.height,
         .format = srcManifest.diffuse.format,
-        .pageWidth = pageWidth,
-        .pageHeight = pageHeight,
+        .pageWidth = coreWidth + 2u * kHaloPixels,
+        .pageHeight = coreHeight + 2u * kHaloPixels,
         .bytesPerPixel = NSTexture::BytesPerPixel(srcManifest.diffuse.format),
-        .haloPixels = 0u
+        .haloPixels = kHaloPixels
     };
 
     for (uint32_t pageZ{}; pageZ < srcManifest.pageCountZ; pageZ++)
@@ -1160,14 +1194,11 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
         {
             WritePageName(pagePathStr, pageNameOffset, pageX, pageZ);
 
-            WriteTexturePageBin(diffuseTexture, pagePathStr,
-                {
-                    .x = pageX * manifest.pageWidth,
-                    .y = pageZ * manifest.pageHeight,
-                    .width = manifest.pageWidth,
-                    .height = manifest.pageHeight
-                },
-                NSTexture::ECopyPixelEdgeMode::REPEAT
+            WriteTexturePageBinHalo(diffuseTexture, pagePathStr,
+                static_cast<int64_t>(pageX) * coreWidth,
+                static_cast<int64_t>(pageZ) * coreHeight,
+                coreWidth, coreHeight,
+                kHaloPixels
             );
         }
     }
@@ -1191,7 +1222,7 @@ NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std
     std::vector<std::byte> bytes(static_cast<size_t>(fileSize));
 
     std::ifstream file(path, std::ios::binary);
-    ASSERT(file.is_open(), "Failed to open terrain page texture");
+    if (not file.is_open()) ASSERT(errno);
 
     file.read(
         reinterpret_cast<char*>(bytes.data()),
@@ -1218,175 +1249,25 @@ NSTexture::Texture Terrain::LoadPageTextureBin(std::wstring_view name, const std
     return tex;
 }
 
-std::shared_ptr<GPUSlot> Terrain::GetGPUSlot(ObserverKey pageKey, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
-{
-    ASSERT(m_pages.Contains(pageKey));
-    auto page = m_pages.Get(pageKey);
-
-    m_currentFrame++;
-
-    if (page->gpuSlotKey.entID == InvalidEntityID)
-    {
-        page->gpuSlotKey = ClaimSlotForPage(pageKey);
-    }
-
-    auto slot = m_gpuPool.Get(page->gpuSlotKey);
-    slot->lastFrameVisible = m_currentFrame;
-
-    if (not slot->isReady)
-    {
-        if (page->residency == TerrainPage::EPageResidency::Present || page->residency == TerrainPage::EPageResidency::Missing)
-        {
-            page->residency = TerrainPage::EPageResidency::Loading;
-
-            std::wstring pageNameHeightmap = NSTool::wformat(L"page_%02u_%02u::HeightmapBin", page->index.gridX, page->index.gridZ);
-            std::wstring pageNameDiffuse = NSTool::wformat(L"page_%02u_%02u::DiffuseBin", page->index.gridX, page->index.gridZ);
-
-            std::shared_ptr<TerrainPage> pagePtr = page;
-
-            std::thread([this, pagePtr, pageNameHeightmap, pageNameDiffuse]()
-            {
-                pagePtr->heightTexturePage = this->LoadPageTextureBin(
-                    pageNameHeightmap,
-                    pagePtr->heightTexturePage.path,
-                    this->pageManifest.height,
-                    NSTexture::EType::HEIGHT
-                );
-
-                pagePtr->diffuseTexturePage = this->LoadPageTextureBin(
-                    pageNameDiffuse,
-                    pagePtr->diffuseTexturePage.path,
-                    this->pageManifest.diffuse,
-                    NSTexture::EType::DIFFUSE
-                );
-
-                const uint32_t pageWidth = this->pageManifest.height.pageWidth;
-                const uint32_t pageHeight = this->pageManifest.height.pageHeight;
-                pagePtr->vertices.resize(static_cast<size_t>(pageWidth) * pageHeight);
-
-                const float worldPageWidth = this->srcManifest.worldWidth / static_cast<float>(this->pageManifest.pageCountX);
-                const float worldPageDepth = this->srcManifest.worldDepth / static_cast<float>(this->pageManifest.pageCountZ);
-
-                for (uint32_t z = 0; z < pageHeight; ++z)
-                {
-                    for (uint32_t x = 0; x < pageWidth; ++x)
-                    {
-                        const float uLocal = static_cast<float>(x) / static_cast<float>(pageWidth - 1);
-                        const float vLocal = static_cast<float>(z) / static_cast<float>(pageHeight - 1);
-
-                        const float uGlobal = pagePtr->uvRect.x + uLocal * pagePtr->uvRect.width;
-                        const float vGlobal = pagePtr->uvRect.y + vLocal * pagePtr->uvRect.height;
-
-                        const float worldX = pagePtr->worldRect.x + uLocal * worldPageWidth;
-                        const float worldZ = pagePtr->worldRect.y + vLocal * worldPageDepth;
-                        const float worldY = this->SampleHeight(uGlobal, vGlobal) * this->m_desc.maxHeight;
-
-                        Vertex& v = pagePtr->vertices[static_cast<size_t>(z) * pageWidth + x];
-                        v.position = { worldX, worldY, worldZ };
-                        v.texCoord = { uGlobal, vGlobal };
-                    }
-                }
-
-                pagePtr->residency = TerrainPage::EPageResidency::Loaded;
-            }).detach();
-        }
-        else if (page->residency == TerrainPage::EPageResidency::Loaded)
-        {
-            CopyPageToGPU(page, slot, cmdList, rendererCtx);
-        }
-    }
-
-    return slot;
-}
-
-ObserverKey Terrain::ClaimSlotForPage(ObserverKey pageKey)
-{
-    std::shared_ptr<GPUSlot> chosenSlot = nullptr;
-    m_gpuPool.ForEach([&](EntityID, std::shared_ptr<GPUSlot> slot) -> LoopCondition
-    {
-        if (slot->virtualPageIndex == -1)
-        {
-            chosenSlot = slot;
-            return ELoopConditionFlag::BREAK;
-        }
-        return ELoopConditionFlag::CONTINUE;
-    });
-
-    if (chosenSlot == nullptr)
-    {
-        uint64_t oldestTime = std::numeric_limits<uint64_t>::max();
-        m_gpuPool.ForEach([&](EntityID, std::shared_ptr<GPUSlot> slot) -> LoopCondition
-        {
-            if (slot->lastFrameVisible < oldestTime)
-            {
-                oldestTime = slot->lastFrameVisible;
-                chosenSlot = slot;
-            }
-            return ELoopConditionFlag::CONTINUE;
-        });
-
-        ASSERT(chosenSlot != nullptr);
-        EvictSlot(chosenSlot);
-    }
-
-    auto page = m_pages.Get(pageKey);
-    chosenSlot->virtualPageIndex = static_cast<int>(page->index.gridZ * pageManifest.pageCountX + page->index.gridX);
-    chosenSlot->mappedPageKey = pageKey;
-    chosenSlot->isReady = false;
-
-    return chosenSlot->m_id;
-}
-
-void Terrain::EvictSlot(std::shared_ptr<GPUSlot> slot)
-{
-    if (m_pages.Contains(slot->mappedPageKey))
-    {
-        auto oldPage = m_pages.Get(slot->mappedPageKey);
-        oldPage->gpuSlotKey = {};
-        oldPage->isOnGPU = false;
-
-        if (oldPage->residency == TerrainPage::EPageResidency::Loaded)
-        {
-            oldPage->vertices.clear();
-            oldPage->vertices.shrink_to_fit();
-            oldPage->heightTexturePage.defaultBuffer.Reset();
-            oldPage->diffuseTexturePage.defaultBuffer.Reset();
-            oldPage->residency = TerrainPage::EPageResidency::Present;
-        }
-    }
-    slot->virtualPageIndex = -1;
-    slot->mappedPageKey = {};
-    slot->isReady = false;
-}
-
-void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<GPUSlot> slot, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<StreamSlot> slot, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
 {
     ASSERT(page->residency == TerrainPage::EPageResidency::Loaded);
+    ASSERT(slot->residency != StreamSlot::ESlotResidency::Loaded);
 
-    // 1. Upload Heightmap Texture
+    // Heightmap Texture
     {
-        NSTexture::Texture& heightmap = page->heightTexturePage;
-        heightmap.defaultBuffer = slot->heightmapDefault;
-        heightmap.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 0u);
+        page->heightTexturePage.defaultBuffer = slot->heightmapDefault;
+        page->heightTexturePage.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 0u);
 
-        heightmap.PopulateGPU(
-            cmdList, true,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-        );
-        heightmap.uploadBuffer.Reset();
+        page->heightTexturePage.PopulateGPU(cmdList, true, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     }
 
-    // 2. Upload Diffuse Texture
+    // Diffuse Texture
     {
-        NSTexture::Texture& diffuse = page->diffuseTexturePage;
-        diffuse.defaultBuffer = slot->diffuseDefault;
-        diffuse.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 1u);
+        page->diffuseTexturePage.defaultBuffer = slot->diffuseDefault;
+        page->diffuseTexturePage.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 1u);
 
-        diffuse.PopulateGPU(
-            cmdList, true,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-        );
-        diffuse.uploadBuffer.Reset();
+        page->diffuseTexturePage.PopulateGPU(cmdList, true, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     }
 
     // 3. Upload Vertex Buffer
@@ -1419,7 +1300,6 @@ void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<G
     page->vertices.clear();
     page->vertices.shrink_to_fit();
 
-    page->residency = TerrainPage::EPageResidency::Loaded;
+    slot->residency = StreamSlot::ESlotResidency::Loaded;
     page->isOnGPU = true;
-    slot->isReady = true;
 }

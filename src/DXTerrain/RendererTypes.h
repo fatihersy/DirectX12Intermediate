@@ -56,6 +56,8 @@ namespace NSBarrier
 
     inline constexpr BarrierKey kApp_beginModelLoad{ "App.beginModelLoad" };
     inline constexpr BarrierKey kApp_endModelLoad  { "App.endModelLoad" };
+
+    inline constexpr BarrierKey kTerrain_terrainOnInit{ "Terrain.terrainOnInit" };
 }
 
 struct FrameConstants
@@ -190,7 +192,8 @@ struct TerrainConstants
     DirectX::XMFLOAT2 chunkUVScale{};
     uint32_t heightmapSrvIndex{};
     uint32_t terrainDiffuseSrvIndex{};
-    uint32_t PADDING_1[2]{};
+    uint32_t pageHalo{};
+    uint32_t PADDING_1{};
     uint32_t splatSrvIndices[4]{};
 };
 static_assert(sizeof(TerrainConstants) % 16 == 0);

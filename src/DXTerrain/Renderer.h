@@ -18,6 +18,7 @@ public:
 
     void Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSRenderer::RendererDescription desc);
 
+    void Update();
     void BeginFrame();
     void DrawScene(NSScene::IScene& scene);
     void EndFrame();
@@ -91,10 +92,10 @@ public:
 
     bool CreateTerrain(NSDX12::GraphicsCommandList cmdList, const std::string_view root, NSTerrain::TerrainDesc desc)
     {
-        return m_terrain.OnInit(cmdList, GetCtx(), root, desc);
+        return m_terrain->OnInit(cmdList, GetCtx(), root, desc);
     }
 
-    const NSTerrain::Terrain& GetTerrain() const {
+    std::shared_ptr<NSTerrain::ITerrainView> GetTerrain() {
         return m_terrain;
     }
 
@@ -150,6 +151,10 @@ private:
     ComPtr<ID3D12CommandQueue> m_commandQueue;
     ComPtr<ID3D12GraphicsCommandList10> m_commandList;
 
+    ComPtr<ID3D12CommandAllocator> m_copyCommandAllocators[IApp::ic_framesInFlight];
+    ComPtr<ID3D12GraphicsCommandList10> m_copyCommandList;
+    std::shared_ptr<NSDX12::CopyCommandList> m_copyCmdListPublic;
+
     ComPtr<ID3D12Fence1> m_fence;
     HANDLE m_fenceEvent = nullptr;
     UINT64 m_fenceGeneration{};
@@ -188,7 +193,7 @@ private:
 
     constexpr static float CLEAR_COLOR[4] = { .0f, .0f, .0f, 1.f };
 
-    NSTerrain::Terrain m_terrain;
+    std::shared_ptr<NSTerrain::Terrain> m_terrain;
 
     NSRenderPass::DebugUtils m_debugUtils;
 

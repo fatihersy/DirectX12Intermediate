@@ -133,9 +133,9 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
         device,
         L"Renderer::m_srvHeap",
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        1024u,
+        1024u * 8u,
         IApp::ic_framesInFlight,
-        1024u
+        1024u * 8u
     );
     m_fallbackSrvHeap = NSDescriptor::StaticHeap(device, L"Renderer::m_fallbackSrvHeap", D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1u, false);
 
@@ -150,6 +150,9 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
 
             ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[frame])));
             m_commandAllocators[frame]->SetName(NSTool::wformat(L"%s[%u]", L"Renderer::m_commandAllocators", frame).c_str());
+
+            ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_copyCommandAllocators[frame])));
+            m_copyCommandAllocators[frame]->SetName(NSTool::wformat(L"Renderer::m_copyCommandAllocators[%u]", frame).c_str());
         }
     }
 
@@ -162,10 +165,15 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
         .outDSV = m_depthStencil
     });
 
-    // Command List
+    // Command Lists
     {
         ThrowIfFailed(m_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&m_commandList)));
         m_commandList->SetName(L"Renderer::m_commandList");
+
+        ThrowIfFailed(m_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&m_copyCommandList)));
+        m_copyCommandList->SetName(L"Renderer::m_copyCommandList");
+
+        m_copyCmdListPublic = std::make_shared<NSDX12::CopyCommandList>(NSDX12::CopyCommandList(m_copyCommandList.Get()));
     }
 
     // Create synchronization objects
@@ -293,14 +301,11 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
 
     CreateFallbackTexture();
 
-    {
-        NSTerrain::Terrain terrain(device);
-        m_terrain = std::move(terrain);
-    }
+    m_terrain = std::make_shared<NSTerrain::Terrain>(device);
 
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, desc.width);
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, desc.height);
-    m_blackboard.Set<std::reference_wrapper<const NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain, std::cref(m_terrain));
+    m_blackboard.Set<std::shared_ptr<NSTerrain::ITerrainView>>(NSRenderer::kRenderer_terrain, m_terrain);
 
     {
         EntityMap<NSRenderer::Model> models;
@@ -334,6 +339,10 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
             .SetIsEnabled(true);
     });
 }
+void Renderer::Update()
+{
+    m_terrain->Update(m_copyCmdListPublic, GetCtx());
+}
 Renderer::~Renderer()
 {
 }
@@ -343,7 +352,7 @@ void Renderer::OnDestroy()
 
     NSRenderer::Ctx rendererCtx = GetCtx();
 
-    m_terrain.OnDestroy(rendererCtx);
+    m_terrain->OnDestroy(rendererCtx);
 
     m_fallbackSrvHeap.Free(m_fallbackTextureSRVhandle);
     m_fallbackTexture.defaultBuffer.Reset();
@@ -364,9 +373,11 @@ void Renderer::OnDestroy()
     m_swapChain.Reset();
 
     m_commandList.Reset();
+    m_copyCommandList.Reset();
     for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
     {
         m_commandAllocators[i].Reset();
+        m_copyCommandAllocators[i].Reset();
     }
     m_commandQueue.Reset();
 
@@ -379,7 +390,7 @@ void Renderer::OnDestroy()
 
     m_shaderCompiler.reset();
 
-    m_terrain = NSTerrain::Terrain{};
+    m_terrain.reset();
 
     m_srvHeap = NSDescriptor::RingHeap{};
     m_rtvHeap = NSDescriptor::StaticHeap{};
@@ -523,9 +534,13 @@ void Renderer::EndFrame()
     }
 
     ThrowIfFailed(m_commandList->Close());
+    ThrowIfFailed(m_copyCommandList->Close());
 
-    ID3D12CommandList *const lists[] = { m_commandList.Get() };
-    m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
+    {
+        ID3D12CommandList* const lists[] = { m_copyCommandList.Get(), m_commandList.Get() };
+        m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
+        m_copyCmdListPublic->m_HasPendingCopy = false;
+    }
 
     ThrowIfFailed(m_swapChain->Present(1, 0));
 

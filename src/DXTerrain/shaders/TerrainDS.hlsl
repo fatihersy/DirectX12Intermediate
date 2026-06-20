@@ -31,7 +31,8 @@ struct TerrainConstants
     float2 chunkUVScale;
     uint heightmapSrvIndex;
     uint terrainDiffuseSrvIndex;
-    uint2 PADDING_1;
+    uint pageHalo;
+    uint PADDING_1;
     uint4 splatSrvIndices;
 };
 
@@ -87,15 +88,26 @@ DSOutput DS_Terrain(HSPatchConstants patchConstants, float2 domainUV : SV_Domain
 
     Texture2D<float> heightmap = ResourceDescriptorHeap[terrainCB.heightmapSrvIndex];
 
-    float2 hmUV = uv;
+    // Page-local position in [0,1] across the page's core (non-halo) region.
+    float2 pageLocal = (uv - terrainCB.chunkUVOffset) / terrainCB.chunkUVScale;
+
+    uint hmWidth;
+    uint hmHeight;
+    heightmap.GetDimensions(hmWidth, hmHeight);
+
+    // Map the page-local position into the haloed heightmap. The heightmap core is
+    // grid-centred (first/last core texels sit on the page edges), offset inward by
+    // the halo gutter so border taps can reach real cross-page neighbours.
+    float halo = (float)terrainCB.pageHalo;
+    float2 coreSpan = float2(hmWidth, hmHeight) - 2.0f * halo - 1.0f; // (core texels - 1)
+    float2 hmUV = (halo + pageLocal * coreSpan + 0.5f) / float2(hmWidth, hmHeight);
+
     worldPos.y = SampleHeight(heightmap, hmUV);
 
     #ifndef DEPTH_PREPASS
-        uint hmWidth;
-        uint hmHeight;
-        heightmap.GetDimensions(hmWidth, hmHeight);
-
-        float2 texelUV = 1.0f / float2(max(hmWidth - 1u, 1u), max(hmHeight - 1u, 1u));
+        // One full heightmap texel; thanks to the halo gutter these neighbour taps read
+        // real cross-page data at borders instead of clamping onto the page's own edge.
+        float2 texelUV = 1.0f / float2(hmWidth, hmHeight);
 
         float hL = SampleHeight(heightmap, hmUV + float2(-texelUV.x, 0.0f));
         float hR = SampleHeight(heightmap, hmUV + float2( texelUV.x, 0.0f));
@@ -120,7 +132,7 @@ DSOutput DS_Terrain(HSPatchConstants patchConstants, float2 domainUV : SV_Domain
         output.worldPos = worldPos;
         output.normal = normal;
         output.uv = uv;
-        output.hmUV = hmUV;
+        output.hmUV = pageLocal;
     #endif
 
     return output;

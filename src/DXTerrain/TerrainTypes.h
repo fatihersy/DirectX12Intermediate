@@ -2,7 +2,6 @@
 #include "core/Math.h"
 #include "core/EntityTypes.h"
 
-#include "RendererTypes.h"
 #include "TextureTypes.h"
 #include "DescriptorTypes.h"
 
@@ -51,7 +50,8 @@ namespace NSTerrain
     constexpr std::string_view kSourcePagesFolderName = "pages";
     constexpr std::string_view kSourceHeightmapBinFilesName = "heightmap.bin";
     constexpr std::string_view kSourceDiffuseBinFilesName = "diffuse.bin";
-    constexpr uint64_t kPageGeneration = 1u;
+    constexpr uint64_t kPageGeneration = 2u;
+    constexpr uint32_t kHaloPixels = 2u;
 
     //constexpr std::string_view kSourcePageFolderNameFormatter = {}; // "page_%02d_%02d";
 
@@ -161,33 +161,50 @@ namespace NSTerrain
         DirectX::XMFLOAT2 texCoord{};
     };
 
-    struct GPUSlot
+    struct StreamSlot
     {
-        EntityKey<GPUSlot> m_id;
-
-        int virtualPageIndex = -1;
-        ObserverKey mappedPageKey;
-        uint64_t lastFrameVisible = 0;
-        bool isReady = false;
+        EntityKey<StreamSlot> m_id;
+        ObserverKey pageKey;
+        uint64_t generation = 0;
 
         ComPtr<ID3D12Resource2> heightmapDefault;
         ComPtr<ID3D12Resource2> diffuseDefault;
-        ComPtr<ID3D12Resource> vertexDefault;
 
+        ComPtr<ID3D12Resource> vertexDefault;
         ComPtr<ID3D12Resource> vertexUpload;
 
         NSDescriptor::Handle srvHandle;
         uint32_t heightmapSRVIndex = 0;
         uint32_t diffuseSRVIndex = 0;
-
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
+
+        enum class ESlotResidency : uint8_t
+        {
+            Unknown = 0u,
+            Missing,
+            Loading,
+            Loaded,
+            Failed,
+        } residency = ESlotResidency::Unknown;
+    };
+
+    struct StreamSlotView : NSMath::ICullable
+    {
+        EntityKey<StreamSlotView> m_id;
+
+        StreamSlotView(ObserverKey inSlotKey) : slotKey(inSlotKey) {};
+        const ObserverKey slotKey;
+
+        ObserverKey pageKey;
+
+        enum class StreamSlot::ESlotResidency residency = StreamSlot::ESlotResidency::Unknown;
     };
 
     struct TerrainPage : public NSMath::ICullable
     {
         uint32_t terrainLod{};
-        PageIndex index;
         EntityKey<TerrainPage> m_id;
+        PageIndex index;
 
         NSMath::SRectU32 heightSourceRect{};
         NSMath::SRectU32 diffuseSourceRect{};
@@ -199,7 +216,7 @@ namespace NSTerrain
         NSTexture::Texture diffuseTexturePage{};
 
         std::vector<Vertex> vertices;
-        ObserverKey gpuSlotKey;
+        ObserverKey slotKey;
 
         bool isOnCPU{};
         bool isOnGPU{};
@@ -220,15 +237,15 @@ namespace NSTerrain
     public:
         virtual ~ITerrainView() = default;
 
+        virtual bool isInitialized() const = 0;
         virtual const TerrainDesc& GetDesc() const = 0;
-        virtual const EntityMap<TerrainPage>& GetPages() const = 0;
         virtual NSDescriptor::Offset GetHeightmapSRV() const = 0;
-        virtual bool IsOnCPU() const = 0;
-        virtual bool IsOnGPU() const = 0;
 
         virtual D3D12_INDEX_BUFFER_VIEW GetSharedPatchIndexBufferView() const = 0;
         virtual uint32_t GetSharedPatchIndexCount() const = 0;
 
-        virtual std::shared_ptr<GPUSlot> GetGPUSlot(ObserverKey pageKey, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx) = 0;
+        virtual const EntityMap<TerrainPage>& GetPageLayout() const = 0;
+        virtual const EntityMap<StreamSlot>& GetSlots() const = 0;
+        virtual EntityMap<StreamSlotView>& GetSlotsView() = 0;
     };
 }

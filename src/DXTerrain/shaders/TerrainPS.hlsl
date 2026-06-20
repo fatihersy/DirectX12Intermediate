@@ -21,7 +21,8 @@ struct TerrainConstants
     float2 chunkUVScale;
     uint heightmapSrvIndex;
     uint terrainDiffuseSrvIndex;
-    uint2 PADDING_1;
+    uint pageHalo;
+    uint PADDING_1;
     uint4 splatSrvIndices;
 };
 
@@ -100,7 +101,17 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
     float3 rockTex  = rockMap.Sample(linearWrapSampler, tiledUV * 0.85f).rgb;
     float3 snowTex  = snowMap.Sample(linearWrapSampler, tiledUV * 0.55f).rgb;
     float3 dirtTex  = dirtMap.Sample(linearWrapSampler, tiledUV * 0.65f).rgb;
-    float3 terrainDiffuseTex = terrainDiffuseMap.Sample(linearClampSampler, input.hmUV).rgb;
+    // input.hmUV is the page-local position in [0,1]. The diffuse core is area-centred
+    // (texels tile the page), inset by the halo gutter so border samples blend with the
+    // neighbouring page's real texels instead of clamping.
+    uint diffW;
+    uint diffH;
+    terrainDiffuseMap.GetDimensions(diffW, diffH);
+    float diffHalo = (float)terrainCB.pageHalo;
+    float2 diffCore = float2(diffW, diffH) - 2.0f * diffHalo; // core texels
+    float2 diffuseUV = (diffHalo + input.hmUV * diffCore) / float2(diffW, diffH);
+
+    float3 terrainDiffuseTex = terrainDiffuseMap.Sample(linearClampSampler, diffuseUV).rgb;
     terrainDiffuseTex = GreenCorrection(terrainDiffuseTex);
     terrainDiffuseTex = ApplyBasicTerrainGrade(terrainDiffuseTex);
 

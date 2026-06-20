@@ -150,7 +150,7 @@ namespace NSMath
 
         DirectX::XMVECTOR Planes[6]{};
 
-        bool TestBounds(BoundingBox& bb) const
+        bool TestBounds(const BoundingBox& bb) const
         {
             using namespace DirectX;
 

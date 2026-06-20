@@ -163,18 +163,7 @@ void app::LoadAssets()
 {
     m_renderer.Execute([this](NSRenderer::Ctx ctx, NSDX12::GraphicsCommandList cmdList)
     {
-        m_scene.OnInit(im_device.Get(), im_wicFactory.Get(), 12.f);
-
-        std::shared_ptr<NSScene::Camera> mainCam = m_scene.GetMainCamera();
-
-        m_scene.SetupCameraInfiniteProjection(
-            DE_REF(mainCam),
-            DirectX::XM_PIDIV4,
-            im_aspectRatio,
-            m_scene.NEAR_CLIP
-        );
-
-        m_scene.m_terrain.desc = NSTerrain::TerrainDesc
+        NSTerrain::TerrainDesc terrainDesc
         {
             .maxHeight = 8194.f,
             .pageCountX = 32,
@@ -199,32 +188,27 @@ void app::LoadAssets()
             }
         };
 
-        DirectX::XMFLOAT3 camEye{};
 
+        ASSERT(this->m_renderer.CreateTerrain(cmdList, "terrain", terrainDesc));
 
-        if (this->m_renderer.CreateTerrain(cmdList, "terrain", m_scene.m_terrain.desc))
-        {
-            camEye = {
-                0.f,
-                m_scene.m_terrain.desc.maxHeight * .5f,
-                0.f
-            };
-            mainCam->SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
+        DirectX::XMFLOAT3 camEye = {
+            0.f,
+            600.f,
+            0.f
+        };
 
-            this->m_renderer.GetTerrain().GetPages().ForEach([this](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page) -> LoopCondition
-            {
-                auto scenePage = std::make_shared<NSScene::TerrainPage>();
-                scenePage->index = page->index;
-                scenePage->m_registerKey = page->m_id;
-                scenePage->ICullable_Bound = page->ICullable_Bound;
-                scenePage->ICullable_Id = scenePage->m_id;
-                m_scene.m_terrain.pages.Add(scenePage);
+        m_scene.OnInit(ctx, im_device.Get(), im_wicFactory.Get(), this->m_renderer.GetTerrain(), 12.f);
 
-                return ELoopConditionFlag::CONTINUE;
-            });
+        std::shared_ptr<NSScene::Camera> mainCam = m_scene.GetMainCamera();
 
-            m_scene.m_terrain.isInitialized = true;
-        }
+        m_scene.SetupCameraInfiniteProjection(
+            DE_REF(mainCam),
+            DirectX::XM_PIDIV4,
+            im_aspectRatio,
+            m_scene.NEAR_CLIP
+        );
+
+        mainCam->SetCamera(camEye, { 0.f, 0.f, -1.f, 0.f }, { 0.f, 1.f, 0.f, 0.f });
 
         ObserverKey sDomeKey;
         {
@@ -398,6 +382,8 @@ void app::OnUpdate()
     m_timer.Tick(NULL);
 
     app::UpdateBindings();
+
+    m_renderer.Update();
 
     m_scene.OnUpdate();
 };

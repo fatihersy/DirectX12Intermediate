@@ -68,6 +68,23 @@ struct EntityMap
 
         return map.at(id);
     }
+   auto Begin()
+    {
+        return map.begin();
+    }
+    auto CBegin() const
+    {
+        return map.cbegin();
+    }
+    auto End()
+    {
+        return map.end();
+    }
+    auto CEnd() const
+    {
+        return map.cend();
+    }
+
     void ForEach(std::function<LoopCondition(EntityID, std::shared_ptr<T>)> eval)
     {
         for (auto& [key, val] : map)

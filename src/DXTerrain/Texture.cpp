@@ -542,12 +542,12 @@ namespace NSTexture
     }
     void Texture::UnloadCPU()
     {
-        uploadBuffer->Release();
+        uploadBuffer.Reset();
         m_isOnCPU = false;
     }
     void Texture::UnloadGPU()
     {
-        defaultBuffer->Release();
+        defaultBuffer.Reset();
         m_isOnGPU = false;
     }
 
