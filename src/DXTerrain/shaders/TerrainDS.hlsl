@@ -102,8 +102,6 @@ DSOutput DS_Terrain(HSPatchConstants patchConstants, float2 domainUV : SV_Domain
     float2 coreSpan = float2(hmWidth, hmHeight) - 2.0f * halo - 1.0f; // (core texels - 1)
     float2 hmUV = (halo + pageLocal * coreSpan + 0.5f) / float2(hmWidth, hmHeight);
 
-    worldPos.y = SampleHeight(heightmap, hmUV);
-
     #ifndef DEPTH_PREPASS
         // One full heightmap texel; thanks to the halo gutter these neighbour taps read
         // real cross-page data at borders instead of clamping onto the page's own edge.

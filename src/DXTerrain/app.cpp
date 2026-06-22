@@ -9,6 +9,8 @@
 #include "RenderPass.h"
 #include "Model.h"
 
+#include "core/Units.h"
+
 IApp* IApp::s_instance = nullptr;
 
 Platform plat;
@@ -165,7 +167,7 @@ void app::LoadAssets()
     {
         NSTerrain::TerrainDesc terrainDesc
         {
-            .maxHeight = 8194.f,
+            .maxHeight = NSUnits::Meters(8194.f).ToWorld(),
             .pageCountX = 32,
             .pageCountZ = 32,
             .chunkCountX = 32,
@@ -193,7 +195,7 @@ void app::LoadAssets()
 
         DirectX::XMFLOAT3 camEye = {
             0.f,
-            600.f,
+            NSUnits::Meters(600.f).ToWorld(),
             0.f
         };
 
@@ -216,7 +218,7 @@ void app::LoadAssets()
             (
                 NSModel::AddCtx { .name = L"SkyDome" },
                 NSModel::SDome {
-                    .radius = 10000.f,
+                    .radius = NSUnits::Meters(10000.f).ToWorld(),
                     .sliceCount = 64,
                     .stackCount = 32
                 },
@@ -230,7 +232,7 @@ void app::LoadAssets()
         }
 
         {
-            const float stride = 11.f;
+            const float stride = NSUnits::Meters(11.f).ToWorld();
             const float gridStartPosX = 5.f * stride / -2.f;
             const float gridStartPosY = 5.f * stride / -2.f;
 
@@ -246,7 +248,7 @@ void app::LoadAssets()
                 const float posZ = 0.f + camEye.z - 100.f;
 
                 NSModel::PrimitiveTraits<NSModel::SSphere> desc({
-                    .radius = 5.f,
+                    .radius = NSUnits::Meters(5.f).ToWorld(),
                     .sliceCount = 20,
                     .stackCount = 20
                 });
@@ -385,7 +387,7 @@ void app::OnUpdate()
 
     m_renderer.Update();
 
-    m_scene.OnUpdate();
+    m_scene.OnUpdate(m_renderer.GetCtx());
 };
 void app::OnRender()
 {

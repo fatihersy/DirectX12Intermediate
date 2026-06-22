@@ -1406,8 +1406,6 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
     const NSTerrain::TerrainDesc& desc = scene.m_terrainView->GetDesc();
-    const float worldTexelSpacingX = 0.f; // TODO: Placeholder. Fix it later desc.worldWidth / static_cast<float>(desc.dimention - 1u);
-    const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
     const uint32_t heightmapSrvIndex = scene.m_terrainView->GetHeightmapSRV().index;
 
     D3D12_INDEX_BUFFER_VIEW ibView = scene.m_terrainView->GetSharedPatchIndexBufferView();
@@ -1430,8 +1428,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
                 TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
                 DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
                 cbuffer.maxHeight = desc.maxHeight;
-                cbuffer.worldTexelSpacingX = desc.worldWidth / 16384.f;
-                cbuffer.worldTexelSpacingZ = desc.worldDepth / 16384.f;
+                cbuffer.worldTexelSpacingX = desc.worldWidth / desc.heightmapDesc.width;
+                cbuffer.worldTexelSpacingZ = desc.worldDepth / desc.heightmapDesc.height;
                 cbuffer.tessFactorScale = 1.f;
                 cbuffer.textureTilingFactor = 64.f;
                 cbuffer.chunkUVOffset = { page->uvRect.x, page->uvRect.y };
@@ -1491,6 +1489,71 @@ DebugPass& DebugPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx
         desc.SampleMask = UINT_MAX;
 
         this->m_linePipeline = GraphicsPipeline(m_device, L"DebugPass::m_linePipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+        {
+            CD3DX12_ROOT_PARAMETER1 rp[1]{};
+            rp[0].InitAsConstantBufferView(0, 0);
+
+            CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC desc{};
+            desc.Init_1_1(_countof(rp), rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+            return D3DX12SerializeVersionedRootSignature(&desc, version, &signature, &error);
+        }).Init(
+            desc,
+            rasterDesc, dsDesc, blendDesc,
+            {
+                L"DebugLine.hlsl",
+                {
+                    L"-E", L"VSMain",
+                    L"-T", L"vs_6_0",
+                    L"-Zi",
+                    L"-Od"
+                },
+            },
+            {
+                L"DebugLine.hlsl",
+                {
+                    L"-E", L"PSMain",
+                    L"-T", L"ps_6_0",
+                    L"-Zi",
+                    L"-Od"
+                },
+            }
+        );
+    }
+
+    {
+        D3D12_INPUT_ELEMENT_DESC inputElements[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSDebug::Vertex, position),  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"COLOR",   0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, offsetof(NSDebug::Vertex, color),    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+
+        CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
+
+        CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
+        dsDesc.DepthEnable = TRUE;
+        dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+
+        CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
+        blendDesc.RenderTarget[0].BlendEnable = TRUE;
+        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+
+        GRAPHICS_PIPELINE_STATE_DESC desc{};
+        desc.InputLayout = { inputElements, _countof(inputElements) };
+        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+        desc.NumRenderTargets = 1;
+        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; // main backbuffer format
+        desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;          // main depth format
+        desc.SampleDesc.Count = 1;
+        desc.SampleMask = UINT_MAX;
+
+        this->m_worldGridPipeline = GraphicsPipeline(m_device, L"DebugPass::m_worldGridPipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
         {
             CD3DX12_ROOT_PARAMETER1 rp[1]{};
             rp[0].InitAsConstantBufferView(0, 0);
@@ -1649,8 +1712,107 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
 
     const std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
 
+    if (utils.m_drawWorldGrid)
+    {
+        using namespace DirectX;
+
+        constexpr float spacing = 1.f;
+        constexpr int half      = 128;
+        const float y           = utils.m_gridHeight;
+        const int majorEvery    = utils.m_gridMajorSpacing;
+
+        XMFLOAT3 camF{};
+        XMStoreFloat3(&camF, mainCam->camEye);
+        const float cx   = std::floor(camF.x / spacing) * spacing; // snap to grid
+        const float cz   = std::floor(camF.z / spacing) * spacing;
+        const float minX = cx - half * spacing;
+        const float maxX = cx + half * spacing;
+        const float minZ = cz - half * spacing;
+        const float maxZ = cz + half * spacing;
+
+        XMFLOAT4 minorColor{ 0.32f, 0.32f, 0.38f, 1.0f };
+        XMFLOAT4 majorColor{ 0.55f, 0.55f, 0.65f, 1.0f };
+        XMFLOAT4 axisXColor{ 0.85f, 0.25f, 0.25f, 1.0f };
+        XMFLOAT4 axisZColor{ 0.25f, 0.45f, 0.95f, 1.0f };
+
+        std::vector<NSDebug::Vertex> grid;
+        grid.reserve(static_cast<size_t>(2 * half + 1) * 4u);
+
+        const float gridRadius = static_cast<float>(half) * spacing;
+        const float fadeStart  = gridRadius * 0.4f;
+        const float fadeEnd    = gridRadius;
+        const float fadeRange  = std::max(fadeEnd - fadeStart, 0.001f);
+
+        auto LineAlpha = [&](float distFromCamera) -> float
+        {
+            const float t = NSMath::Saturate((distFromCamera - fadeStart) / fadeRange);
+            return 1.0f - NSMath::Smoothstep(t);
+        };
+
+        for (int i = -half; i <= half; ++i)
+        {
+            const float x = cx + i * spacing;
+            const float z = cz + i * spacing;
+
+
+            XMFLOAT4 cAlongZ =
+                (std::fabs(x) < spacing * 0.5f) ?
+                    axisZColor :
+                (static_cast<int>(x) % majorEvery == 0) ?
+                    majorColor :
+                        minorColor;
+
+            XMFLOAT4 cAlongX =
+                (std::fabs(z) < spacing * 0.5f) ?
+                    axisXColor :
+                (static_cast<int>(z) % majorEvery == 0) ?
+                    majorColor :
+                        minorColor;
+
+            cAlongZ.w = LineAlpha(std::fabs(x - camF.x));
+            cAlongX.w = LineAlpha(std::fabs(z - camF.z));
+
+            grid.push_back({ XMFLOAT3{ x, y, minZ }, cAlongZ });
+            grid.push_back({ XMFLOAT3{ x, y, maxZ }, cAlongZ });
+            grid.push_back({ XMFLOAT3{ minX, y, z }, cAlongX });
+            grid.push_back({ XMFLOAT3{ maxX, y, z }, cAlongX });
+        }
+
+        auto gridRTV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainRTV);
+        auto gridDSV = blackboard.GetOpt<D3D12_CPU_DESCRIPTOR_HANDLE>(NSRenderer::kRenderer_mainDSV);
+        ASSERT(gridRTV.has_value() and gridDSV.has_value());
+
+        const UINT w = IApp::GetInstance()->im_width;
+        const UINT h = IApp::GetInstance()->im_height;
+        CD3DX12_VIEWPORT gridViewport(0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h));
+        CD3DX12_RECT gridScissor(0, 0, static_cast<LONG>(w), static_cast<LONG>(h));
+        cmdList.RSSetViewports(1, &gridViewport);
+        cmdList.RSSetScissorRects(1, &gridScissor);
+        cmdList.OMSetRenderTargets(1, &gridRTV->get(), false, &gridDSV->get());
+
+        m_worldGridPipeline.Bind(cmdList);
+
+        NSAllocator::Ctx gridCB = rendererCtx.constAlloc(sizeof(FrameConstants));
+        FrameConstants& gridFrame = gridCB.As<FrameConstants>();
+        XMStoreFloat4x4(&gridFrame.view, mainCam->viewMatrix);
+        XMStoreFloat4x4(&gridFrame.proj, mainCam->projMatrix);
+        cmdList.SetGraphicsRootConstantBufferView(0u, gridCB.gpuAddr);
+
+        cmdList.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+
+        const size_t gridBytes = sizeof(NSDebug::Vertex) * grid.size();
+        NSAllocator::Ctx gridVB = rendererCtx.constAlloc(gridBytes);
+        memcpy(gridVB.cpuAddr, grid.data(), gridBytes);
+
+        D3D12_VERTEX_BUFFER_VIEW gridVbv{};
+        gridVbv.BufferLocation = gridVB.gpuAddr;
+        gridVbv.SizeInBytes = static_cast<UINT>(gridBytes);
+        gridVbv.StrideInBytes = sizeof(NSDebug::Vertex);
+        cmdList.IASetVertexBuffers(0u, 1u, &gridVbv);
+        cmdList.DrawInstanced(static_cast<UINT>(grid.size()), 1u, 0u, 0u);
+    }
+
     EntityMap<NSTerrain::StreamSlotView>& streamSlotViews = scene.m_terrainView->GetSlotsView();
-    //const EntityMap<NSTerrain::StreamSlot>& streamSlots = scene.m_terrainView->GetSlots();
     const EntityMap<NSTerrain::TerrainPage>& pageLayout = scene.m_terrainView->GetPageLayout();
     const NSTerrain::TerrainDesc& terrainDesc = scene.m_terrainView->GetDesc();
 
@@ -2089,8 +2251,6 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
         const NSTerrain::TerrainDesc& desc = scene.m_terrainView->GetDesc();
-        const float worldTexelSpacingX = 0.f; // TODO: Placeholder. Fix it later desc.worldWidth / static_cast<float>(desc.dimention - 1u);
-        const float worldTexelSpacingZ = 0.f; // TODO: Placeholder. Fix it later desc.worldDepth / static_cast<float>(desc.dimention - 1u);
         const uint32_t heightmapSrvIndex = scene.m_terrainView->GetHeightmapSRV().index;
 
         D3D12_INDEX_BUFFER_VIEW ibView = scene.m_terrainView->GetSharedPatchIndexBufferView();
@@ -2113,8 +2273,8 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                     TerrainConstants& cbuffer = allocCtx.As<TerrainConstants>();
                     DirectX::XMStoreFloat4x4(&cbuffer.worldMatrix, DirectX::XMMatrixIdentity());
                     cbuffer.maxHeight = desc.maxHeight;
-                    cbuffer.worldTexelSpacingX = desc.worldWidth / 16384.f;
-                    cbuffer.worldTexelSpacingZ = desc.worldDepth / 16384.f;
+                    cbuffer.worldTexelSpacingX = desc.worldWidth / desc.heightmapDesc.width;
+                    cbuffer.worldTexelSpacingZ = desc.worldDepth / desc.heightmapDesc.height;
                     cbuffer.tessFactorScale = 1.f;
                     cbuffer.textureTilingFactor = 64.f;
                     cbuffer.chunkUVOffset = { page->uvRect.x, page->uvRect.y };

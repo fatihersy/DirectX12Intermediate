@@ -458,6 +458,9 @@ namespace NSRenderPass
         uint32_t debugPassImageHeight{};
         bool isActive{};
 
+        bool  m_drawWorldGrid{ true };
+        int   m_gridMajorSpacing{ 1 };
+        float m_gridHeight{ 550.0f };
     };
 
     class IRenderPass

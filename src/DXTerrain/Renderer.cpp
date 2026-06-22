@@ -341,6 +341,10 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
 }
 void Renderer::Update()
 {
+    const UINT frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+    ThrowIfFailed(m_copyCommandAllocators[frameIndex]->Reset());
+    ThrowIfFailed(m_copyCommandList->Reset(m_copyCommandAllocators[frameIndex].Get(), nullptr));
+
     m_terrain->Update(m_copyCmdListPublic, GetCtx());
 }
 Renderer::~Renderer()
@@ -539,6 +543,7 @@ void Renderer::EndFrame()
     {
         ID3D12CommandList* const lists[] = { m_copyCommandList.Get(), m_commandList.Get() };
         m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
+
         m_copyCmdListPublic->m_HasPendingCopy = false;
     }
 
@@ -953,6 +958,13 @@ void Renderer::DrawDebugImage(NSScene::IScene& scene)
     {
         ImGui::End();
         return;
+    }
+
+    if (ImGui::CollapsingHeader("World Grid", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Draw grid", &m_debugUtils.m_drawWorldGrid);
+        ImGui::SliderInt("Major Spacing (m)", &m_debugUtils.m_gridMajorSpacing, 1u, 20u, "%u");
+        ImGui::SliderFloat("Height Offset (m)", &m_debugUtils.m_gridHeight, 0.f, 1024.f, "%.1f");
     }
 
     if (m_debugUtils.isActive and m_debugUtils.debugPassImageSrv.ptr)

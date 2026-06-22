@@ -50,7 +50,7 @@ namespace NSTerrain
     constexpr std::string_view kSourcePagesFolderName = "pages";
     constexpr std::string_view kSourceHeightmapBinFilesName = "heightmap.bin";
     constexpr std::string_view kSourceDiffuseBinFilesName = "diffuse.bin";
-    constexpr uint64_t kPageGeneration = 2u;
+    constexpr uint64_t kPageGeneration = 3u;
     constexpr uint32_t kHaloPixels = 2u;
 
     //constexpr std::string_view kSourcePageFolderNameFormatter = {}; // "page_%02d_%02d";
@@ -89,10 +89,14 @@ namespace NSTerrain
         std::filesystem::path relativePath;
         DXGI_FORMAT format{};
         std::vector<NSTexture::EChannel> channels;
+        uint32_t width{};
+        uint32_t height{};
 
         static constexpr std::string_view kJsonObj_file = "file";
         static constexpr std::string_view kJsonObj_format = "format";
         static constexpr std::string_view kJsonObj_channels = "channels";
+        static constexpr std::string_view kJsonObj_width = "width";
+        static constexpr std::string_view kJsonObj_height = "height";
     };
     struct SourceManifest
     {
@@ -177,6 +181,9 @@ namespace NSTerrain
         uint32_t heightmapSRVIndex = 0;
         uint32_t diffuseSRVIndex = 0;
         D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
+
+        // re-upload flag. Barrier must transition from SHADER_RESOURCE not COMMON after first upload.
+        bool gpuInitialized{};
 
         enum class ESlotResidency : uint8_t
         {

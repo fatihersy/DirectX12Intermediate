@@ -62,7 +62,7 @@ float EdgeTessFactor(float3 a, float3 b)
     float3 mid = 0.5f * (a + b);
     float d = distance(mid, frameCB.camPos);
 
-    float maxTess = max(1.0f, 8.0f * max(terrainCB.tessFactorScale, 0.01f));
+    float maxTess = max(1.0f, 4.0f * max(terrainCB.tessFactorScale, 0.01f));
     float t = saturate((d - 64.0f) / 1024.0f);
 
     return lerp(maxTess, 1.0f, t);

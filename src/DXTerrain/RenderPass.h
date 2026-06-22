@@ -167,6 +167,7 @@ namespace NSRenderPass
         MemberRef<DebugUtils> m_utils;
 
         GraphicsPipeline m_linePipeline;
+        GraphicsPipeline m_worldGridPipeline;
 
         NSDescriptor::Handle m_colorRtv;
         NSDescriptor::Handle m_depthDsv;

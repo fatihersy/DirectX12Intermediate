@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "Scene.h"
 
+#include <unordered_set>
+
 void Scene::OnInit(NSRenderer::Ctx rendererCtx, ID3D12Device14* device, IWICImagingFactory2* wicFactory, std::shared_ptr<NSTerrain::ITerrainView> inTerrainView, float timeOfDay)
 {
     m_device = device;
@@ -15,32 +17,30 @@ void Scene::OnInit(NSRenderer::Ctx rendererCtx, ID3D12Device14* device, IWICImag
 
     m_terrainView = inTerrainView;
 
-    DirectX::XMFLOAT3 camPos{};
-    DirectX::XMStoreFloat3(&camPos, mainCam->camEye);
-    const float streamDist = static_cast<float>(rendererCtx.rendererDesc.streamingDistance);
+    const NSTerrain::TerrainDesc& desc = m_terrainView->GetDesc();
+    m_pageCountX = desc.pageCountX;
+    m_pageCountZ = desc.pageCountZ;
+    m_worldPageWidth = desc.worldWidth / static_cast<float>(desc.pageCountX);
+    m_worldPageDepth = desc.worldDepth / static_cast<float>(desc.pageCountZ);
+    m_halfWorldWidth = 0.5f * desc.worldWidth;
+    m_halfWorldDepth = 0.5f * desc.worldDepth;
 
-    auto slotIter = m_terrainView->GetSlotsView().Begin();
-    const auto slotEnd = m_terrainView->GetSlotsView().End();
+    const uint32_t streamingDistance = rendererCtx.rendererDesc.streamingDistance;
+    m_pageRadius = std::max(
+        static_cast<int>(std::ceil(static_cast<float>(streamingDistance) / m_worldPageWidth)),
+        static_cast<int>(std::ceil(static_cast<float>(streamingDistance) / m_worldPageDepth))
+    );
 
-    m_terrainView->GetPageLayout().ForEach([&](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page) -> LoopCondition
+    m_pageGrid.assign(static_cast<size_t>(m_pageCountX) * m_pageCountZ, nullptr);
+    m_terrainView->GetPageLayout().ForEach([this](EntityID, std::shared_ptr<const NSTerrain::TerrainPage> page) -> LoopCondition
     {
-        if (slotIter == slotEnd) return ELoopConditionFlag::BREAK;
-
-        const float pageCenterX = page->worldRect.x + page->worldRect.width  * 0.5f;
-        const float pageCenterZ = page->worldRect.y + page->worldRect.height * 0.5f;
-        const float dx = pageCenterX - camPos.x;
-        const float dz = pageCenterZ - camPos.z;
-
-        if (dx * dx + dz * dz > streamDist * streamDist) return ELoopConditionFlag::CONTINUE;
-
-        std::shared_ptr<NSTerrain::StreamSlotView> slotView = slotIter->second;
-        slotView->residency = NSTerrain::StreamSlot::ESlotResidency::Missing;
-        slotView->pageKey = page->m_id;
-        slotView->ICullable_Bound = page->ICullable_Bound;
-
-        ++slotIter;
+        m_pageGrid[static_cast<size_t>(page->index.gridZ) * m_pageCountX + page->index.gridX] = page;
         return ELoopConditionFlag::CONTINUE;
     });
+
+    DirectX::XMFLOAT3 camPos{};
+    DirectX::XMStoreFloat3(&camPos, mainCam->camEye);
+    UpdateTerrainStreaming(camPos);
 }
 Scene::~Scene() {}
 
@@ -59,14 +59,97 @@ void Scene::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_terrainView.reset();
 }
 
-void Scene::OnUpdate()
+void Scene::OnUpdate(NSRenderer::Ctx rendererCtx)
 {
     std::shared_ptr<NSScene::Camera> mainCam = m_cameras.Get(mainCameraKey);
 
-    DirectX::XMFLOAT3 fcamEye{};
-    DirectX::XMStoreFloat3(&fcamEye, mainCam->camEye);
+    DirectX::XMFLOAT3 camEye{};
+    DirectX::XMStoreFloat3(&camEye, mainCam->camEye);
 
     UpdateCamera(DE_REF(mainCam));
+
+    UpdateTerrainStreaming(camEye);
+}
+
+void Scene::UpdateTerrainStreaming(const DirectX::XMFLOAT3& camEye)
+{
+    using ESlotResidency = NSTerrain::StreamSlot::ESlotResidency;
+
+    if (m_pageGrid.empty() || m_pageCountX == 0u || m_pageCountZ == 0u) return;
+
+
+    const int camGX = static_cast<int>(std::floor((camEye.x + m_halfWorldWidth) / m_worldPageWidth));
+    const int camGZ = static_cast<int>(std::floor((camEye.z + m_halfWorldDepth) / m_worldPageDepth));
+
+    if (m_streamInitialized && camGX == m_lastCamGX && camGZ == m_lastCamGZ) return;
+    m_streamInitialized = true;
+    m_lastCamGX = camGX;
+    m_lastCamGZ = camGZ;
+
+    const int minX = std::max(0, camGX - m_pageRadius);
+    const int maxX = std::min(static_cast<int>(m_pageCountX) - 1, camGX + m_pageRadius);
+    const int minZ = std::max(0, camGZ - m_pageRadius);
+    const int maxZ = std::min(static_cast<int>(m_pageCountZ) - 1, camGZ + m_pageRadius);
+    if (minX > maxX || minZ > maxZ) return;
+
+    EntityMap<NSTerrain::StreamSlotView>& slotViews = m_terrainView->GetSlotsView();
+    const EntityMap<NSTerrain::TerrainPage>& pageLayout = m_terrainView->GetPageLayout();
+
+    std::vector<std::shared_ptr<NSTerrain::StreamSlotView>> freeSlots;
+    std::unordered_set<uint32_t> covered;
+
+    slotViews.ForEach([&](EntityID, std::shared_ptr<NSTerrain::StreamSlotView> view) -> LoopCondition
+    {
+        if (view->residency == ESlotResidency::Unknown)
+        {
+            freeSlots.push_back(view);
+            return ELoopConditionFlag::CONTINUE;
+        }
+
+        std::shared_ptr<const NSTerrain::TerrainPage> page = pageLayout.Get(view->pageKey);
+        if (page == nullptr)
+        {
+            view->residency = ESlotResidency::Unknown;
+            freeSlots.push_back(view);
+            return ELoopConditionFlag::CONTINUE;
+        }
+
+        const int gx = static_cast<int>(page->index.gridX);
+        const int gz = static_cast<int>(page->index.gridZ);
+        const bool inBlock = (gx >= minX && gx <= maxX && gz >= minZ && gz <= maxZ);
+
+        if (inBlock)
+        {
+            covered.insert(static_cast<uint32_t>(gz) * m_pageCountX + static_cast<uint32_t>(gx));
+        }
+        else if (view->residency != ESlotResidency::Loading)
+        {
+            view->residency = ESlotResidency::Unknown;
+            freeSlots.push_back(view);
+        }
+
+        return ELoopConditionFlag::CONTINUE;
+    });
+
+    size_t nextFree = 0u;
+    for (int gz = minZ; gz <= maxZ; ++gz)
+    {
+        for (int gx = minX; gx <= maxX; ++gx)
+        {
+            const uint32_t lin = static_cast<uint32_t>(gz) * m_pageCountX + static_cast<uint32_t>(gx);
+            if (covered.count(lin)) continue;
+
+            std::shared_ptr<const NSTerrain::TerrainPage> page = m_pageGrid[lin];
+            if (page == nullptr) continue;
+
+            if (nextFree >= freeSlots.size()) return;
+
+            std::shared_ptr<NSTerrain::StreamSlotView> view = freeSlots[nextFree++];
+            view->pageKey = page->m_id;
+            view->ICullable_Bound = page->ICullable_Bound;
+            view->residency = ESlotResidency::Missing;
+        }
+    }
 }
 
 
@@ -135,6 +218,8 @@ std::shared_ptr<NSScene::CullResult> Scene::Cull(ObserverKey camKey, Flag<NSScen
 
         streamSlotViews.ForEach([&frustum, &camera, &results](EntityID, std::shared_ptr<NSTerrain::StreamSlotView> view) -> LoopCondition
         {
+            if (view->residency == NSTerrain::StreamSlot::ESlotResidency::Unknown) return ELoopConditionFlag::CONTINUE;
+
             if (frustum.TestBounds(view->ICullable_Bound))
             {
                 results->m_culledObjects.push_back(DE_REF(view));

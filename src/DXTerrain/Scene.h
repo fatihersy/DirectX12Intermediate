@@ -16,8 +16,10 @@ public:
     void OnInit(NSRenderer::Ctx rendererCtx, ID3D12Device14* device, IWICImagingFactory2* wicFactory, std::shared_ptr<NSTerrain::ITerrainView> inTerrainView, float timeOfDay);
     void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-    void OnUpdate();
+    void OnUpdate(NSRenderer::Ctx rendererCtx);
     void UpdateCamera(NSScene::Camera& camera);
+
+    void UpdateTerrainStreaming(const DirectX::XMFLOAT3& camEye);
 
     bool ValidateKey(ObserverKey entKey) override
     {
@@ -77,4 +79,16 @@ public:
 
     private:
         ObserverKey mainCameraKey;
+
+        std::vector<std::shared_ptr<const NSTerrain::TerrainPage>> m_pageGrid;
+        uint32_t m_pageCountX{};
+        uint32_t m_pageCountZ{};
+        float    m_worldPageWidth{};
+        float    m_worldPageDepth{};
+        float    m_halfWorldWidth{};
+        float    m_halfWorldDepth{};
+        int      m_pageRadius{};
+        bool     m_streamInitialized{};
+        int      m_lastCamGX{};
+        int      m_lastCamGZ{};
 };

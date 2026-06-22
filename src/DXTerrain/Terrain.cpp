@@ -15,6 +15,8 @@ TextureManifest JsonToTextureManifest(const Json& json)
     TextureManifest manifest{};
     manifest.relativePath = json.at(manifest.kJsonObj_file).get<std::string>();
     manifest.format = StringToDXGI_Format(json.at(manifest.kJsonObj_format).get<std::string>());
+    manifest.width = json.at(manifest.kJsonObj_width).get<uint32_t>();
+    manifest.height = json.at(manifest.kJsonObj_height).get<uint32_t>();
 
     const auto& channelsJson = json.at(manifest.kJsonObj_channels);
     ASSERT(channelsJson.is_array(), "Channels must be a JSON array");
@@ -60,6 +62,8 @@ Json TextureManifestToJson(const TextureManifest& manifest)
     Json json;
     json[manifest.kJsonObj_file] = manifest.relativePath.generic_string();
     json[manifest.kJsonObj_format] = DXGI_FormatToString(manifest.format);
+    json[manifest.kJsonObj_width] = manifest.width;
+    json[manifest.kJsonObj_height] = manifest.height;
 
     std::vector<std::string_view> channelsStr;
 
@@ -313,6 +317,10 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
 
         m_desc.worldWidth = baseWidth * (static_cast<float>(heightmapMetadata.width - 1u)  / static_cast<float>(expectedWidth - 1u));
         m_desc.worldDepth = baseDepth * (static_cast<float>(heightmapMetadata.height - 1u) / static_cast<float>(expectedHeight - 1u));
+        m_desc.heightmapDesc.width = heightmapMetadata.width;
+        m_desc.heightmapDesc.height = heightmapMetadata.height;
+        m_desc.diffuseDesc.width = diffuseMetadata.width;
+        m_desc.diffuseDesc.height = diffuseMetadata.height;
 
         for (NSTexture::EChannel reqChannel : desc.heightmapDesc.channels)
         {
@@ -353,13 +361,17 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
         {
             .relativePath = m_desc.heightmapDesc.relativePath,
             .format = m_desc.heightmapDesc.format,
-            .channels = m_desc.heightmapDesc.channels
+            .channels = m_desc.heightmapDesc.channels,
+            .width = m_desc.heightmapDesc.width,
+            .height = m_desc.heightmapDesc.height
         };
         srcManifest.diffuse =
         {
             .relativePath = m_desc.diffuseDesc.relativePath,
             .format = m_desc.diffuseDesc.format,
-            .channels = m_desc.diffuseDesc.channels
+            .channels = m_desc.diffuseDesc.channels,
+            .width = m_desc.diffuseDesc.width,
+            .height = m_desc.diffuseDesc.height
         };
 
         srcManifest.isPresent = true;
@@ -373,6 +385,10 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
         m_desc.maxHeight = srcManifest.maxHeight;
         m_desc.pageCountX = srcManifest.pageCountX;
         m_desc.pageCountZ = srcManifest.pageCountZ;
+        m_desc.heightmapDesc.width = srcManifest.heightmap.width;
+        m_desc.heightmapDesc.height = srcManifest.heightmap.height;
+        m_desc.diffuseDesc.width = srcManifest.diffuse.width;
+        m_desc.diffuseDesc.height = srcManifest.diffuse.height;
     }
 
     ASSERT(srcManifest.pageCountX < 100 and srcManifest.pageCountZ < 100, "Too many pages tried to create");
@@ -386,9 +402,6 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
         GeneratePageFromEXR();
     }
 
-    // pageManifest.*.pageWidth/Height are the FULL (uploaded) page-texture dimensions,
-    // including the halo gutter on every side. The vertex grid, patch layout and world
-    // mapping all operate on the CORE region (full minus the halo on both sides).
     const uint32_t heightHalo = pageManifest.height.haloPixels;
     const uint32_t heightCoreW = pageManifest.height.pageWidth - 2u * heightHalo;
     const uint32_t heightCoreH = pageManifest.height.pageHeight - 2u * heightHalo;
@@ -403,13 +416,18 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
     ASSERT(pageManifest.isPresent);
     ASSERT(m_pages.Size() == static_cast<size_t>(pageManifest.pageCountX) * pageManifest.pageCountZ);
 
-    // Dynamic Pool Calculation
     uint32_t streamingDistance = rendererCtx.rendererDesc.streamingDistance;
     ASSERT(streamingDistance > 0);
 
-    float areaOfPage = static_cast<float>(heightCoreW) * static_cast<float>(heightCoreH);
-    float areaOfCircle = DirectX::XM_PI * static_cast<float>(streamingDistance * streamingDistance);
-    int poolSize = static_cast<uint32_t>(std::ceil(areaOfCircle) / areaOfPage);
+    const float worldPageWidth = m_desc.worldWidth / static_cast<float>(m_desc.pageCountX);
+    const float worldPageDepth = m_desc.worldDepth / static_cast<float>(m_desc.pageCountZ);
+    const int pageRadius = std::max(
+        static_cast<int>(std::ceil(static_cast<float>(streamingDistance) / worldPageWidth)),
+        static_cast<int>(std::ceil(static_cast<float>(streamingDistance) / worldPageDepth))
+    );
+    const int poolSide = (2 * pageRadius + 1) + 2; // resident block + one margin ring
+    const uint32_t totalPages = m_desc.pageCountX * m_desc.pageCountZ;
+    uint32_t poolSize = std::min(static_cast<uint32_t>(poolSide * poolSide), totalPages);
 
     m_gpuPool.Reserve(poolSize);
     m_poolView.Reserve(poolSize);
@@ -549,7 +567,7 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
 
     barrierBatch.Execute(NSBarrier::kTerrain_terrainOnInit, cmdList);
 
-    // Shared Patch Index Buffer Creation
+    // Each page have the same layout so we can use the same indices for all.
     std::vector<uint32_t> patchIndices;
     patchIndices.reserve(512 * 512 * 4);
     for (uint32_t z = 0; z < 512; ++z)
@@ -719,6 +737,9 @@ void Terrain::Update(std::shared_ptr<NSDX12::CopyCommandList> cmdList, NSRendere
             if (view->residency == StreamSlot::ESlotResidency::Missing)
             {
                 auto page = m_pages.Get(view->pageKey);
+
+                m_gpuPool.Get(view->slotKey)->residency = StreamSlot::ESlotResidency::Unknown;
+
                 view->residency = StreamSlot::ESlotResidency::Loading;
                 page->residency = TerrainPage::EPageResidency::Loading;
 
@@ -737,9 +758,7 @@ void Terrain::Update(std::shared_ptr<NSDX12::CopyCommandList> cmdList, NSRendere
                         NSTexture::EType::DIFFUSE
                     );
 
-                    // pageWidth/Height from the manifest are the FULL (haloed) texture size;
-                    // the vertex grid spans only the core, and height reads are offset inward
-                    // by the halo gutter to land on the core texels.
+                    // pageWidth/Height from the manifest are the texture sizes includes halo
                     const uint32_t halo = this->pageManifest.height.haloPixels;
                     const uint32_t pageWidth = this->pageManifest.height.pageWidth - 2u * halo;
                     const uint32_t pageHeight = this->pageManifest.height.pageHeight - 2u * halo;
@@ -761,7 +780,9 @@ void Terrain::Update(std::shared_ptr<NSDX12::CopyCommandList> cmdList, NSRendere
                             const UINT chunkIdx = srcRow / NSTexture::ROWS_AT_A_TIME;
                             const UINT localRow = srcRow % NSTexture::ROWS_AT_A_TIME;
 
-                            const std::byte* pixelPtr = page->heightTexturePage.chunks[chunkIdx].bytes.data() + localRow * page->heightTexturePage.localRowPitch + srcCol * sizeof(uint16_t);
+                            const std::byte* pixelPtr = page->heightTexturePage.chunks[chunkIdx].bytes.data()
+                                + localRow * page->heightTexturePage.localRowPitch
+                                + srcCol   * sizeof(uint16_t);
                             const uint16_t rawHeight = *reinterpret_cast<const uint16_t*>(pixelPtr);
                             const float heightScale = static_cast<float>(rawHeight) / std::numeric_limits<uint16_t>::max();
 
@@ -1254,12 +1275,16 @@ void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<S
     ASSERT(page->residency == TerrainPage::EPageResidency::Loaded);
     ASSERT(slot->residency != StreamSlot::ESlotResidency::Loaded);
 
+    const D3D12_RESOURCE_STATES reuseState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
     // Heightmap Texture
     {
         page->heightTexturePage.defaultBuffer = slot->heightmapDefault;
         page->heightTexturePage.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 0u);
 
-        page->heightTexturePage.PopulateGPU(cmdList, true, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        if (slot->gpuInitialized) page->heightTexturePage.desc.initialState = reuseState;
+
+        page->heightTexturePage.PopulateGPU(cmdList, true, reuseState);
     }
 
     // Diffuse Texture
@@ -1267,7 +1292,9 @@ void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<S
         page->diffuseTexturePage.defaultBuffer = slot->diffuseDefault;
         page->diffuseTexturePage.srvOffset = rendererCtx.offsetSRV(slot->srvHandle, 1u);
 
-        page->diffuseTexturePage.PopulateGPU(cmdList, true, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        if (slot->gpuInitialized) page->diffuseTexturePage.desc.initialState = reuseState;
+
+        page->diffuseTexturePage.PopulateGPU(cmdList, true, reuseState);
     }
 
     // 3. Upload Vertex Buffer
@@ -1300,6 +1327,7 @@ void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<S
     page->vertices.clear();
     page->vertices.shrink_to_fit();
 
+    slot->gpuInitialized = true;
     slot->residency = StreamSlot::ESlotResidency::Loaded;
     page->isOnGPU = true;
 }
