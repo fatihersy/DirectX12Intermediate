@@ -393,7 +393,7 @@ void app::OnRender()
 {
     m_renderer.BeginFrame();
 
-    m_renderer.DrawScene(m_scene);
+    m_renderer.DrawScene(std::make_shared<Scene>(m_scene));
 
     m_renderer.EndFrame();
 };
@@ -503,7 +503,6 @@ void app::UpdateBindings()
             move = DirectX::XMVector3Normalize(move);
             move = DirectX::XMVectorScale(move, mainCam->camSpeed * static_cast<FLOAT>(m_timer.GetElapsedSeconds()));
             mainCam->camEye = DirectX::XMVectorAdd(mainCam->camEye, move);
-
             moved = true;
         }
 

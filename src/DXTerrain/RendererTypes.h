@@ -211,6 +211,31 @@ static_assert(offsetof(TerrainConstants, terrainDiffuseSrvIndex) % 4 == 0);
 static_assert(offsetof(TerrainConstants, PADDING_1) % 4 == 0);
 static_assert(offsetof(TerrainConstants, splatSrvIndices) % 4 == 0);
 
+struct ImpostorConstants
+{
+    DirectX::XMFLOAT4X4 worldMatrix{};
+    float maxHeight{};
+    float worldTexelSpacingX{};
+    float worldTexelSpacingZ{};
+    float cullMargin{};
+    DirectX::XMFLOAT2 streamMin{}; // streaming region world XZ min
+    DirectX::XMFLOAT2 streamMax{}; // streaming region world XZ max
+    uint32_t heightmapSrvIndex{};
+    uint32_t diffuseSrvIndex{};
+    uint32_t streamValid{};        // 1 if streaming region is valid
+    float sinkStart{};
+    float sinkRate{};
+    float maxSink{};
+    float PADDING_0{};
+    float PADDING_1{};
+};
+static_assert(sizeof(ImpostorConstants) % 16 == 0);
+static_assert(offsetof(ImpostorConstants, maxHeight) % 4 == 0);
+static_assert(offsetof(ImpostorConstants, streamMin) % 4 == 0);
+static_assert(offsetof(ImpostorConstants, streamMax) % 4 == 0);
+static_assert(offsetof(ImpostorConstants, heightmapSrvIndex) % 4 == 0);
+static_assert(offsetof(ImpostorConstants, sinkRate) % 4 == 0);
+
 namespace NSBarrier
 {
     class IBarrierBatch
@@ -470,7 +495,7 @@ namespace NSRenderPass
 
         virtual void OnDestroy(NSRenderer::Ctx rendererCtx) = 0;
 
-        virtual void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) = 0;
+        virtual void Execute(std::shared_ptr<NSScene::IScene> scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) = 0;
         virtual void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) = 0;
 
         bool IsEnabled() const { return im_isEnabled; };

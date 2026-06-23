@@ -18,7 +18,7 @@ namespace NSRenderPass
         GeometryPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
+        void Execute(std::shared_ptr<NSScene::IScene> scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
@@ -43,7 +43,7 @@ namespace NSRenderPass
         AtmospherePass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
+        void Execute(std::shared_ptr<NSScene::IScene> scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
         AtmosphereConstants m_constantsUpload{};
@@ -86,7 +86,7 @@ namespace NSRenderPass
         EnvironmentCubemapPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
+        void Execute(std::shared_ptr<NSScene::IScene> scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
@@ -130,7 +130,7 @@ namespace NSRenderPass
         TerrainPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, IWICImagingFactory2* wicFactory);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
+        void Execute(std::shared_ptr<NSScene::IScene> scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
 
     private:
@@ -138,6 +138,7 @@ namespace NSRenderPass
         ComPtr<ID3D12RootSignature> m_rootSignature;
         TessellationPipeline m_solidPipeline;
         TessellationPipeline m_wireframePipeline;
+        GraphicsPipeline m_impostorPipeline;
 
         enum class ETexture : uint32_t { GRASS = 0, ROCK, SNOW, DIRT, TERRAIN_DIFFUSE, MAX };
 
@@ -160,7 +161,7 @@ namespace NSRenderPass
         DebugPass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList, std::reference_wrapper<DebugUtils> utils);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
+        void Execute(std::shared_ptr<NSScene::IScene> scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
     private:
         ID3D12Device14* m_device;
@@ -190,7 +191,7 @@ namespace NSRenderPass
         ZPrePass& OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList);
         void OnDestroy(NSRenderer::Ctx rendererCtx) override;
 
-        void Execute(NSScene::IScene& scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
+        void Execute(std::shared_ptr<NSScene::IScene> scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList) override;
         void OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx) override;
     private:
         GraphicsPipeline m_modelDepthPipeline;

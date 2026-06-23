@@ -50,8 +50,13 @@ namespace NSTerrain
     constexpr std::string_view kSourcePagesFolderName = "pages";
     constexpr std::string_view kSourceHeightmapBinFilesName = "heightmap.bin";
     constexpr std::string_view kSourceDiffuseBinFilesName = "diffuse.bin";
-    constexpr uint64_t kPageGeneration = 3u;
+    constexpr uint64_t kPageGeneration = 5u;
     constexpr uint32_t kHaloPixels = 2u;
+
+    constexpr std::string_view kImpostorFolderName = "impostor";
+    constexpr std::string_view kImpostorHeightmapBinFilesName = "heightmap.bin";
+    constexpr std::string_view kImpostorDiffuseBinFilesName = "diffuse.bin";
+    constexpr uint32_t kImpostorResolution = 512u;
 
     //constexpr std::string_view kSourcePageFolderNameFormatter = {}; // "page_%02d_%02d";
 
@@ -98,30 +103,6 @@ namespace NSTerrain
         static constexpr std::string_view kJsonObj_width = "width";
         static constexpr std::string_view kJsonObj_height = "height";
     };
-    struct SourceManifest
-    {
-        std::string name;
-        uint32_t pageCountX{};
-        uint32_t pageCountZ{};
-
-        float worldWidth{};
-        float worldDepth{};
-        float maxHeight{};
-
-        TextureManifest heightmap;
-        TextureManifest diffuse;
-
-        static constexpr std::string_view kJsonObj_name = "name";
-        static constexpr std::string_view kJsonObj_pageCountX = "pageCountX";
-        static constexpr std::string_view kJsonObj_pageCountZ = "pageCountZ";
-        static constexpr std::string_view kJsonObj_worldWidth = "worldWidth";
-        static constexpr std::string_view kJsonObj_worldDepth = "worldDepth";
-        static constexpr std::string_view kJsonObj_maxHeight = "maxHeight";
-        static constexpr std::string_view kJsonObj_heightmap = "heightmap";
-        static constexpr std::string_view kJsonObj_diffuse = "diffuse";
-
-        bool isPresent{};
-    };
     struct PageTextureManifest
     {
         uint32_t sourceWidth{};
@@ -139,6 +120,35 @@ namespace NSTerrain
         static constexpr std::string_view kJsonObj_pageHeight = "pageHeight";
         static constexpr std::string_view kJsonObj_bytesPerPixel = "bytesPerPixel";
         static constexpr std::string_view kJsonObj_haloPixels = "haloPixels";
+    };
+    struct SourceManifest
+    {
+        std::string name;
+        uint32_t pageCountX{};
+        uint32_t pageCountZ{};
+
+        float worldWidth{};
+        float worldDepth{};
+        float maxHeight{};
+
+        TextureManifest heightmap;
+        TextureManifest diffuse;
+
+        PageTextureManifest impostorHeight;
+        PageTextureManifest impostorDiffuse;
+
+        static constexpr std::string_view kJsonObj_name = "name";
+        static constexpr std::string_view kJsonObj_pageCountX = "pageCountX";
+        static constexpr std::string_view kJsonObj_pageCountZ = "pageCountZ";
+        static constexpr std::string_view kJsonObj_worldWidth = "worldWidth";
+        static constexpr std::string_view kJsonObj_worldDepth = "worldDepth";
+        static constexpr std::string_view kJsonObj_maxHeight = "maxHeight";
+        static constexpr std::string_view kJsonObj_heightmap = "heightmap";
+        static constexpr std::string_view kJsonObj_diffuse = "diffuse";
+        static constexpr std::string_view kJsonObj_impostorHeight = "impostorHeight";
+        static constexpr std::string_view kJsonObj_impostorDiffuse = "impostorDiffuse";
+
+        bool isPresent{};
     };
     struct PageManifest
     {
@@ -254,5 +264,13 @@ namespace NSTerrain
         virtual const EntityMap<TerrainPage>& GetPageLayout() const = 0;
         virtual const EntityMap<StreamSlot>& GetSlots() const = 0;
         virtual EntityMap<StreamSlotView>& GetSlotsView() = 0;
+
+        virtual bool HasImpostor() const = 0;
+        virtual uint32_t GetImpostorHeightmapSRVIndex() const = 0;
+        virtual uint32_t GetImpostorDiffuseSRVIndex() const = 0;
+        virtual D3D12_VERTEX_BUFFER_VIEW GetImpostorVertexBufferView() const = 0;
+        virtual D3D12_INDEX_BUFFER_VIEW GetImpostorIndexBufferView() const = 0;
+        virtual uint32_t GetImpostorIndexCount() const = 0;
+        virtual DirectX::XMFLOAT2 GetImpostorWorldCell() const = 0;
     };
 }

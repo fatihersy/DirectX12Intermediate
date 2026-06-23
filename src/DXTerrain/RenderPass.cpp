@@ -140,11 +140,11 @@ void GeometryPass::OnDestroy(NSRenderer::Ctx rendererCtx)
 GeometryPass::~GeometryPass()
 {}
 
-void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
+void GeometryPass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
-    Scene& scene = static_cast<Scene&>(_scene);
+    std::shared_ptr<Scene> scene = std::static_pointer_cast<Scene>(_scene);
 
     m_pipeline.Bind(cmdList);
     cmdList.IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -163,13 +163,13 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
 
         FrameConstants& frameCB = frameCBAC.As<FrameConstants>();
 
-        std::shared_ptr<NSScene::Camera> mainCam =scene.GetMainCamera();
+        std::shared_ptr<NSScene::Camera> mainCam = scene->GetMainCamera();
 
         XMStoreFloat4x4(&frameCB.view, mainCam->viewMatrix);
         XMStoreFloat4x4(&frameCB.proj, mainCam->projMatrix);
         XMStoreFloat3(&frameCB.eye, mainCam->camEye);
-        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
-        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
+        XMStoreFloat4(&frameCB.lightDir, scene->m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene->m_lightColor);
     }
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
@@ -183,14 +183,14 @@ void GeometryPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRe
 
     EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+    std::shared_ptr<NSScene::Camera> mainCam = scene->GetMainCamera();
 
-    std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS);
+    std::shared_ptr<NSScene::CullResult> cullResult = scene->Cull(mainCam->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS);
 
     for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
-        ASSERT(scene.m_models.Contains(culled.ICullable_Id));
-        std::shared_ptr<Model> sceModel = scene.m_models.Get(culled.ICullable_Id);
+        ASSERT(scene->m_models.Contains(culled.ICullable_Id));
+        std::shared_ptr<Model> sceModel = scene->m_models.Get(culled.ICullable_Id);
 
         if (not sceModel->m_flags.HasLeastOne(NSModel::EModelFlag::PBR_MODEL)) continue;
 
@@ -460,13 +460,13 @@ void AtmospherePass::OnDestroy(NSRenderer::Ctx rendererCtx)
 };
 AtmospherePass::~AtmospherePass()
 {};
-void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
+void AtmospherePass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
     UINT width = IApp::GetInstance()->im_width;
     UINT height = IApp::GetInstance()->im_height;
 
-    Scene& scene = static_cast<Scene&>(_scene);
+    std::shared_ptr<Scene> scene = static_pointer_cast<Scene>(_scene);
 
     CD3DX12_VIEWPORT viewport(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
     CD3DX12_RECT scissor(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
@@ -475,18 +475,18 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
     cmdList.RSSetScissorRects(1, &scissor);
 
     NSAllocator::Ctx atmosCBAC{};
-    if (m_constantsUpload != m_constantsDefault or scene.m_timeOfDay != m_timeOfDayDefault)
+    if (m_constantsUpload != m_constantsDefault or scene->m_timeOfDay != m_timeOfDayDefault)
     {
-        const float hourAngle = (scene.m_timeOfDay / 24.f) * DirectX::XM_2PI - DirectX::XM_PIDIV2;
+        const float hourAngle = (scene->m_timeOfDay / 24.f) * DirectX::XM_2PI - DirectX::XM_PIDIV2;
 
         DirectX::XMFLOAT3 sunDir = { cosf(hourAngle), sinf(hourAngle), 0.f };
         DirectX::XMVECTOR vSunDir = DirectX::XMLoadFloat3(&sunDir);
 
-        scene.m_lightDir = DirectX::XMVectorNegate(vSunDir);
+        scene->m_lightDir = DirectX::XMVectorNegate(vSunDir);
         DirectX::XMStoreFloat3(&m_constantsUpload.SunDir, vSunDir);
 
         m_constantsDefault = m_constantsUpload;
-        m_timeOfDayDefault = scene.m_timeOfDay;
+        m_timeOfDayDefault = scene->m_timeOfDay;
 
         blackboard.Set<AtmosphereConstants&>(NSRenderer::kAtmosphere_constants, m_constantsDefault);
 
@@ -501,7 +501,7 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
         atmosCBAC.As<AtmosphereConstants>() = m_constantsDefault;
     }
 
-    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+    std::shared_ptr<NSScene::Camera> mainCam = scene->GetMainCamera();
 
     NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstants));
     {
@@ -512,8 +512,8 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
         XMStoreFloat4x4(&frameCB.view, mainCam->viewMatrix);
         XMStoreFloat4x4(&frameCB.proj, mainCam->projMatrix);
         XMStoreFloat3(&frameCB.eye, mainCam->camEye);
-        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
-        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
+        XMStoreFloat4(&frameCB.lightDir, scene->m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene->m_lightColor);
     }
 
     m_graphics.Bind(cmdList);
@@ -524,7 +524,7 @@ void AtmospherePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NS
 
     std::shared_ptr<Model> skyDome;
 
-    scene.m_models.ForEach([&skyDome](EntityID, std::shared_ptr<Model> model) -> LoopCondition
+    scene->m_models.ForEach([&skyDome](EntityID, std::shared_ptr<Model> model) -> LoopCondition
     {
         if (model->m_flags.HasLeastAll(NSModel::EModelFlag::ATMOSPHERE) and model->isOnGPU)
         {
@@ -886,11 +886,11 @@ void EnvironmentCubemapPass::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_prefilterPipeline.Reset();
     m_brdfPipeline.Reset();
 }
-void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
+void EnvironmentCubemapPass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
-    Scene& scene = static_cast<Scene&>(_scene);
+    std::shared_ptr<Scene> scene = static_pointer_cast<Scene>(_scene);
 
     blackboard.Set<NSDescriptor::Handle&>(NSRenderer::kEnvCubemap_brdfLUTsrv, m_brdfSRVhandle);
 
@@ -901,7 +901,7 @@ void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackb
 
     EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-    scene.m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model) -> LoopCondition
+    scene->m_models.ForEach([&](EntityID, std::shared_ptr<::Model> model) -> LoopCondition
     {
         std::shared_ptr<NSRenderer::Model> regModel = regModels.Get(model->m_registerKey);
 
@@ -909,7 +909,7 @@ void EnvironmentCubemapPass::Execute(NSScene::IScene& _scene, Blackboard& blackb
 
         if (regModel->isDirty)
         {
-            Capture(DE_REF(model), scene, blackboard, rendererCtx, cmdList);
+            Capture(DE_REF(model), DE_REF(scene), blackboard, rendererCtx, cmdList);
             return ELoopConditionFlag::CONTINUE;
         }
 
@@ -1292,6 +1292,41 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
         rasterDesc, dsDesc, blendDesc,
         vertexMetadata, hullMetadata, domainMetadata, pixelMetadata
     );
+
+    {
+        D3D12_INPUT_ELEMENT_DESC impostorInput[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(NSTerrain::Vertex, position), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, offsetof(NSTerrain::Vertex, texCoord), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+        };
+
+        CD3DX12_RASTERIZER_DESC impostorRaster(D3D12_DEFAULT);
+        impostorRaster.FillMode = D3D12_FILL_MODE_SOLID;
+        impostorRaster.CullMode = D3D12_CULL_MODE_NONE;
+
+        CD3DX12_DEPTH_STENCIL_DESC impostorDS(D3D12_DEFAULT);
+        impostorDS.DepthEnable = TRUE;
+        impostorDS.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL; // impostor is not in the Z-PrePass
+        impostorDS.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+
+        CD3DX12_BLEND_DESC impostorBlend(D3D12_DEFAULT);
+
+        GRAPHICS_PIPELINE_STATE_DESC impostorDesc{};
+        impostorDesc.InputLayout = { impostorInput, _countof(impostorInput) };
+        impostorDesc.NumRenderTargets = 1;
+        impostorDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        impostorDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        impostorDesc.SampleDesc.Count = 1;
+        impostorDesc.SampleMask = UINT_MAX;
+        impostorDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+
+        m_impostorPipeline = GraphicsPipeline(device, L"TerrainPass::m_impostorPipeline", m_rootSignature).Init(
+            impostorDesc,
+            impostorRaster, impostorDS, impostorBlend,
+            { L"ImpostorVS.hlsl", { L"-E", L"VS_Impostor", L"-T", L"vs_6_6", L"-Zi", L"-Od" } },
+            { L"ImpostorPS.hlsl", { L"-E", L"PS_Impostor", L"-T", L"ps_6_6", L"-Zi", L"-Od" } }
+        );
+    }
 }
 TerrainPass::~TerrainPass()
 {
@@ -1353,15 +1388,16 @@ void TerrainPass::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_rootSignature.Reset();
     m_solidPipeline.Reset();
     m_wireframePipeline.Reset();
+    m_impostorPipeline.Reset();
 };
 
-void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
+void TerrainPass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not this->im_isEnabled) return;
 
-    Scene& scene = static_cast<Scene&>(_scene);
+    std::shared_ptr<Scene> scene = std::static_pointer_cast<Scene>(_scene);
 
-    if (not scene.m_terrainView->isInitialized()) return;
+    if (not scene->m_terrainView->isInitialized()) return;
 
     auto optTerrainRef = blackboard.GetOpt
         <std::shared_ptr
@@ -1377,8 +1413,8 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
     cmdList.RSSetViewports(1, &viewport);
     cmdList.RSSetScissorRects(1, &scissor);
 
-    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
-    std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
+    std::shared_ptr<NSScene::Camera> mainCam = scene->GetMainCamera();
+    std::shared_ptr<NSScene::CullResult> cullResult = scene->Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
     if (rendererCtx.rendererFlagHasLeastOne(NSRenderer::ERendererFlag::MODE_WIREFRAME))
     {
@@ -1400,19 +1436,19 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
         XMStoreFloat4x4(&frameCB.view, mainCam->viewMatrix);
         XMStoreFloat4x4(&frameCB.proj, mainCam->projMatrix);
         XMStoreFloat3(&frameCB.eye, mainCam->camEye);
-        XMStoreFloat4(&frameCB.lightDir, scene.m_lightDir);
-        XMStoreFloat4(&frameCB.lightColor, scene.m_lightColor);
+        XMStoreFloat4(&frameCB.lightDir, scene->m_lightDir);
+        XMStoreFloat4(&frameCB.lightColor, scene->m_lightColor);
     }
     cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
 
-    const NSTerrain::TerrainDesc& desc = scene.m_terrainView->GetDesc();
-    const uint32_t heightmapSrvIndex = scene.m_terrainView->GetHeightmapSRV().index;
+    const NSTerrain::TerrainDesc& desc = scene->m_terrainView->GetDesc();
+    const uint32_t heightmapSrvIndex = scene->m_terrainView->GetHeightmapSRV().index;
 
-    D3D12_INDEX_BUFFER_VIEW ibView = scene.m_terrainView->GetSharedPatchIndexBufferView();
+    D3D12_INDEX_BUFFER_VIEW ibView = scene->m_terrainView->GetSharedPatchIndexBufferView();
     cmdList.IASetIndexBuffer(&ibView);
 
-    EntityMap<NSTerrain::StreamSlotView>& slotViews = scene.m_terrainView->GetSlotsView();
-    const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene.m_terrainView->GetSlots();
+    EntityMap<NSTerrain::StreamSlotView>& slotViews = scene->m_terrainView->GetSlotsView();
+    const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene->m_terrainView->GetSlots();
 
     for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
@@ -1421,7 +1457,7 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
         if (view != nullptr and view->residency == NSTerrain::StreamSlot::ESlotResidency::Loaded)
         {
             auto slot = streamSlot.Get(view->slotKey);
-            auto page = scene.m_terrainView->GetPageLayout().Get(view->pageKey);
+            auto page = scene->m_terrainView->GetPageLayout().Get(view->pageKey);
 
             NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
             {
@@ -1446,8 +1482,71 @@ void TerrainPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRen
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
             cmdList.IASetVertexBuffers(0, 1, &slot->vertexBufferView);
-            cmdList.DrawIndexedInstanced(scene.m_terrainView->GetSharedPatchIndexCount(), 1, 0, 0, 0);
+            cmdList.DrawIndexedInstanced(scene->m_terrainView->GetSharedPatchIndexCount(), 1, 0, 0, 0);
         }
+    }
+
+    if (scene->m_terrainView->HasImpostor())
+    {
+        bool streamValid = false;
+        float minX = 0.f, minZ = 0.f, maxX = 0.f, maxZ = 0.f;
+        slotViews.ForEach([&](EntityID, std::shared_ptr<NSTerrain::StreamSlotView> view) -> LoopCondition
+        {
+            if (view->residency != NSTerrain::StreamSlot::ESlotResidency::Loaded) return ELoopConditionFlag::CONTINUE;
+
+            std::shared_ptr<const NSTerrain::TerrainPage> page = scene->m_terrainView->GetPageLayout().Get(view->pageKey);
+            if (page == nullptr) return ELoopConditionFlag::CONTINUE;
+
+            const float px0 = page->worldRect.x;
+            const float pz0 = page->worldRect.y;
+            const float px1 = page->worldRect.x + page->worldRect.width;
+            const float pz1 = page->worldRect.y + page->worldRect.height;
+
+            if (not streamValid)
+            {
+                minX = px0; minZ = pz0; maxX = px1; maxZ = pz1;
+                streamValid = true;
+            }
+            else
+            {
+                minX = std::min(minX, px0); minZ = std::min(minZ, pz0);
+                maxX = std::max(maxX, px1); maxZ = std::max(maxZ, pz1);
+            }
+            return ELoopConditionFlag::CONTINUE;
+        });
+
+        m_impostorPipeline.Bind(cmdList);
+        cmdList.IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_FRAME, frameCBAC.gpuAddr);
+
+        NSAllocator::Ctx impostorAC = rendererCtx.constAlloc(sizeof(ImpostorConstants));
+        {
+            ImpostorConstants& cb = impostorAC.As<ImpostorConstants>();
+            DirectX::XMStoreFloat4x4(&cb.worldMatrix, DirectX::XMMatrixIdentity());
+            cb.maxHeight = desc.maxHeight;
+            cb.worldTexelSpacingX = desc.worldWidth / static_cast<float>(desc.heightmapDesc.width);
+            cb.worldTexelSpacingZ = desc.worldDepth / static_cast<float>(desc.heightmapDesc.height);
+            cb.streamMin = { minX, minZ };
+            cb.streamMax = { maxX, maxZ };
+            cb.heightmapSrvIndex = scene->m_terrainView->GetImpostorHeightmapSRVIndex();
+            cb.diffuseSrvIndex = scene->m_terrainView->GetImpostorDiffuseSRVIndex();
+            cb.streamValid = streamValid ? 1u : 0u;
+
+            // Seam handling
+            const DirectX::XMFLOAT2 cell = scene->m_terrainView->GetImpostorWorldCell();
+            const float cellMax = std::max(cell.x, cell.y);
+            cb.cullMargin = 3.0f * cellMax;
+            cb.sinkStart = 1.0f * cellMax;
+            cb.sinkRate = 1.0f;
+            cb.maxSink = desc.maxHeight;
+        }
+        cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, impostorAC.gpuAddr);
+
+        D3D12_VERTEX_BUFFER_VIEW imVB = scene->m_terrainView->GetImpostorVertexBufferView();
+        D3D12_INDEX_BUFFER_VIEW imIB = scene->m_terrainView->GetImpostorIndexBufferView();
+        cmdList.IASetVertexBuffers(0, 1, &imVB);
+        cmdList.IASetIndexBuffer(&imIB);
+        cmdList.DrawIndexedInstanced(scene->m_terrainView->GetImpostorIndexCount(), 1, 0, 0, 0);
     }
 };
 void TerrainPass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
@@ -1548,8 +1647,8 @@ DebugPass& DebugPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx
         desc.InputLayout = { inputElements, _countof(inputElements) };
         desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
         desc.NumRenderTargets = 1;
-        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; // main backbuffer format
-        desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;          // main depth format
+        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         desc.SampleDesc.Count = 1;
         desc.SampleMask = UINT_MAX;
 
@@ -1702,15 +1801,15 @@ void DebugPass::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_utils->get().isActive = false;
 }
 
-void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
+void DebugPass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
     ASSERT(m_utils);
     DebugUtils& utils = m_utils->get();
-    Scene& scene = static_cast<Scene&>(_scene);
+    std::shared_ptr<Scene> scene = static_pointer_cast<Scene>(_scene);
 
-    const std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+    const std::shared_ptr<NSScene::Camera> mainCam = scene->GetMainCamera();
 
     if (utils.m_drawWorldGrid)
     {
@@ -1723,7 +1822,7 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
 
         XMFLOAT3 camF{};
         XMStoreFloat3(&camF, mainCam->camEye);
-        const float cx   = std::floor(camF.x / spacing) * spacing; // snap to grid
+        const float cx   = std::floor(camF.x / spacing) * spacing;
         const float cz   = std::floor(camF.z / spacing) * spacing;
         const float minX = cx - half * spacing;
         const float maxX = cx + half * spacing;
@@ -1812,9 +1911,9 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
         cmdList.DrawInstanced(static_cast<UINT>(grid.size()), 1u, 0u, 0u);
     }
 
-    EntityMap<NSTerrain::StreamSlotView>& streamSlotViews = scene.m_terrainView->GetSlotsView();
-    const EntityMap<NSTerrain::TerrainPage>& pageLayout = scene.m_terrainView->GetPageLayout();
-    const NSTerrain::TerrainDesc& terrainDesc = scene.m_terrainView->GetDesc();
+    EntityMap<NSTerrain::StreamSlotView>& streamSlotViews = scene->m_terrainView->GetSlotsView();
+    const EntityMap<NSTerrain::TerrainPage>& pageLayout = scene->m_terrainView->GetPageLayout();
+    const NSTerrain::TerrainDesc& terrainDesc = scene->m_terrainView->GetDesc();
 
     {
         using namespace DirectX;
@@ -1843,7 +1942,7 @@ void DebugPass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRende
             AddLine(p3, p0, color);
         };
 
-        std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
+        std::shared_ptr<NSScene::CullResult> cullResult = scene->Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
         const XMFLOAT4 hiddenChunkColor{ 0.65f, 0.12f, 0.10f, 1.0f };
         const XMFLOAT4 visibleChunkColor{ 0.10f, 0.85f, 0.25f, 1.0f };
@@ -2207,7 +2306,7 @@ void ZPrePass::OnDestroy(NSRenderer::Ctx rendererCtx)
     this->m_terrDepthPipeline.Reset();
 }
 
-void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
+void ZPrePass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blackboard, NSRenderer::Ctx rendererCtx, NSDX12::GraphicsCommandList cmdList)
 {
     if (not im_isEnabled) return;
 
@@ -2219,9 +2318,9 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
     cmdList.RSSetViewports(1, &viewport);
     cmdList.RSSetScissorRects(1, &scissor);
 
-    Scene& scene = static_cast<Scene&>(_scene);
+    std::shared_ptr<Scene> scene = static_pointer_cast<Scene>(_scene);
 
-    std::shared_ptr<NSScene::Camera> mainCam = scene.GetMainCamera();
+    std::shared_ptr<NSScene::Camera> mainCam = scene->GetMainCamera();
 
     NSAllocator::Ctx frameCBAC = rendererCtx.constAlloc(sizeof(FrameConstantsZPrepass));
     {
@@ -2248,16 +2347,16 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
         );
         ASSERT(optTerrainRef.has_value(), "TerrainPass must have terrain access through blackboard");
 
-        std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
+        std::shared_ptr<NSScene::CullResult> cullResult = scene->Cull(mainCam->m_id, NSScene::EIncCullFlag::TERRAIN);
 
-        const NSTerrain::TerrainDesc& desc = scene.m_terrainView->GetDesc();
-        const uint32_t heightmapSrvIndex = scene.m_terrainView->GetHeightmapSRV().index;
+        const NSTerrain::TerrainDesc& desc = scene->m_terrainView->GetDesc();
+        const uint32_t heightmapSrvIndex = scene->m_terrainView->GetHeightmapSRV().index;
 
-        D3D12_INDEX_BUFFER_VIEW ibView = scene.m_terrainView->GetSharedPatchIndexBufferView();
+        D3D12_INDEX_BUFFER_VIEW ibView = scene->m_terrainView->GetSharedPatchIndexBufferView();
         cmdList.IASetIndexBuffer(&ibView);
 
-        EntityMap<NSTerrain::StreamSlotView>& slotViews = scene.m_terrainView->GetSlotsView();
-        const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene.m_terrainView->GetSlots();
+        EntityMap<NSTerrain::StreamSlotView>& slotViews = scene->m_terrainView->GetSlotsView();
+        const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene->m_terrainView->GetSlots();
 
         for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
@@ -2266,7 +2365,7 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
             if (view != nullptr and view->residency == NSTerrain::StreamSlot::ESlotResidency::Loaded)
             {
                 auto slot = streamSlot.Get(view->slotKey);
-                auto page = scene.m_terrainView->GetPageLayout().Get(view->pageKey);
+                auto page = scene->m_terrainView->GetPageLayout().Get(view->pageKey);
 
                 NSAllocator::Ctx allocCtx = rendererCtx.constAlloc(sizeof(TerrainConstants));
                 {
@@ -2291,7 +2390,7 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
                 cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
 
                 cmdList.IASetVertexBuffers(0, 1, &slot->vertexBufferView);
-                cmdList.DrawIndexedInstanced(scene.m_terrainView->GetSharedPatchIndexCount(), 1, 0, 0, 0);
+                cmdList.DrawIndexedInstanced(scene->m_terrainView->GetSharedPatchIndexCount(), 1, 0, 0, 0);
             }
         }
     }
@@ -2307,12 +2406,12 @@ void ZPrePass::Execute(NSScene::IScene& _scene, Blackboard& blackboard, NSRender
 
         EntityMap<NSRenderer::Model>& regModels = optRegModels->get();
 
-        std::shared_ptr<NSScene::CullResult> cullResult = scene.Cull(mainCam->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS | NSScene::EIncCullFlag::DYNAMIC_OBJECTS);
+        std::shared_ptr<NSScene::CullResult> cullResult = scene->Cull(mainCam->m_id, NSScene::EIncCullFlag::STATIC_OBJECTS | NSScene::EIncCullFlag::DYNAMIC_OBJECTS);
 
         for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
-            ASSERT(scene.m_models.Contains(culled.ICullable_Id), "Invalid model key");
-            std::shared_ptr<Model> sceneModel = scene.m_models.Get(culled.ICullable_Id);
+            ASSERT(scene->m_models.Contains(culled.ICullable_Id), "Invalid model key");
+            std::shared_ptr<Model> sceneModel = scene->m_models.Get(culled.ICullable_Id);
 
             if (not sceneModel->m_flags.HasLeastOne(NSModel::EModelFlag::PBR_MODEL)) continue;
 

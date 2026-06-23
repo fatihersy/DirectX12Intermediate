@@ -20,7 +20,7 @@ public:
 
     void Update();
     void BeginFrame();
-    void DrawScene(NSScene::IScene& scene);
+    void DrawScene(std::shared_ptr<NSScene::IScene> scene);
     void EndFrame();
     std::shared_ptr<NSRenderer::Model> RegisterModel(std::wstring_view modelName, ObserverKey sceneKey, NSDX12::GraphicsCommandList cmdList, NSRenderer::ERegModelFlag flag);
     void UnloadModel(ObserverKey key);
@@ -182,7 +182,7 @@ private:
 
     NSRenderer::RendererDescription m_desc;
 
-    void DrawDebugImage(NSScene::IScene& scene);
+    void DrawDebugImage();
 
     void CreateSwapChain(HWND hwnd, UINT width, UINT height);
     void CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription desc);

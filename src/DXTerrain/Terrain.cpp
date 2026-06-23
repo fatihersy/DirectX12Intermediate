@@ -204,6 +204,116 @@ static void WriteTexturePageBinHalo(
     ASSERT(file.good(), "Failed to finish writing terrain page texture");
 }
 
+static void WriteImpostorBin(
+    NSTexture::Texture& src,
+    const std::string& path,
+    uint32_t targetW, uint32_t targetH)
+{
+    ASSERT(src.desc.bytesPerPixel == NSTexture::BytesPerPixel(src.desc.format));
+    ASSERT(targetW > 0u and targetH > 0u);
+    ASSERT(targetW <= src.width and targetH <= src.height);
+    ASSERT(not src.chunks.empty());
+
+    std::filesystem::path _path = path;
+    if (not std::filesystem::is_directory(_path.parent_path()))
+    {
+        std::filesystem::create_directory(_path.parent_path());
+    }
+
+    const uint32_t bpp = src.desc.bytesPerPixel;
+    const uint32_t componentCount = NSTexture::ComponentCount(src.desc.format);
+    ASSERT(componentCount > 0u and componentCount <= 4u);
+    const uint32_t bytesPerComponent = bpp / componentCount;
+    ASSERT(bytesPerComponent == 1u or bytesPerComponent == 2u, "Impostor downsample supports 8- or 16-bit UNORM components");
+
+    const size_t rowPitch = static_cast<size_t>(targetW) * bpp;
+    std::vector<std::byte> outBytes(rowPitch * targetH);
+
+    auto FindChunkRow = [&src](uint32_t sy) -> const std::byte*
+    {
+        for (const NSTexture::TextureChunk& chunk : src.chunks)
+        {
+            if (sy >= chunk.firstRow and sy - chunk.firstRow < chunk.rowCount)
+            {
+                return chunk.bytes.data() + static_cast<size_t>(sy - chunk.firstRow) * src.localRowPitch;
+            }
+        }
+        return nullptr;
+    };
+
+    auto ReadComponent = [bytesPerComponent](const std::byte* p) -> uint32_t
+    {
+        if (bytesPerComponent == 2u)
+        {
+            uint16_t v{};
+            memcpy(&v, p, sizeof(v));
+            return v;
+        }
+        return static_cast<uint32_t>(static_cast<uint8_t>(p[0]));
+    };
+    auto WriteComponent = [bytesPerComponent](std::byte* p, uint32_t v)
+    {
+        if (bytesPerComponent == 2u)
+        {
+            const uint16_t out = static_cast<uint16_t>(v);
+            memcpy(p, &out, sizeof(out));
+        }
+        else
+        {
+            const uint8_t out = static_cast<uint8_t>(v);
+            memcpy(p, &out, sizeof(out));
+        }
+    };
+
+    for (uint32_t absoluteY{}; absoluteY < targetH; ++absoluteY)
+    {
+        const uint32_t sampleYbegin = static_cast<uint32_t>(static_cast<uint64_t>(absoluteY) * src.height / targetH);
+        uint32_t sampleYend = static_cast<uint32_t>(static_cast<uint64_t>(absoluteY + 1u) * src.height / targetH);
+        if (sampleYend <= sampleYbegin) sampleYend = sampleYbegin + 1u;
+
+        std::byte* dstRow = outBytes.data() + static_cast<size_t>(absoluteY) * rowPitch;
+
+        for (uint32_t absoluteX{}; absoluteX < targetW; ++absoluteX)
+        {
+            const uint32_t sampleXbegin = static_cast<uint32_t>(static_cast<uint64_t>(absoluteX) * src.width / targetW);
+            uint32_t sampleXend = static_cast<uint32_t>(static_cast<uint64_t>(absoluteX + 1u) * src.width / targetW);
+            if (sampleXend <= sampleXbegin) sampleXend = sampleXbegin + 1u;
+
+            uint64_t pixel[4] = { 0ull, 0ull, 0ull, 0ull };
+            uint32_t sampleCount = 0u;
+
+            for (uint32_t sampleY = sampleYbegin; sampleY < sampleYend; ++sampleY)
+            {
+                const std::byte* srcRow = FindChunkRow(sampleY);
+                ASSERT(srcRow, "Impostor downsample could not resolve a source row chunk");
+
+                for (uint32_t sampleX = sampleXbegin; sampleX < sampleXend; ++sampleX)
+                {
+                    const std::byte* px = srcRow + static_cast<size_t>(sampleX) * bpp;
+                    for (uint32_t c = 0u; c < componentCount; ++c)
+                    {
+                        pixel[c] += ReadComponent(px + static_cast<size_t>(c) * bytesPerComponent);
+                    }
+                    ++sampleCount;
+                }
+            }
+
+            ASSERT(sampleCount > 0u);
+            std::byte* dstPx = dstRow + static_cast<size_t>(absoluteX) * bpp;
+            for (uint32_t c = 0u; c < componentCount; ++c)
+            {
+                WriteComponent(dstPx + static_cast<size_t>(c) * bytesPerComponent, static_cast<uint32_t>(pixel[c] / sampleCount));
+            }
+        }
+    }
+
+    std::ofstream file(_path, std::ios::binary | std::ios::trunc);
+    ASSERT(file.is_open(), "Failed to write terrain impostor texture");
+
+    file.write(reinterpret_cast<const char*>(outBytes.data()), static_cast<std::streamsize>(outBytes.size()));
+    ASSERT(file.good(), "Failed to finish writing terrain impostor texture");
+}
+
 template<typename StrClass>
 static void WritePageName(StrClass& pagePathStr, size_t pageNameOffset, uint32_t coordX, uint32_t coordZ)
 {
@@ -645,6 +755,9 @@ bool Terrain::OnInit(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx render
         );
         cmdList.ResourceBarrier(1u, &postCopy);
     }
+
+    LoadImpostor(cmdList, rendererCtx);
+
     m_isInitialized = true;
     return true;
 }
@@ -679,6 +792,19 @@ void Terrain::OnDestroy(NSRenderer::Ctx rendererCtx)
     m_sharedPatchIndexUpload.Reset();
     m_sharedPatchIndexBufferView = {};
     m_sharedPatchIndexCount = 0;
+
+    if (m_impostorSrvHandle.amount > 0) rendererCtx.freeSRVStatic(m_impostorSrvHandle);
+    m_impostorSrvHandle = {};
+    m_impostorHeight = NSTexture::Texture{};
+    m_impostorDiffuse = NSTexture::Texture{};
+    m_impostorVertexDefault.Reset();
+    m_impostorVertexUpload.Reset();
+    m_impostorIndexDefault.Reset();
+    m_impostorIndexUpload.Reset();
+    m_impostorVertexBufferView = {};
+    m_impostorIndexBufferView = {};
+    m_impostorIndexCount = 0;
+    m_impostorWorldCell = {};
 
     m_pages.ForEach([&](EntityID, std::shared_ptr<NSTerrain::TerrainPage> page) -> LoopCondition
     {
@@ -960,6 +1086,15 @@ bool Terrain::LoadSourceManifest()
     srcManifest.heightmap = JsonToTextureManifest(json.at(srcManifest.kJsonObj_heightmap));
     srcManifest.diffuse = JsonToTextureManifest(json.at(srcManifest.kJsonObj_diffuse));
 
+    if (json.contains(srcManifest.kJsonObj_impostorHeight))
+    {
+        srcManifest.impostorHeight = JsonToPageTextureManifest(json.at(srcManifest.kJsonObj_impostorHeight));
+    }
+    if (json.contains(srcManifest.kJsonObj_impostorDiffuse))
+    {
+        srcManifest.impostorDiffuse = JsonToPageTextureManifest(json.at(srcManifest.kJsonObj_impostorDiffuse));
+    }
+
     const bool isNameValid = !srcManifest.name.empty();
     const bool isPageCountXValid = (srcManifest.pageCountX > 0u);
     const bool isPageCountZValid = (srcManifest.pageCountZ > 0u);
@@ -986,6 +1121,8 @@ void Terrain::SaveSourceManifest()
     json[srcManifest.kJsonObj_maxHeight] = srcManifest.maxHeight;
     json[srcManifest.kJsonObj_heightmap] = TextureManifestToJson(srcManifest.heightmap);
     json[srcManifest.kJsonObj_diffuse] = TextureManifestToJson(srcManifest.diffuse);
+    json[srcManifest.kJsonObj_impostorHeight] = PageTextureManifestToJson(srcManifest.impostorHeight);
+    json[srcManifest.kJsonObj_impostorDiffuse] = PageTextureManifestToJson(srcManifest.impostorDiffuse);
 
     std::ofstream file(path);
     ASSERT(file.is_open(), "Failed to write terrain page cache manifest");
@@ -1056,20 +1193,35 @@ bool Terrain::PageMatchesSource()
 }
 std::string Terrain::ComputeSourceManifestHash()
 {
-     uint64_t hash = 14695981039346656037ull;
+    uint64_t hash = 14695981039346656037ull;
 
-    const std::filesystem::path path = m_root / kSourceManifestFilesName;
-
-    std::ifstream file(path, std::ios::binary);
-    ASSERT(file.is_open(), "Failed to open terrain source manifest for hashing");
-
-    char c{};
-
-    while (file.get(c))
+    auto Mix = [&hash](const void* data, size_t size)
     {
-        hash ^= static_cast<unsigned char>(c);
-        hash *= 1099511628211ull;
-    }
+        const unsigned char* bytes = static_cast<const unsigned char*>(data);
+        for (size_t i = 0u; i < size; ++i)
+        {
+            hash ^= bytes[i];
+            hash *= 1099511628211ull;
+        }
+    };
+    auto MixStr = [&Mix](std::string_view s) { Mix(s.data(), s.size()); };
+    auto MixTex = [&Mix, &MixStr](const TextureManifest& tex)
+    {
+        MixStr(tex.relativePath.generic_string());
+        Mix(&tex.format, sizeof(tex.format));
+        Mix(&tex.width, sizeof(tex.width));
+        Mix(&tex.height, sizeof(tex.height));
+        for (NSTexture::EChannel ch : tex.channels) Mix(&ch, sizeof(ch));
+    };
+
+    MixStr(srcManifest.name);
+    Mix(&srcManifest.pageCountX, sizeof(srcManifest.pageCountX));
+    Mix(&srcManifest.pageCountZ, sizeof(srcManifest.pageCountZ));
+    Mix(&srcManifest.worldWidth, sizeof(srcManifest.worldWidth));
+    Mix(&srcManifest.worldDepth, sizeof(srcManifest.worldDepth));
+    Mix(&srcManifest.maxHeight, sizeof(srcManifest.maxHeight));
+    MixTex(srcManifest.heightmap);
+    MixTex(srcManifest.diffuse);
 
     return NSTool::format("%016llx", hash);
 }
@@ -1088,15 +1240,15 @@ void Terrain::GeneratePageFromEXR()
     pageManifest.sourceManifestHash = ComputeSourceManifestHash();
     pageManifest.pageCountX = srcManifest.pageCountX;
     pageManifest.pageCountZ = srcManifest.pageCountZ;
-    pageManifest.height = GenerateHeightBinsFromEXR();
-    pageManifest.diffuse = GenerateDiffuseBinsFromEXR();
-
+    pageManifest.height = BakeHeightmapEXR();
+    pageManifest.diffuse = BakeDiffuseEXR();
     pageManifest.isPresent = true;
 
     SavePagesManifest();
+    SaveSourceManifest();
 }
 
-PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
+PageTextureManifest Terrain::BakeHeightmapEXR()
 {
     ASSERT(srcManifest.pageCountX > 0u and srcManifest.pageCountZ > 0u);
     ASSERT(srcManifest.heightmap.format == DXGI_FORMAT::DXGI_FORMAT_R16_UNORM, "Terrain height page cache expects DXGI_FORMAT_R16_UNORM");
@@ -1148,6 +1300,26 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
         }
     }
 
+    // Baking impostor terrain heights
+    {
+        const uint32_t impostorW = std::min(kImpostorResolution, heightTexture.width);
+        const uint32_t impostorH = std::min(kImpostorResolution, heightTexture.height);
+
+        const std::filesystem::path impostorPath = m_root / kImpostorFolderName / kImpostorHeightmapBinFilesName;
+        WriteImpostorBin(heightTexture, impostorPath.generic_string(), impostorW, impostorH);
+
+        srcManifest.impostorHeight = PageTextureManifest
+        {
+            .sourceWidth = heightTexture.width,
+            .sourceHeight = heightTexture.height,
+            .format = srcManifest.heightmap.format,
+            .pageWidth = impostorW,
+            .pageHeight = impostorH,
+            .bytesPerPixel = NSTexture::BytesPerPixel(srcManifest.heightmap.format),
+            .haloPixels = 0u
+        };
+    }
+
     return PageTextureManifest
     {
         .sourceWidth = quadsPerPageX * srcManifest.pageCountX + 1u,
@@ -1160,7 +1332,7 @@ PageTextureManifest Terrain::GenerateHeightBinsFromEXR()
     };
 }
 
-PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
+PageTextureManifest Terrain::BakeDiffuseEXR()
 {
     ASSERT(srcManifest.pageCountX > 0u and srcManifest.pageCountZ > 0u);
     ASSERT(
@@ -1222,6 +1394,26 @@ PageTextureManifest Terrain::GenerateDiffuseBinsFromEXR()
                 kHaloPixels
             );
         }
+    }
+
+    // Baking impostor terrain diffuse
+    {
+        const uint32_t impostorW = std::min(kImpostorResolution, diffuseTexture.width);
+        const uint32_t impostorH = std::min(kImpostorResolution, diffuseTexture.height);
+
+        const std::filesystem::path impostorPath = m_root / kImpostorFolderName / kImpostorDiffuseBinFilesName;
+        WriteImpostorBin(diffuseTexture, impostorPath.generic_string(), impostorW, impostorH);
+
+        srcManifest.impostorDiffuse = PageTextureManifest
+        {
+            .sourceWidth = diffuseTexture.width,
+            .sourceHeight = diffuseTexture.height,
+            .format = srcManifest.diffuse.format,
+            .pageWidth = impostorW,
+            .pageHeight = impostorH,
+            .bytesPerPixel = NSTexture::BytesPerPixel(srcManifest.diffuse.format),
+            .haloPixels = 0u
+        };
     }
 
     return manifest;
@@ -1330,4 +1522,113 @@ void Terrain::CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<S
     slot->gpuInitialized = true;
     slot->residency = StreamSlot::ESlotResidency::Loaded;
     page->isOnGPU = true;
+}
+
+void Terrain::LoadImpostor(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx)
+{
+    const std::filesystem::path heightPath = m_root / kImpostorFolderName / kImpostorHeightmapBinFilesName;
+    const std::filesystem::path diffusePath = m_root / kImpostorFolderName / kImpostorDiffuseBinFilesName;
+
+    if (not std::filesystem::is_regular_file(heightPath) or not std::filesystem::is_regular_file(diffusePath))
+    {
+        g_FWarn("Terrain impostor bins missing; skipping impostor load");
+        return;
+    }
+    ASSERT(srcManifest.impostorHeight.pageWidth > 1u and srcManifest.impostorDiffuse.pageWidth > 0u, "Impostor manifest not present");
+
+    // Always-resident impostor textures. Single tile, no halo!
+    m_impostorHeight = LoadPageTextureBin(L"NSTerrain::Terrain::Impostor::Heightmap", heightPath, srcManifest.impostorHeight, NSTexture::EType::HEIGHT);
+    m_impostorDiffuse = LoadPageTextureBin(L"NSTerrain::Terrain::Impostor::Diffuse", diffusePath, srcManifest.impostorDiffuse, NSTexture::EType::DIFFUSE);
+
+    m_impostorSrvHandle = rendererCtx.allocSRVStatic(2u);
+    m_impostorHeight.srvOffset = rendererCtx.offsetSRV(m_impostorSrvHandle, 0u);
+    m_impostorDiffuse.srvOffset = rendererCtx.offsetSRV(m_impostorSrvHandle, 1u);
+
+    m_impostorHeight.PopulateCPU(true).PopulateGPU(cmdList);
+    m_impostorDiffuse.PopulateCPU(true).PopulateGPU(cmdList);
+
+    const uint32_t vertsX = srcManifest.impostorHeight.pageWidth;
+    const uint32_t vertsZ = srcManifest.impostorHeight.pageHeight;
+    ASSERT(vertsX > 1u and vertsZ > 1u);
+
+    const float worldWidth = m_desc.worldWidth;
+    const float worldDepth = m_desc.worldDepth;
+    const float originX = -0.5f * worldWidth;
+    const float originZ = -0.5f * worldDepth;
+
+    m_impostorWorldCell = {
+        worldWidth / static_cast<float>(vertsX - 1u),
+        worldDepth / static_cast<float>(vertsZ - 1u)
+    };
+
+    std::vector<Vertex> vertices;
+    vertices.reserve(static_cast<size_t>(vertsX) * vertsZ);
+    for (uint32_t z = 0u; z < vertsZ; ++z)
+    {
+        const float v = static_cast<float>(z) / static_cast<float>(vertsZ - 1u);
+        for (uint32_t x = 0u; x < vertsX; ++x)
+        {
+            const float u = static_cast<float>(x) / static_cast<float>(vertsX - 1u);
+            Vertex vert{};
+            vert.position = { originX + u * worldWidth, 0.f, originZ + v * worldDepth };
+            vert.texCoord = { u, v };
+            vertices.push_back(vert);
+        }
+    }
+
+    std::vector<uint32_t> indices;
+    indices.reserve(static_cast<size_t>(vertsX - 1u) * (vertsZ - 1u) * 6u);
+    for (uint32_t z = 0u; z < vertsZ - 1u; ++z)
+    {
+        for (uint32_t x = 0u; x < vertsX - 1u; ++x)
+        {
+            const uint32_t i0 = z * vertsX + x;
+            const uint32_t i1 = i0 + 1u;
+            const uint32_t i2 = i0 + vertsX;
+            const uint32_t i3 = i2 + 1u;
+
+            indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
+            indices.push_back(i1); indices.push_back(i2); indices.push_back(i3);
+        }
+    }
+    m_impostorIndexCount = static_cast<uint32_t>(indices.size());
+
+    const UINT vbSize = static_cast<UINT>(vertices.size() * sizeof(Vertex));
+    const UINT ibSize = static_cast<UINT>(indices.size() * sizeof(uint32_t));
+
+    auto UploadBuffer = [&](UINT size, const void* data, ComPtr<ID3D12Resource>& outUpload, ComPtr<ID3D12Resource>& outDefault, D3D12_RESOURCE_STATES finalState, LPCWSTR uploadName, LPCWSTR defaultName)
+    {
+        const CD3DX12_HEAP_PROPERTIES upProps(D3D12_HEAP_TYPE_UPLOAD);
+        const CD3DX12_RESOURCE_DESC bufDesc = CD3DX12_RESOURCE_DESC::Buffer(size);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(&upProps, D3D12_HEAP_FLAG_NONE, &bufDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&outUpload)));
+        outUpload->SetName(uploadName);
+
+        void* p = nullptr;
+        ThrowIfFailed(outUpload->Map(0u, nullptr, &p));
+        memcpy(p, data, size);
+        outUpload->Unmap(0u, nullptr);
+
+        const CD3DX12_HEAP_PROPERTIES defProps(D3D12_HEAP_TYPE_DEFAULT);
+        ThrowIfFailed(m_device->CreateCommittedResource(&defProps, D3D12_HEAP_FLAG_NONE, &bufDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&outDefault)));
+        outDefault->SetName(defaultName);
+
+        CD3DX12_RESOURCE_BARRIER pre = CD3DX12_RESOURCE_BARRIER::Transition(outDefault.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+        cmdList.ResourceBarrier(1u, &pre);
+        cmdList.CopyResource(outDefault.Get(), outUpload.Get());
+        CD3DX12_RESOURCE_BARRIER post = CD3DX12_RESOURCE_BARRIER::Transition(outDefault.Get(), D3D12_RESOURCE_STATE_COPY_DEST, finalState);
+        cmdList.ResourceBarrier(1u, &post);
+    };
+
+    UploadBuffer(vbSize, vertices.data(), m_impostorVertexUpload, m_impostorVertexDefault,
+        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, L"NSTerrain::Terrain::Impostor::VertexUpload", L"NSTerrain::Terrain::Impostor::VertexDefault");
+    m_impostorVertexBufferView.BufferLocation = m_impostorVertexDefault->GetGPUVirtualAddress();
+    m_impostorVertexBufferView.SizeInBytes = vbSize;
+    m_impostorVertexBufferView.StrideInBytes = sizeof(Vertex);
+
+    UploadBuffer(ibSize, indices.data(), m_impostorIndexUpload, m_impostorIndexDefault,
+        D3D12_RESOURCE_STATE_INDEX_BUFFER, L"NSTerrain::Terrain::Impostor::IndexUpload", L"NSTerrain::Terrain::Impostor::IndexDefault");
+    m_impostorIndexBufferView.BufferLocation = m_impostorIndexDefault->GetGPUVirtualAddress();
+    m_impostorIndexBufferView.SizeInBytes = ibSize;
+    m_impostorIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
 }

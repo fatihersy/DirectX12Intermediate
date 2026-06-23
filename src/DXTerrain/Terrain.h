@@ -108,6 +108,28 @@ namespace NSTerrain
             return m_poolView;
         };
 
+        bool HasImpostor() const override {
+            return m_impostorIndexCount > 0u;
+        }
+        uint32_t GetImpostorHeightmapSRVIndex() const override {
+            return m_impostorHeight.srvOffset.index;
+        }
+        uint32_t GetImpostorDiffuseSRVIndex() const override {
+            return m_impostorDiffuse.srvOffset.index;
+        }
+        D3D12_VERTEX_BUFFER_VIEW GetImpostorVertexBufferView() const override {
+            return m_impostorVertexBufferView;
+        }
+        D3D12_INDEX_BUFFER_VIEW GetImpostorIndexBufferView() const override {
+            return m_impostorIndexBufferView;
+        }
+        uint32_t GetImpostorIndexCount() const override {
+            return m_impostorIndexCount;
+        }
+        DirectX::XMFLOAT2 GetImpostorWorldCell() const override {
+            return m_impostorWorldCell;
+        }
+
         void BuildPageLayout(EntityMap<TerrainPage>& out_Pages);
 
     private:
@@ -135,10 +157,12 @@ namespace NSTerrain
         bool PagesExists();
         bool PageMatchesSource();
         void GeneratePageFromEXR();
-        PageTextureManifest GenerateHeightBinsFromEXR();
-        PageTextureManifest GenerateDiffuseBinsFromEXR();
+        PageTextureManifest BakeHeightmapEXR();
+        PageTextureManifest BakeDiffuseEXR();
         NSTexture::Texture LoadPageTextureBin(std::wstring_view name, const std::filesystem::path& path, const PageTextureManifest& manifest, NSTexture::EType type);
         void CopyPageToGPU(std::shared_ptr<TerrainPage> page, std::shared_ptr<StreamSlot> slot, NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
+
+        void LoadImpostor(NSDX12::GraphicsCommandList cmdList, NSRenderer::Ctx rendererCtx);
 
         std::filesystem::path m_root;
         bool m_isInitialized{};
@@ -150,5 +174,17 @@ namespace NSTerrain
         ComPtr<ID3D12Resource> m_sharedPatchIndexUpload;
         D3D12_INDEX_BUFFER_VIEW m_sharedPatchIndexBufferView{};
         uint32_t m_sharedPatchIndexCount = 0;
+
+        NSDescriptor::Handle m_impostorSrvHandle{};
+        NSTexture::Texture m_impostorHeight{};
+        NSTexture::Texture m_impostorDiffuse{};
+        ComPtr<ID3D12Resource> m_impostorVertexDefault;
+        ComPtr<ID3D12Resource> m_impostorVertexUpload;
+        ComPtr<ID3D12Resource> m_impostorIndexDefault;
+        ComPtr<ID3D12Resource> m_impostorIndexUpload;
+        D3D12_VERTEX_BUFFER_VIEW m_impostorVertexBufferView{};
+        D3D12_INDEX_BUFFER_VIEW m_impostorIndexBufferView{};
+        uint32_t m_impostorIndexCount = 0;
+        DirectX::XMFLOAT2 m_impostorWorldCell{};
     };
 }

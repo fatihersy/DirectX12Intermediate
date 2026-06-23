@@ -504,7 +504,7 @@ void Renderer::BeginFrame()
     m_commandList->RSSetViewports(1, &viewport);
     m_commandList->RSSetScissorRects(1, &scissor);
 }
-void Renderer::DrawScene(NSScene::IScene& scene)
+void Renderer::DrawScene(std::shared_ptr<NSScene::IScene> scene)
 {
     m_blackboard.Set(NSRenderer::kRenderer_frameIndex, m_swapChain->GetCurrentBackBufferIndex());
 
@@ -516,7 +516,7 @@ void Renderer::DrawScene(NSScene::IScene& scene)
         pass->Execute(scene, m_blackboard, rendererCtx, cmdList);
     }
 
-    DrawDebugImage(scene);
+    DrawDebugImage();
 }
 void Renderer::EndFrame()
 {
@@ -950,7 +950,7 @@ void Renderer::CreateFallbackTexture()
     });
 }
 
-void Renderer::DrawDebugImage(NSScene::IScene& scene)
+void Renderer::DrawDebugImage()
 {
     static bool terrainCullingDebug = true;
 
