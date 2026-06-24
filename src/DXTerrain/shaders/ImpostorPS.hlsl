@@ -86,8 +86,6 @@ float4 PS_Impostor(PSInput input) : SV_TARGET
 
     float3 color = ambient + diffuse;
 
-    color = color / (color + 1.0f);
-    color = pow(color, float3(1.0f / 2.2f, 1.0f / 2.2f, 1.0f / 2.2f));
-
+    // Linear HDR out; tonemap + gamma happen in the post-process pass.
     return float4(color, 1.0f);
 }

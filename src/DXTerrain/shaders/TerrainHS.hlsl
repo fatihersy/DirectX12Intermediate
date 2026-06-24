@@ -63,7 +63,14 @@ float EdgeTessFactor(float3 a, float3 b)
     float d = distance(mid, frameCB.camPos);
 
     float maxTess = max(1.0f, 4.0f * max(terrainCB.tessFactorScale, 0.01f));
-    float t = saturate((d - 64.0f) / 1024.0f);
+    // Smoothstep (C1-continuous) over a widened band instead of a linear ramp: the linear
+    // version had sharp corners where it met the clamps, which read as a LOD-rate "line"
+    // sweeping across the surface as the camera moved. smoothstep eases both ends so the
+    // tess factor changes gradually and that line disappears. Edges share the same midpoint,
+    // so the factor stays crack-free across adjacent patches.
+    const float nearDist = 64.0f;
+    const float farDist  = 1536.0f;
+    float t = smoothstep(nearDist, farDist, d);
 
     return lerp(maxTess, 1.0f, t);
 }

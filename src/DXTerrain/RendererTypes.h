@@ -77,6 +77,20 @@ static_assert(offsetof(FrameConstants, lightColor) % 4 == 0);
 static_assert(offsetof(FrameConstants, eye) % 4 == 0);
 static_assert(offsetof(FrameConstants, PADDING_0) % 4 == 0);
 
+struct PostConstants
+{
+    DirectX::XMFLOAT4X4 invViewProj{};
+    DirectX::XMFLOAT3 camPos{};
+    uint32_t sceneColorSrvIndex{};
+    uint32_t depthSrvIndex{};
+    uint32_t transmittanceSrvIndex{};
+    uint32_t scatteringSrvIndex{};
+    uint32_t PADDING_0{};
+};
+static_assert(sizeof(PostConstants) % 16 == 0);
+static_assert(offsetof(PostConstants, camPos) % 16 == 0);
+static_assert(offsetof(PostConstants, depthSrvIndex) % 16 == 0);
+
 struct MeshConstants
 {
     DirectX::XMFLOAT4X4 worldMatrix{};
@@ -195,8 +209,14 @@ struct TerrainConstants
     uint32_t pageHalo{};
     uint32_t PADDING_1{};
     uint32_t splatSrvIndices[4]{};
+    uint32_t impostorHeightmapSrvIndex{};
+    uint32_t impostorDiffuseSrvIndex{};
+    float morphNear{};
+    float morphFar{};
 };
 static_assert(sizeof(TerrainConstants) % 16 == 0);
+static_assert(offsetof(TerrainConstants, impostorHeightmapSrvIndex) % 4 == 0);
+static_assert(offsetof(TerrainConstants, morphNear) % 4 == 0);
 static_assert(offsetof(TerrainConstants, worldMatrix) % 4 == 0);
 static_assert(offsetof(TerrainConstants, maxHeight) % 4 == 0);
 static_assert(offsetof(TerrainConstants, worldTexelSpacingX) % 4 == 0);
@@ -326,6 +346,7 @@ namespace NSRenderer
     inline constexpr BlackboardKey kRenderer_terrain   { "Renderer.terrain" };
 
     inline constexpr BlackboardKey kAtmosphere_transmitScatterSRV{ "Atmosphere.transmitScatterSRV" };
+    inline constexpr BlackboardKey kAtmosphere_scatteringSRV     { "Atmosphere.scatteringSRV" };
     inline constexpr BlackboardKey kAtmosphere_constants         { "Atmosphere.constants" };
 
     inline constexpr BlackboardKey kEnvCubemap_brdfLUTsrv{ "EnvCubemap.brdfLUTsrv" };

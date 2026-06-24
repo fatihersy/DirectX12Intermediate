@@ -34,6 +34,10 @@ struct TerrainConstants
     uint pageHalo;
     uint PADDING_1;
     uint4 splatSrvIndices;
+    uint impostorHeightmapSrvIndex;
+    uint impostorDiffuseSrvIndex;
+    float morphNear;
+    float morphFar;
 };
 
 ConstantBuffer<FrameConstants> frameCB : register(b0);
@@ -102,6 +106,15 @@ DSOutput DS_Terrain(HSPatchConstants patchConstants, float2 domainUV : SV_Domain
     float2 coreSpan = float2(hmWidth, hmHeight) - 2.0f * halo - 1.0f; // (core texels - 1)
     float2 hmUV = (halo + pageLocal * coreSpan + 0.5f) / float2(hmWidth, hmHeight);
 
+    // Distance-driven impostor->page morph. Blend the page surface toward the whole-map
+    // impostor (sampled at the same global uv) so far detail rises out of it with no pop.
+    // Crack-free: a pure function of world position + camera, so adjacent pages always agree
+    // at shared edges. Runs in both the main and depth-prepass variants so depth stays valid.
+    Texture2D<float> impostorHM = ResourceDescriptorHeap[terrainCB.impostorHeightmapSrvIndex];
+    float wImp = smoothstep(terrainCB.morphNear, terrainCB.morphFar, distance(worldPos, frameCB.camPos));
+    float hImp = impostorHM.SampleLevel(linearClampSampler, saturate(uv), 0).r * terrainCB.maxHeight;
+    worldPos.y = lerp(worldPos.y, hImp, wImp);
+
     #ifndef DEPTH_PREPASS
         // One full heightmap texel; thanks to the halo gutter these neighbour taps read
         // real cross-page data at borders instead of clamping onto the page's own edge.
@@ -120,6 +133,25 @@ DSOutput DS_Terrain(HSPatchConstants patchConstants, float2 domainUV : SV_Domain
             1.0f,
             (hD - hU) / (2.0f * spacingZ)
         ));
+
+        // Morph the normal toward the impostor's so lighting doesn't pop as the height blends.
+        // Same spacing as the page (the impostor shares the worldTexel formula).
+        uint imW;
+        uint imH;
+        impostorHM.GetDimensions(imW, imH);
+        float2 imTexel = 1.0f / float2(imW, imH);
+
+        float ihL = impostorHM.SampleLevel(linearClampSampler, saturate(uv + float2(-imTexel.x, 0.0f)), 0).r * terrainCB.maxHeight;
+        float ihR = impostorHM.SampleLevel(linearClampSampler, saturate(uv + float2( imTexel.x, 0.0f)), 0).r * terrainCB.maxHeight;
+        float ihD = impostorHM.SampleLevel(linearClampSampler, saturate(uv + float2(0.0f, -imTexel.y)), 0).r * terrainCB.maxHeight;
+        float ihU = impostorHM.SampleLevel(linearClampSampler, saturate(uv + float2(0.0f,  imTexel.y)), 0).r * terrainCB.maxHeight;
+
+        float3 impNormal = normalize(float3(
+            (ihL - ihR) / (2.0f * spacingX),
+            1.0f,
+            (ihD - ihU) / (2.0f * spacingZ)
+        ));
+        normal = normalize(lerp(normal, impNormal, wImp));
     #endif
 
     float4 viewPos = mul(frameCB.viewMatrix, float4(worldPos, 1.0f));

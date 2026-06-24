@@ -207,4 +207,22 @@ namespace NSRenderPass
         static constexpr UINT IDX_TERRAIN_CBV_FRAME = 0u;
         static constexpr UINT IDX_TERRAIN_CBV_TERRAIN = 1u;
     };
+
+    // Renderer-driven post-process. Not in the m_passes array. The Renderer owns the
+    // HDR scene-color target + backbuffer and invokes this after the scene pass loop in Renderer::DrawScene
+    class PostProcessPass
+    {
+    public:
+        PostProcessPass(ID3D12Device14* device);
+        ~PostProcessPass();
+
+        void OnDestroy();
+        void Execute(NSDX12::GraphicsCommandList cmdList, D3D12_GPU_VIRTUAL_ADDRESS postCB, D3D12_GPU_VIRTUAL_ADDRESS atmosCB);
+
+    private:
+        GraphicsPipeline m_pipeline;
+
+        static constexpr UINT IDX_ROOT_CBV_POST = 0u;
+        static constexpr UINT IDX_ROOT_CBV_ATMOSPHERE = 1u;
+    };
 } // NSRenderPass

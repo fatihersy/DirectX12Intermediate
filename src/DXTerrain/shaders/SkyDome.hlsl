@@ -581,14 +581,8 @@ float4 PS_Sky(VSOutput input) : SV_Target
 
     float3 color = inScatter + sunColor;
 
-    // Tone mapping: simple Reinhard on luminance to keep HDR sky in [0,1]
-    float lum = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
-    color *= 1.0f / (1.0f + lum);
-
-    // Gamma correction (assume linear rendering pipeline, apply 2.2)
-    color = pow(max(color, 0.0f), 1.0f / 2.2f);
-
-    return float4(color, 1.0f);
+    // Linear HDR out; tonemap + gamma happen in the post-process pass.
+    return float4(max(color, 0.0f), 1.0f);
 }
 
 #endif // COMPUTE_SHADER

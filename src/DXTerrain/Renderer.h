@@ -10,10 +10,12 @@
 
 using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSDX12::GraphicsCommandList cmdList)>;
 
+namespace NSRenderPass { class PostProcessPass; }
+
 class Renderer
 {
 public:
-    Renderer() {}
+    Renderer();
     ~Renderer();
 
     void Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSRenderer::RendererDescription desc);
@@ -146,6 +148,14 @@ private:
 
     NSDescriptor::Handle m_dsHandle;
     ComPtr<ID3D12Resource2> m_depthStencil;
+    NSDescriptor::Handle m_depthSrv; // R32_FLOAT view of the depth buffer for the post-process pass
+
+    static constexpr DXGI_FORMAT SCENE_COLOR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ComPtr<ID3D12Resource2> m_sceneColor;
+    NSDescriptor::Handle m_sceneColorRtv;
+    NSDescriptor::Handle m_sceneColorSrv;
+    std::unique_ptr<NSRenderPass::PostProcessPass> m_postProcess;
+    void CreateSceneColor(UINT width, UINT height);
 
     ComPtr<ID3D12CommandAllocator> m_commandAllocators[IApp::ic_framesInFlight];
     ComPtr<ID3D12CommandQueue> m_commandQueue;

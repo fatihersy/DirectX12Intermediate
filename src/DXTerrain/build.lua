@@ -21,7 +21,8 @@ filter {}
 files {
     "**.h",
     "**.cpp",
-    "**.hlsl"
+    "**.hlsl",
+    "**.hlsli",
 }
 
 mox_link_vcpkg("DirectXTK12")
@@ -72,7 +73,7 @@ filter { "action:vs*", "configurations:Release" }
 linkoptions { "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF" }
 filter {}
 
-filter "files:**.hlsl"
+filter { "files:**.hlsl" }
 buildaction "CustomBuild"
 buildoutputs {
     "%{wks.location}/app/%{prj.name}/%{file.reldirectory}/%{file.name}"
@@ -84,6 +85,17 @@ buildcommands {
 linkbuildoutputs "false"
 filter {}
 
+filter { "files:**.hlsli" }
+buildaction "CustomBuild"
+buildoutputs {
+    "%{wks.location}/app/%{prj.name}/%{file.reldirectory}/%{file.name}"
+}
+buildcommands {
+    'mkdir -p "%{wks.location}/app/%{prj.name}/%{file.reldirectory}"',
+    'cp "%{file.relpath}" "%{wks.location}/app/%{prj.name}/%{file.reldirectory}/%{file.name}"'
+}
+linkbuildoutputs "false"
+filter {}
 
 -- Use the following to build after other projects
 -- dependson {

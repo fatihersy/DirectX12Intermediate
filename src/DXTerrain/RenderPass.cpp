@@ -99,7 +99,7 @@ GeometryPass& GeometryPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rende
         GRAPHICS_PIPELINE_STATE_DESC desc{};
         desc.InputLayout = { inputElements, _countof(inputElements) };
         desc.NumRenderTargets = 1;
-        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         desc.SampleDesc.Count = 1;
         desc.SampleMask = UINT_MAX;
@@ -313,7 +313,7 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
         desc.InputLayout = { inputElements, _countof(inputElements) };
         desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         desc.NumRenderTargets = 1;
-        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         desc.SampleDesc.Count = 1;
         desc.SampleMask = UINT_MAX;
@@ -391,6 +391,7 @@ AtmospherePass::AtmospherePass(ID3D12Device14* device, Blackboard& blackboard, N
     NSDescriptor::Offset scatteringSRVoffset = rendererCtx.offsetSRV(m_srvHandle, IDX_SRV_SCATTERING);
 
     blackboard.Set(NSRenderer::kAtmosphere_transmitScatterSRV, transmittanceSRVoffset);
+    blackboard.Set(NSRenderer::kAtmosphere_scatteringSRV, scatteringSRVoffset);
 
     device->CreateUnorderedAccessView(
         m_transmittanceLUT.Get(),
@@ -1242,7 +1243,7 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
     desc.SampleMask = UINT_MAX;
     desc.InputLayout = { inputElements, _countof(inputElements) };
     desc.NumRenderTargets = 1;
-    desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
     desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     desc.SampleDesc.Count = 1;
 
@@ -1314,7 +1315,7 @@ TerrainPass::TerrainPass(ID3D12Device14* device, Blackboard& blackboard, NSRende
         GRAPHICS_PIPELINE_STATE_DESC impostorDesc{};
         impostorDesc.InputLayout = { impostorInput, _countof(impostorInput) };
         impostorDesc.NumRenderTargets = 1;
-        impostorDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        impostorDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
         impostorDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         impostorDesc.SampleDesc.Count = 1;
         impostorDesc.SampleMask = UINT_MAX;
@@ -1450,6 +1451,24 @@ void TerrainPass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& b
     EntityMap<NSTerrain::StreamSlotView>& slotViews = scene->m_terrainView->GetSlotsView();
     const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene->m_terrainView->GetSlots();
 
+    // impostor to page morph must match ZPrePass exactly so depth and color agree
+    uint32_t impostorHeightmapSrvIndex = rendererCtx.fallbackSRV.index;
+    uint32_t impostorDiffuseSrvIndex = rendererCtx.fallbackSRV.index;
+    float morphNear = std::numeric_limits<float>::max();
+    float morphFar = std::numeric_limits<float>::max();
+    if (scene->m_terrainView->HasImpostor())
+    {
+        impostorHeightmapSrvIndex = scene->m_terrainView->GetImpostorHeightmapSRVIndex();
+        impostorDiffuseSrvIndex   = scene->m_terrainView->GetImpostorDiffuseSRVIndex();
+        float morphScale = static_cast<float>(rendererCtx.rendererDesc.streamingDistance);
+        const float pageWorld = std::max(
+            desc.worldWidth / static_cast<float>(desc.pageCountX),
+            desc.worldDepth / static_cast<float>(desc.pageCountZ)
+        );
+        morphFar  = std::max(morphScale - pageWorld, 1.0f);
+        morphNear = std::max(morphFar - 2.0f * pageWorld, 0.0f);
+    }
+
     for (NSMath::ICullable& culled : cullResult->m_culledObjects)
     {
         auto view = slotViews.Get(culled.ICullable_Id);
@@ -1477,6 +1496,10 @@ void TerrainPass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& b
                 cbuffer.splatSrvIndices[1] = m_textures[static_cast<size_t>(ETexture::ROCK)].srvOffset.index;
                 cbuffer.splatSrvIndices[2] = m_textures[static_cast<size_t>(ETexture::SNOW)].srvOffset.index;
                 cbuffer.splatSrvIndices[3] = m_textures[static_cast<size_t>(ETexture::DIRT)].srvOffset.index;
+                cbuffer.impostorHeightmapSrvIndex = impostorHeightmapSrvIndex;
+                cbuffer.impostorDiffuseSrvIndex = impostorDiffuseSrvIndex;
+                cbuffer.morphNear = morphNear;
+                cbuffer.morphFar = morphFar;
             }
 
             cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
@@ -1647,7 +1670,7 @@ DebugPass& DebugPass::OnInit(Blackboard& blackboard, NSRenderer::Ctx rendererCtx
         desc.InputLayout = { inputElements, _countof(inputElements) };
         desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
         desc.NumRenderTargets = 1;
-        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         desc.SampleDesc.Count = 1;
         desc.SampleMask = UINT_MAX;
@@ -2358,6 +2381,22 @@ void ZPrePass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blac
         EntityMap<NSTerrain::StreamSlotView>& slotViews = scene->m_terrainView->GetSlotsView();
         const EntityMap<NSTerrain::StreamSlot>& streamSlot = scene->m_terrainView->GetSlots();
 
+        // Same impostor to page morph as TerrainPass, so the prepass depth matches the morphed color & geometry
+        uint32_t impostorHeightmapSrvIndex = rendererCtx.fallbackSRV.index;
+        float morphNear = std::numeric_limits<float>::max();
+        float morphFar = std::numeric_limits<float>::max();
+        if (scene->m_terrainView->HasImpostor())
+        {
+            impostorHeightmapSrvIndex = scene->m_terrainView->GetImpostorHeightmapSRVIndex();
+            float morphScale = static_cast<float>(rendererCtx.rendererDesc.streamingDistance);
+            const float pageWorld = std::max(
+                desc.worldWidth / static_cast<float>(desc.pageCountX),
+                desc.worldDepth / static_cast<float>(desc.pageCountZ)
+            );
+            morphFar  = std::max(morphScale - pageWorld, 1.0f);
+            morphNear = std::max(morphFar - 2.0f * pageWorld, 0.0f);
+        }
+
         for (NSMath::ICullable& culled : cullResult->m_culledObjects)
         {
             auto view = slotViews.Get(culled.ICullable_Id);
@@ -2385,6 +2424,10 @@ void ZPrePass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blac
                     cbuffer.splatSrvIndices[1] = rendererCtx.fallbackSRV.index;
                     cbuffer.splatSrvIndices[2] = rendererCtx.fallbackSRV.index;
                     cbuffer.splatSrvIndices[3] = rendererCtx.fallbackSRV.index;
+                    cbuffer.impostorHeightmapSrvIndex = impostorHeightmapSrvIndex;
+                    cbuffer.impostorDiffuseSrvIndex = rendererCtx.fallbackSRV.index; // unused in depth
+                    cbuffer.morphNear = morphNear;
+                    cbuffer.morphFar = morphFar;
                 }
 
                 cmdList.SetGraphicsRootConstantBufferView(IDX_TERRAIN_ROOT_CBV_TERRAIN, allocCtx.gpuAddr);
@@ -2439,4 +2482,76 @@ void ZPrePass::Execute(std::shared_ptr<NSScene::IScene> _scene, Blackboard& blac
 void ZPrePass::OnResize(uint32_t width, uint32_t height, NSRenderer::Ctx rendererCtx)
 {
 
+}
+
+PostProcessPass::PostProcessPass(ID3D12Device14* device)
+{
+    CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
+    rasterDesc.CullMode = D3D12_CULL_MODE_NONE;
+
+    CD3DX12_DEPTH_STENCIL_DESC dsDesc(D3D12_DEFAULT);
+    dsDesc.DepthEnable = FALSE;
+    dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+    CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
+
+    GRAPHICS_PIPELINE_STATE_DESC desc{};
+    desc.InputLayout = { nullptr, 0 };
+    desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    desc.NumRenderTargets = 1;
+    desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc.Count = 1;
+    desc.SampleMask = UINT_MAX;
+
+    m_pipeline = GraphicsPipeline(device, L"PostProcessPass::m_pipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+    {
+        CD3DX12_ROOT_PARAMETER1 rp[2]{};
+        rp[IDX_ROOT_CBV_POST].InitAsConstantBufferView(0, 0);       // b0 PostConstants
+        rp[IDX_ROOT_CBV_ATMOSPHERE].InitAsConstantBufferView(2, 0); // b2 AtmosphereConstants
+
+        D3D12_STATIC_SAMPLER_DESC sampler{};
+        sampler.ShaderRegister = 0;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+
+        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc{};
+        rsDesc.Init_1_1(_countof(rp), rp, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED);
+
+        return D3DX12SerializeVersionedRootSignature(&rsDesc, version, &signature, &error);
+    }).Init(
+        desc,
+        rasterDesc, dsDesc, blendDesc,
+        { L"PostProcess.hlsl", { L"-E", L"VS_FullScreen", L"-T", L"vs_6_6", L"-Zi", L"-Od" } },
+        { L"PostProcess.hlsl", { L"-E", L"PS_Post",       L"-T", L"ps_6_6", L"-Zi", L"-Od" } }
+    );
+}
+PostProcessPass::~PostProcessPass()
+{}
+void PostProcessPass::OnDestroy()
+{
+    m_pipeline.Reset();
+}
+void PostProcessPass::Execute(NSDX12::GraphicsCommandList cmdList, D3D12_GPU_VIRTUAL_ADDRESS postCB, D3D12_GPU_VIRTUAL_ADDRESS atmosCB)
+{
+    m_pipeline.Bind(cmdList);
+
+    UINT width = IApp::GetInstance()->im_width;
+    UINT height = IApp::GetInstance()->im_height;
+    CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
+    RECT scissor = CD3DX12_RECT(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
+
+    cmdList.RSSetViewports(1, &viewport);
+    cmdList.RSSetScissorRects(1, &scissor);
+
+    cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_POST, postCB);
+    cmdList.SetGraphicsRootConstantBufferView(IDX_ROOT_CBV_ATMOSPHERE, atmosCB);
+    cmdList.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmdList.DrawInstanced(3, 1, 0, 0);
 }

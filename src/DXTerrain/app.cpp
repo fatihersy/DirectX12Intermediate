@@ -155,7 +155,7 @@ void app::LoadPipeline()
             .wnd = plat.GetWindow(),
             .width = im_width,
             .height = im_height,
-            .streamingDistance = 2000
+            .streamingDistance = 2500
         };
         m_renderer.Init(m_factory.Get(), im_device.Get(), im_wicFactory.Get(), desc);
     }
@@ -214,10 +214,10 @@ void app::LoadAssets()
 
         ObserverKey sDomeKey;
         {
-            std::shared_ptr<Model> skyDome = m_scene.AddObject<NSModel::SDome>
+            std::shared_ptr<Model> skyDome = m_scene.AddObject<NSModel::SSphere>
             (
                 NSModel::AddCtx { .name = L"SkyDome" },
-                NSModel::SDome {
+                NSModel::SSphere {
                     .radius = NSUnits::Meters(10000.f).ToWorld(),
                     .sliceCount = 64,
                     .stackCount = 32

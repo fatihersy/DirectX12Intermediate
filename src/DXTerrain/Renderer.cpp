@@ -6,6 +6,7 @@
 
 #include "DXSampleHelper.h"
 #include "RenderPass.h"
+#include "SceneTypes.h"
 #include "Logger.h"
 
 class BarrierBatch : public NSBarrier::IBarrierBatch
@@ -156,6 +157,10 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
         }
     }
 
+    m_depthSrv = AllocSRVStatic(1u);
+    m_sceneColorRtv = AllocRTVStatic(1u);
+    m_sceneColorSrv = AllocSRVStatic(1u);
+
     CreateDepthStencil(L"Renderer::m_depthStencil", NSRenderer::DepthStencilCreateDescription {
         .format = DXGI_FORMAT_D32_FLOAT,
         .flags = D3D12_DSV_FLAG_NONE,
@@ -164,6 +169,9 @@ void Renderer::Init(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingF
         .height = m_desc.height,
         .outDSV = m_depthStencil
     });
+
+    CreateSceneColor(m_desc.width, m_desc.height);
+    m_postProcess = std::make_unique<NSRenderPass::PostProcessPass>(m_device);
 
     // Command Lists
     {
@@ -347,6 +355,9 @@ void Renderer::Update()
 
     m_terrain->Update(m_copyCmdListPublic, GetCtx());
 }
+Renderer::Renderer()
+{
+}
 Renderer::~Renderer()
 {
 }
@@ -367,6 +378,13 @@ void Renderer::OnDestroy()
         pass->OnDestroy(rendererCtx);
         pass = {};
     }
+
+    if (m_postProcess)
+    {
+        m_postProcess->OnDestroy();
+        m_postProcess.reset();
+    }
+    m_sceneColor.Reset();
 
     for (UINT i = 0; i < IApp::ic_framesInFlight; i++)
     {
@@ -468,11 +486,17 @@ void Renderer::BeginFrame()
     ThrowIfFailed(m_commandList->Reset(m_commandAllocators[frameIndex].Get(), nullptr));
 
     {
+        // Backbuffer only drawn by post-process. Other passes renders into the HDR m_sceneColor target.
         CD3DX12_RESOURCE_BARRIER barriers[] =
         {
             CD3DX12_RESOURCE_BARRIER::Transition(
                 m_renderTargets[frameIndex].Get(),
                 D3D12_RESOURCE_STATE_PRESENT,
+                D3D12_RESOURCE_STATE_RENDER_TARGET
+            ),
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_sceneColor.Get(),
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_RENDER_TARGET
             )
         };
@@ -482,13 +506,13 @@ void Renderer::BeginFrame()
     m_srvHeap.BeginFrame(frameIndex);
     m_constantAllocator.BeginFrame(frameIndex);
 
-    D3D12_CPU_DESCRIPTOR_HANDLE rtCpuHandle = OffsetRTV(m_rtHandle, frameIndex).cpuAddr;
-    m_commandList->OMSetRenderTargets(1, &rtCpuHandle, FALSE, &m_dsHandle.cpuAddr);
+    D3D12_CPU_DESCRIPTOR_HANDLE sceneRtv = m_sceneColorRtv.cpuAddr;
+    m_commandList->OMSetRenderTargets(1, &sceneRtv, FALSE, &m_dsHandle.cpuAddr);
 
-    m_blackboard.Set<D3D12_CPU_DESCRIPTOR_HANDLE&>(NSRenderer::kRenderer_mainRTV, rtCpuHandle);
+    m_blackboard.Set<D3D12_CPU_DESCRIPTOR_HANDLE&>(NSRenderer::kRenderer_mainRTV, sceneRtv);
     m_blackboard.Set<D3D12_CPU_DESCRIPTOR_HANDLE&>(NSRenderer::kRenderer_mainDSV, m_dsHandle.cpuAddr);
 
-    m_commandList->ClearRenderTargetView(OffsetRTV(m_rtHandle, frameIndex).cpuAddr, CLEAR_COLOR, 0, nullptr);
+    m_commandList->ClearRenderTargetView(sceneRtv, CLEAR_COLOR, 0, nullptr);
     m_commandList->ClearDepthStencilView(m_dsHandle.cpuAddr, D3D12_CLEAR_FLAG_DEPTH, 0.f, 0, 0, nullptr); // Clear Depth 1.f -> 0.f
 
     ID3D12DescriptorHeap* heaps[] = {
@@ -516,11 +540,62 @@ void Renderer::DrawScene(std::shared_ptr<NSScene::IScene> scene)
         pass->Execute(scene, m_blackboard, rendererCtx, cmdList);
     }
 
+    {
+        using namespace DirectX;
+        UINT frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+
+        CD3DX12_RESOURCE_BARRIER toSrv[] =
+        {
+            CD3DX12_RESOURCE_BARRIER::Transition(m_sceneColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+            CD3DX12_RESOURCE_BARRIER::Transition(m_depthStencil.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+        };
+        m_commandList->ResourceBarrier(_countof(toSrv), toSrv);
+
+        D3D12_CPU_DESCRIPTOR_HANDLE backRtv = OffsetRTV(m_rtHandle, frameIndex).cpuAddr;
+        m_commandList->OMSetRenderTargets(1, &backRtv, FALSE, nullptr);
+
+        ID3D12DescriptorHeap* heaps[] = { const_cast<ID3D12DescriptorHeap*>(m_srvHeap.Raw()) };
+        m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
+
+        std::shared_ptr<NSScene::Camera> cam = scene->GetMainCamera();
+        XMMATRIX invViewProj = XMMatrixInverse(nullptr, XMMatrixMultiply(cam->viewMatrix, cam->projMatrix));
+
+        NSAllocator::Ctx postCBAC = m_constantAllocator.Allocate(sizeof(PostConstants));
+        PostConstants& pc = postCBAC.As<PostConstants>();
+        XMStoreFloat4x4(&pc.invViewProj, invViewProj);
+        XMStoreFloat3(&pc.camPos, cam->camEye);
+        pc.sceneColorSrvIndex = m_sceneColorSrv.index;
+        pc.depthSrvIndex = m_depthSrv.index;
+
+        auto trans = m_blackboard.GetOpt<NSDescriptor::Offset>(NSRenderer::kAtmosphere_transmitScatterSRV);
+        auto scat  = m_blackboard.GetOpt<NSDescriptor::Offset>(NSRenderer::kAtmosphere_scatteringSRV);
+        auto atmos = m_blackboard.GetOpt<AtmosphereConstants>(NSRenderer::kAtmosphere_constants);
+        ASSERT(trans.has_value() and scat.has_value() and atmos.has_value());
+        pc.transmittanceSrvIndex = trans->get().index;
+        pc.scatteringSrvIndex = scat->get().index;
+
+        NSAllocator::Ctx atmosCBAC = m_constantAllocator.Allocate(sizeof(AtmosphereConstants));
+        atmosCBAC.As<AtmosphereConstants>() = atmos->get();
+
+        m_postProcess->Execute(cmdList, postCBAC.gpuAddr, atmosCBAC.gpuAddr);
+
+        CD3DX12_RESOURCE_BARRIER toDepth = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_depthStencil.Get(),
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE
+        );
+        m_commandList->ResourceBarrier(1, &toDepth);
+    }
+
     DrawDebugImage();
 }
 void Renderer::EndFrame()
 {
     ImGui::Render();
+
+    D3D12_CPU_DESCRIPTOR_HANDLE backRtv = OffsetRTV(m_rtHandle, m_swapChain->GetCurrentBackBufferIndex()).cpuAddr;
+    m_commandList->OMSetRenderTargets(1, &backRtv, FALSE, nullptr);
+
     ID3D12DescriptorHeap* imGuiDescHeap[] = { m_imGuiSrvHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(imGuiDescHeap), imGuiDescHeap);
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
@@ -756,6 +831,7 @@ void Renderer::Resize(UINT width, UINT height)
         m_renderTargets[i].Reset();
     }
     m_depthStencil.Reset();
+    m_sceneColor.Reset();
 
     {
         DXGI_SWAP_CHAIN_DESC1 desc{};
@@ -775,7 +851,7 @@ void Renderer::Resize(UINT width, UINT height)
 
     {
         D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-        D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, width, height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE);
+        D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, width, height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
         D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 0.f, 0); // Clear value 1.f -> 0.f
         ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
     }
@@ -786,7 +862,16 @@ void Renderer::Resize(UINT width, UINT height)
         desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
         desc.Flags = D3D12_DSV_FLAG_NONE;
         m_device->CreateDepthStencilView(m_depthStencil.Get(), &desc, m_dsHandle.cpuAddr);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+        srv.Format = DXGI_FORMAT_R32_FLOAT;
+        srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv.Texture2D.MipLevels = 1;
+        m_device->CreateShaderResourceView(m_depthStencil.Get(), &srv, m_depthSrv.cpuAddr);
     }
+
+    CreateSceneColor(width, height);
 
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_width, m_desc.width);
     m_blackboard.Set<UINT&>(NSRenderer::kRenderer_height, m_desc.height);
@@ -816,7 +901,7 @@ void Renderer::CreateSwapChain(HWND hwnd, UINT width, UINT height)
 void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDescription inDesc)
 {
     D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
-    desc.Format = inDesc.format;
+    desc.Format = inDesc.format; // D32_FLOAT view over the typeless resource
     desc.Flags = inDesc.flags;
     desc.ViewDimension = inDesc.dimension;
 
@@ -824,16 +909,60 @@ void Renderer::CreateDepthStencil(LPCWSTR name, NSRenderer::DepthStencilCreateDe
 
     D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(DXGI_FORMAT_D32_FLOAT, 0.f, 0); // Clear value 1.f -> 0.f
+
+    // Typeless so the post-process pass can read it as R32_FLOAT
     D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_D32_FLOAT,
+        DXGI_FORMAT_R32_TYPELESS,
         inDesc.width, inDesc.height,
         1, 0, 1, 0,
-        D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE
+        D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
     );
 
-    ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil)));
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &heapProp,
+        D3D12_HEAP_FLAG_NONE,
+        &resDesc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        &clearVal,
+        IID_PPV_ARGS(&m_depthStencil))
+    );
     m_device->CreateDepthStencilView(inDesc.outDSV.Get(), &desc, m_dsHandle.cpuAddr);
     inDesc.outDSV->SetName(name);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = DXGI_FORMAT_R32_FLOAT;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels = 1;
+    m_device->CreateShaderResourceView(m_depthStencil.Get(), &srv, m_depthSrv.cpuAddr);
+}
+void Renderer::CreateSceneColor(UINT width, UINT height)
+{
+    D3D12_HEAP_PROPERTIES heapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    const float clearColor[4] = { 0.f, 0.f, 0.f, 1.f };
+    D3D12_CLEAR_VALUE clearVal = CD3DX12_CLEAR_VALUE(SCENE_COLOR_FORMAT, clearColor);
+    D3D12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+        SCENE_COLOR_FORMAT, width, height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET
+    );
+
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &heapProp,
+        D3D12_HEAP_FLAG_NONE,
+        &resDesc,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        &clearVal,
+        IID_PPV_ARGS(&m_sceneColor))
+    );
+    m_sceneColor->SetName(L"Renderer::m_sceneColor");
+
+    m_device->CreateRenderTargetView(m_sceneColor.Get(), nullptr, m_sceneColorRtv.cpuAddr);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = SCENE_COLOR_FORMAT;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels = 1;
+    m_device->CreateShaderResourceView(m_sceneColor.Get(), &srv, m_sceneColorSrv.cpuAddr);
 }
 void Renderer::CreateFallbackTexture()
 {

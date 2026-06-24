@@ -40,11 +40,15 @@ void ShaderCompiler::CompileShader(LPCWSTR pFileName, ComPtr<IDxcBlob>& outShade
     sourceBuffer.Ptr = shaderSource->GetBufferPointer();
     sourceBuffer.Size = shaderSource->GetBufferSize();
 
+    std::vector<LPCWSTR> argsWithInclude = args;
+    argsWithInclude.push_back(L"-I");
+    argsWithInclude.push_back(SHADERS_FOLDER.data());
+
     ComPtr<IDxcResult> compileResult;
     ThrowIfFailed(m_dxcCompiler->Compile(
         &sourceBuffer,
-        args.data(),
-        static_cast<UINT>(args.size()),
+        argsWithInclude.data(),
+        static_cast<UINT>(argsWithInclude.size()),
         m_dxcIncludeHandler.Get(),
         IID_PPV_ARGS(&compileResult)
     ));

@@ -140,7 +140,7 @@ namespace NSTerrain
         EntityMap<TerrainPage> m_pages;
         TerrainStreamPool m_streamPool;
         uint64_t generation{};
-        uint32_t m_maxUploadsPerFrame{1u};
+        uint32_t m_maxUploadsPerFrame{4u};
         uint32_t m_pendingCopyCount{};
 
         enum class TextureIDs : uint32_t { HEIGHTMAP = 0, DIFFUSE, MAX };

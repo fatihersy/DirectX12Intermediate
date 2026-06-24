@@ -255,12 +255,6 @@ float4 mainPS(VSOutput input) : SV_TARGET
     // Total color: IBL ambient + direct lights.
     float3 color = ambient + Lo;
 
-    // === POST-PROCESSING ===
-    // Reinhard tone mapping (simple HDR compression).
-    color = color / (color + 1.0f);
-
-    // Gamma correction (sRGB output; assumes linear input from textures).
-    color = pow(color, float3(1.0f / 2.2f, 1.0f / 2.2f, 1.0f / 2.2f));
-
+    // Linear HDR out; tonemap + gamma happen in the post-process pass.
     return float4(color, opacity);
 }

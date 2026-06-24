@@ -24,6 +24,10 @@ struct TerrainConstants
     uint pageHalo;
     uint PADDING_1;
     uint4 splatSrvIndices;
+    uint impostorHeightmapSrvIndex;
+    uint impostorDiffuseSrvIndex;
+    float morphNear;
+    float morphFar;
 };
 
 ConstantBuffer<FrameConstants> frameCB : register(b0);
@@ -126,6 +130,16 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
         wRock  * lerp(terrainDiffuseTex, rockTex  * rockTint,  0.00f) +
         wSnow  * lerp(terrainDiffuseTex, snowTex  * snowTint,  0.00f);
 
+    // Impostor->page albedo morph: blend toward the impostor's diffuse over the same distance
+    // band as the geometry morph (DS), so texture detail resolves in with no appearance pop.
+    // Match the impostor's color grade so albedo is identical at wImp = 1.
+    float wImp = smoothstep(terrainCB.morphNear, terrainCB.morphFar, distance(input.worldPos, frameCB.camPos));
+    Texture2D<float4> impostorDiffuseMap = ResourceDescriptorHeap[terrainCB.impostorDiffuseSrvIndex];
+    float3 impostorAlbedo = impostorDiffuseMap.Sample(linearClampSampler, input.uv).rgb;
+    impostorAlbedo = GreenCorrection(impostorAlbedo);
+    impostorAlbedo = ApplyBasicTerrainGrade(impostorAlbedo);
+    albedo = lerp(albedo, impostorAlbedo, wImp);
+
     float3 L = normalize(-frameCB.lightDir.xyz);
     float3 V = normalize(frameCB.camPos - input.worldPos);
     float3 H = normalize(L + V);
@@ -140,12 +154,13 @@ float4 PS_Terrain(PSInput input) : SV_TARGET
 
     float3 diffuse = ndotl * albedo * frameCB.lightColor.rgb * max(frameCB.lightColor.a, 1.0f);
     float specMask = saturate(wRock * 0.05f + wSnow * 0.18f);
-    float3 specular = pow(ndoth, 32.0f) * specMask * frameCB.lightColor.rgb;
+    // Fade the terrain-only specular out with the morph: the impostor PS has no specular, so at
+    // wImp = 1 the page must light identically to the impostor or the handoff pops (visible when a
+    // page streams in forward at a near-enough distance that fog doesn't hide it).
+    float3 specular = pow(ndoth, 32.0f) * specMask * (1.0f - wImp) * frameCB.lightColor.rgb;
 
     float3 color = ambient + diffuse + specular;
 
-    color = color / (color + 1.0f);
-    color = pow(color, float3(1.0f / 2.2f, 1.0f / 2.2f, 1.0f / 2.2f));
-
+    // Linear HDR out; tonemap + gamma happen in the post-process pass.
     return float4(color, 1.0f);
 }
