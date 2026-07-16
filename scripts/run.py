@@ -86,7 +86,9 @@ if __name__ == "__main__":
         else:
             exepath = "./" + exepath
 
-        proc = subprocess.Popen((exepath, *passthrough), cwd=f"./app/{proj}")
+        path = f"./app/{proj}"
+        os.makedirs(path, exist_ok=True)
+        proc = subprocess.Popen((exepath, *passthrough), cwd=path)
 
         try:
             returncode = proc.wait()

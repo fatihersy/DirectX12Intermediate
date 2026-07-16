@@ -6,11 +6,12 @@ using ComPtr = Microsoft::WRL::ComPtr<T>;
 template<typename T>
 using MemberRef = std::optional<std::reference_wrapper<T>>;
 
-constexpr std::wstring_view PROJECT_NAME = L"DXTerrain";
+inline constexpr std::wstring_view PROJECT_NAME = L"DXFoliage";
 
-constexpr std::wstring_view SHADERS_FOLDER = L"shaders";
+inline constexpr std::wstring_view SHADERS_FOLDER = L"shaders";
 
-enum EArguments {
+enum EArguments
+{
     ARG_CONSOLE_PID,
     ARG_WAIT_FOR_DEBUGGER,
     ARG_MAX
@@ -28,12 +29,12 @@ inline std::array<SCmdArg, static_cast<size_t>(ARG_MAX)> g_CmdArguments =
 {
     SCmdArg
     {
-        .aliases = {"--console-pid="},
+        .aliases {"--console-pid="},
         .expectsValue = true
     },
     SCmdArg
     {
-        .aliases = {"--debug", "-d"},
+        .aliases {"--debug", "-d"},
         .expectsValue = false
     }
 };
@@ -48,18 +49,19 @@ decltype(auto) IndexSequence(Fn&& fn, Args&&... args)
             std::forward<Args>(args)...
         );
     }(std::make_index_sequence<Count>{});
-};
+}
 
 template<size_t Count, class Fn>
-auto ArraySequence(Fn&& fn)
+auto ArraySequence(Fn &&fn)
 {
     return [&]<size_t... N>(std::index_sequence<N...>)
     {
-        return std::array{
-            std::forward<Fn>(fn)(std::integral_constant<size_t, N>{})...
+        return std::array
+        {
+            fn(std::integral_constant<size_t, N>{})...
         };
     }(std::make_index_sequence<Count>{});
-};
+}
 
 template<typename... Ts>
 struct overloaded : Ts... { using Ts::operator()...; };
@@ -70,12 +72,12 @@ template<typename T>
 using undertype = std::underlying_type_t<T>;
 
 template<typename TEnum>
-concept IsEnumClass = not std::is_convertible_v<TEnum, std::underlying_type_t<TEnum>>;
+concept IsEnumClass = not std::is_convertible_v<TEnum, undertype<TEnum>>;
 
-template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
+template<typename TEnum> requires std::is_enum_v<TEnum> and requires {TEnum::Force32Bit; } and IsEnumClass<TEnum>
 struct Flag
 {
-    using T = std::underlying_type_t<TEnum>;
+    using T = undertype<TEnum>;
 
     constexpr Flag() = default;
     constexpr Flag(TEnum e) : bits(static_cast<T>(e)) {}
@@ -92,38 +94,43 @@ struct Flag
     }
 
     template<typename TLHS, typename TRHS>
-    friend constexpr Flag operator| (TLHS lhs, TRHS rhs) {
+    friend constexpr Flag operator| (TLHS lhs, TRHS rhs)
+    {
         return Flag(toRaw(lhs) | toRaw(rhs));
     }
     template<typename TLHS, typename TRHS>
-    friend constexpr Flag operator& (TLHS lhs, TRHS rhs) {
+    friend constexpr Flag operator& (TLHS lhs, TRHS rhs)
+    {
         return Flag(toRaw(lhs) & toRaw(rhs));
     }
     template<typename TLHS, typename TRHS>
-    friend constexpr Flag operator^ (TLHS lhs, TRHS rhs) {
+    friend constexpr Flag operator^ (TLHS lhs, TRHS rhs)
+    {
         return Flag(toRaw(lhs) ^ toRaw(rhs));
     }
     template<typename TVAL>
-    friend constexpr Flag operator~(TVAL val) {
+    friend constexpr Flag operator~(TVAL val)
+    {
         return Flag(~toRaw(val));
     }
-
     template<typename TVAL>
-    constexpr Flag&  operator|=(TVAL val) {
+    constexpr Flag& operator|=(TVAL val)
+    {
         bits |= toRaw(val);
-        return *this;
+        return DE_REF(this);
     }
     template<typename TVAL>
-    constexpr Flag& operator&=(TVAL val) {
+    constexpr Flag& operator&=(TVAL val)
+    {
         bits &= toRaw(val);
-        return *this;
+        return DE_REF(this);
     }
     template<typename TVAL>
-    constexpr Flag& operator^=(TVAL val) {
+    constexpr Flag& operator^=(TVAL val)
+    {
         bits ^= toRaw(val);
-        return *this;
+        return DE_REF(this);
     }
-
     template<typename TVAL>
     constexpr bool HasLeastOne(TVAL e) const {
         return (bits & toRaw(e)) != 0;
@@ -136,10 +143,10 @@ struct Flag
     constexpr bool HasExact(TVAL e) const {
         return bits == toRaw(e);
     }
-    constexpr bool Empty() const {
+
+    [[nodiscard]] constexpr bool Empty() const {
         return bits == 0;
     }
-
     template<typename TVAL>
     constexpr Flag& Set(TVAL e) {
         bits |= toRaw(e);
@@ -156,27 +163,33 @@ struct Flag
         return DE_REF(this);
     }
 
-    constexpr explicit operator T() const { return bits; }
+    constexpr explicit operator T() const {
+        return bits;
+    }
 
 private:
     T bits{};
 };
 
 template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
-constexpr undertype<TEnum> operator| (TEnum lhs, TEnum rhs) {
-    return Flag<TEnum>::toRaw(lhs) | Flag<TEnum>::toRaw(rhs);
+constexpr Flag<TEnum> operator| (TEnum lhs, TEnum rhs)
+{
+    return Flag<TEnum>(Flag<TEnum>::toRaw(lhs) | Flag<TEnum>::toRaw(rhs));
 }
 template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
-constexpr undertype<TEnum> operator& (TEnum lhs, TEnum rhs) {
-    return Flag<TEnum>::toRaw(lhs) & Flag<TEnum>::toRaw(rhs);
+constexpr Flag<TEnum> operator& (TEnum lhs, TEnum rhs)
+{
+    return Flag<TEnum>(Flag<TEnum>::toRaw(lhs) & Flag<TEnum>::toRaw(rhs));
 }
 template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
-constexpr undertype<TEnum> operator^ (TEnum lhs, TEnum rhs) {
-    return Flag<TEnum>::toRaw(lhs) ^ Flag<TEnum>::toRaw(rhs);
+constexpr Flag<TEnum> operator^ (TEnum lhs, TEnum rhs)
+{
+    return Flag<TEnum>(Flag<TEnum>::toRaw(lhs) ^ Flag<TEnum>::toRaw(rhs));
 }
 template<typename TEnum> requires std::is_enum_v<TEnum> and requires { TEnum::Force32Bit; } and IsEnumClass<TEnum>
-constexpr undertype<TEnum> operator~(TEnum val) {
-    return ~Flag<TEnum>::toRaw(val);
+constexpr Flag<TEnum> operator~ (TEnum val)
+{
+    return Flag<TEnum>(~Flag<TEnum>::toRaw(val));
 }
 
 enum class ELoopConditionFlag : uint32_t
@@ -185,7 +198,7 @@ enum class ELoopConditionFlag : uint32_t
     CONTINUE  = 1 << 0,
     BREAK     = 1 << 1,
     SUCCESS   = 1 << 2,
-    Force32Bit = UINT32_MAX
+    Force32Bit = UINT32_MAX,
 };
 
 struct LoopCondition
