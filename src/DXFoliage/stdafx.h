@@ -9,6 +9,7 @@
 #include <directx/d3dx12.h>
 #include <directx/d3d12shader.h>
 #include <dxgi1_6.h>
+#include "dxcapi.h"
 #include <DirectXMath.h>
 
 #include <system_error>
@@ -23,6 +24,7 @@
 #include <cstdio>
 #include <memory>
 #include <algorithm>
+#include <numeric>
 #include <functional>
 #include <variant>
 #include <type_traits>

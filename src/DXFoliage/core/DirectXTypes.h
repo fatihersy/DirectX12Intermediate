@@ -219,7 +219,7 @@ namespace NSDX12
         _In_reads_(NumSubresources) const UINT64* pRowSizesInBytes,
         _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
         {
-            ASSERT(m_cmdList);
+            ASSERT(m_cmdList != nullptr);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pSrcData);
         }
@@ -236,7 +236,7 @@ namespace NSDX12
         _In_ const void* pResourceData,
         _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
         {
-            ASSERT(m_cmdList);
+            ASSERT(m_cmdList != nullptr);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, FirstSubresource, NumSubresources, RequiredSize, pLayouts, pNumRows, pRowSizesInBytes, pResourceData, pSrcData);
         }
@@ -249,7 +249,7 @@ namespace NSDX12
         _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
         _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
         {
-            ASSERT(m_cmdList);
+            ASSERT(m_cmdList != nullptr);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
         }
@@ -263,7 +263,7 @@ namespace NSDX12
         _In_ const void* pResourceData,
         _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
         {
-            ASSERT(m_cmdList);
+            ASSERT(m_cmdList != nullptr);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
         }
@@ -277,7 +277,7 @@ namespace NSDX12
         _In_range_(1,MaxSubresources-FirstSubresource) UINT NumSubresources,
         _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) noexcept
         {
-            ASSERT(m_cmdList);
+            ASSERT(m_cmdList != nullptr);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pSrcData);
         }
@@ -292,7 +292,7 @@ namespace NSDX12
             _In_ const void* pResourceData,
             _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_INFO* pSrcData) noexcept
         {
-            ASSERT(m_cmdList);
+            ASSERT(m_cmdList != nullptr);
 
             return ::UpdateSubresources(m_cmdList, pDestinationResource, pIntermediate, IntermediateOffset, FirstSubresource, NumSubresources, pResourceData, pSrcData);
         }

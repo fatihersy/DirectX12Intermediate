@@ -3,6 +3,9 @@
 #include "IApp.h"
 #include "RendererTypes.h"
 
+#include "ShaderCompiler.h"
+#include "Pipeline.h"
+
 using FnRendererExecutionBody = std::function<void(NSRenderer::Ctx ctx, NSDX12::GraphicsCommandList cmdList)>;
 
 class Renderer
@@ -93,7 +96,11 @@ private:
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
     uint32_t m_rtvDescriptorSize;
     uint32_t m_dsvDescriptorSize;
-    ComPtr<ID3D12PipelineState> m_pipelineState;
+
+    // Temporary
+    GraphicsPipeline m_pipeline;
+    ComPtr<ID3D12Resource> m_vertexBuffer;
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 
     ComPtr<ID3D12CommandAllocator> m_copyCommandAllocators[IApp::ic_framesInFlight];
     ComPtr<ID3D12GraphicsCommandList10> m_copyCommandList;
@@ -103,6 +110,7 @@ private:
     HANDLE m_fenceEvent{nullptr};
     uint64_t m_fenceGeneration{};
 
+    std::unique_ptr<ShaderCompiler> m_shaderCompiler;
     std::unique_ptr<NSBarrier::IBarrierBatch> m_barrierBatch;
 
     std::array<

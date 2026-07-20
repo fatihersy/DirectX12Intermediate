@@ -13,7 +13,7 @@ public:
 
     static IApp* GetInstance()
     {
-        ASSERT(s_instance);
+        ASSERT(s_instance != nullptr);
         return s_instance;
     }
 

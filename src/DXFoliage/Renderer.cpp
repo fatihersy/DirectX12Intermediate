@@ -6,6 +6,9 @@
 #include "DXSampleHelper.h"
 #include "Logger.h"
 
+// Temporary
+#include "ShaderCompiler.h"
+
 class BarrierBatch : public NSBarrier::IBarrierBatch
 {
 public:
@@ -110,6 +113,8 @@ void Renderer::OnInit(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagin
         nullptr,
         &m_infoQueueCookie
     );
+
+    m_shaderCompiler = std::make_unique<ShaderCompiler>();
 
     m_barrierBatch = std::make_unique<BarrierBatch>();
 
@@ -308,6 +313,89 @@ void Renderer::OnInit(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagin
             userData->m_freeImGuiSRVIndices.push_back(idx);
         };
     }
+
+    // temporary pipeline
+    {
+        // Pipeline state
+        {
+            D3D12_INPUT_ELEMENT_DESC inputElementDesc[]
+            {
+                {"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+                {"COLOR", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+            };
+
+            GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+            psoDesc.InputLayout = {inputElementDesc, _countof(inputElementDesc)};
+            psoDesc.SampleMask = UINT_MAX;
+            psoDesc.PrimitiveTopologyType =  D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+            psoDesc.NumRenderTargets = 1;
+            psoDesc.RTVFormats[0] = DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM;
+            psoDesc.SampleDesc.Count = 1;
+
+            m_pipeline = GraphicsPipeline(m_device, L"Renderer::m_pipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
+            {
+                CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc{};
+                rsDesc.Init_1_1(
+                    0, nullptr,
+                    0, nullptr,
+                    D3D12_ROOT_SIGNATURE_FLAGS::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
+                );
+
+                return D3DX12SerializeVersionedRootSignature(&rsDesc, version, &signature, &error);
+            }).Init(psoDesc, CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT), {}, CD3DX12_BLEND_DESC(D3D12_DEFAULT),
+                {
+                    L"vert.hlsl",
+                    {
+                        L"-E", L"mainVS",
+                        L"-T", L"vs_6_0",
+                        L"-Zi",
+                        L"-Od"
+                    }
+                },
+                {
+                    L"pixel.hlsl",
+                    {
+                        L"-E", L"mainPS",
+                        L"-T", L"ps_6_0",
+                        L"-Zi",
+                        L"-Od"
+                    }
+                }
+            );
+        }
+
+        // VERTEX BUFFER
+        {
+            NSDebug::Vertex triangleVertices[] {
+                { {0.f, 0.25f * IApp::GetInstance()->im_aspectRatio, 0.f}, {1.f, 0.f, 0.f, 1.f} },
+                { {0.25f, -0.25f * IApp::GetInstance()->im_aspectRatio, 0.f}, {0.f, 1.f, 0.f, 1.f} },
+                { {-0.25f, -0.25f * IApp::GetInstance()->im_aspectRatio, 0.f}, {0.f, 0.f, 1.f, 1.f} },
+            };
+
+            const UINT vertexBufferSize = sizeof(triangleVertices);
+
+            CD3DX12_HEAP_PROPERTIES prop{D3D12_HEAP_TYPE_UPLOAD};
+            CD3DX12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
+
+            ThrowIfFailed(m_device->CreateCommittedResource(
+                &prop,
+                D3D12_HEAP_FLAGS::D3D12_HEAP_FLAG_NONE,
+                &resDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                nullptr, IID_PPV_ARGS(&m_vertexBuffer))
+            );
+
+            UINT8* vertexDataBegin = nullptr;
+            CD3DX12_RANGE readRange(0,0);
+            ThrowIfFailed(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&vertexDataBegin)));
+            memcpy(vertexDataBegin, triangleVertices, sizeof(triangleVertices));
+            m_vertexBuffer->Unmap(0, nullptr);
+
+            m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
+            m_vertexBufferView.SizeInBytes = vertexBufferSize;
+            m_vertexBufferView.StrideInBytes = sizeof(NSDebug::Vertex);
+        }
+    }
 }
 void Renderer::OnDestroy()
 {
@@ -327,8 +415,9 @@ void Renderer::OnDestroy()
     }
     m_rtvHeap.Reset();
     m_dsvHeap.Reset();
-    m_pipelineState.Reset();
+    m_pipeline.Reset();
     m_copyCommandList.Reset();
+    m_vertexBuffer.Reset();
 
     for (uint32_t frame{}; frame < IApp::ic_framesInFlight; frame++)
     {
@@ -386,7 +475,11 @@ void Renderer::BeginFrame()
 }
 void Renderer::DrawScene(std::shared_ptr<NSScene::IScene> scene)
 {
+    m_pipeline.Bind(NSDX12::GraphicsCommandList(m_commandList.Get()));
 
+    m_commandList->IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+    m_commandList->DrawInstanced(3, 1, 0, 0);
 }
 void Renderer::EndFrame()
 {
@@ -416,6 +509,13 @@ void Renderer::EndFrame()
     }
 
     ThrowIfFailed(m_commandList->Close());
+
+
+    {
+        ID3D12CommandList* const lists[] = { m_commandList.Get() };
+        m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
+    }
+
     ThrowIfFailed(m_swapChain->Present(1, 0));
 
     MoveToNextFrame();

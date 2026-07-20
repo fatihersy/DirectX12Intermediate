@@ -65,12 +65,12 @@ struct FrameConstants
     uint32_t PADDING_0{};
 };
 static_assert(sizeof(FrameConstants) % 16 == 0);
-static_assert(offsetof(FrameConstants, view) % 4 == 0);
-static_assert(offsetof(FrameConstants, proj) % 4 == 0);
-static_assert(offsetof(FrameConstants, lightDir) % 4 == 0);
-static_assert(offsetof(FrameConstants, lightColor) % 4 == 0);
-static_assert(offsetof(FrameConstants, eye) % 4 == 0);
-static_assert(offsetof(FrameConstants, PADDING_0) % 4 == 0);
+static_assert(offsetof(FrameConstants, view) % 16 == 0);
+static_assert(offsetof(FrameConstants, proj) % 16 == 0);
+static_assert(offsetof(FrameConstants, lightDir) % 16 == 0);
+static_assert(offsetof(FrameConstants, lightColor) % 16 == 0);
+static_assert(offsetof(FrameConstants, eye      ) / 16 == (offsetof(FrameConstants, eye      ) + sizeof(FrameConstants::eye      ) - 1) / 16);
+static_assert(offsetof(FrameConstants, PADDING_0) / 16 == (offsetof(FrameConstants, PADDING_0) + sizeof(FrameConstants::PADDING_0) - 1) / 16);
 
 struct PostConstants
 {
@@ -83,13 +83,13 @@ struct PostConstants
     uint32_t PADDING_0{};
 };
 static_assert(sizeof(PostConstants) % 16 == 0);
-static_assert(offsetof(PostConstants, invViewProj) % 4 == 0);
-static_assert(offsetof(PostConstants, camPos) % 4 == 0);
-static_assert(offsetof(PostConstants, sceneColorSrvIndex) % 4 == 0);
-static_assert(offsetof(PostConstants, depthSrvIndex) % 4 == 0);
-static_assert(offsetof(PostConstants, transmittanceSrvIndex) % 4 == 0);
-static_assert(offsetof(PostConstants, scatteringSrvIndex) % 4 == 0);
-static_assert(offsetof(PostConstants, PADDING_0) % 4 == 0);
+static_assert(offsetof(PostConstants, invViewProj) % 16 == 0);
+static_assert(offsetof(PostConstants, camPos               ) / 16 == (offsetof(PostConstants, camPos               ) + sizeof(PostConstants::camPos               ) - 1) / 16);
+static_assert(offsetof(PostConstants, sceneColorSrvIndex   ) / 16 == (offsetof(PostConstants, sceneColorSrvIndex   ) + sizeof(PostConstants::sceneColorSrvIndex   ) - 1) / 16);
+static_assert(offsetof(PostConstants, depthSrvIndex        ) / 16 == (offsetof(PostConstants, depthSrvIndex        ) + sizeof(PostConstants::depthSrvIndex        ) - 1) / 16);
+static_assert(offsetof(PostConstants, transmittanceSrvIndex) / 16 == (offsetof(PostConstants, transmittanceSrvIndex) + sizeof(PostConstants::transmittanceSrvIndex) - 1) / 16);
+static_assert(offsetof(PostConstants, scatteringSrvIndex   ) / 16 == (offsetof(PostConstants, scatteringSrvIndex   ) + sizeof(PostConstants::scatteringSrvIndex   ) - 1) / 16);
+static_assert(offsetof(PostConstants, PADDING_0            ) / 16 == (offsetof(PostConstants, PADDING_0            ) + sizeof(PostConstants::PADDING_0            ) - 1) / 16);
 
 struct MeshConstants
 {
@@ -102,13 +102,13 @@ struct MeshConstants
     uint32_t textureFlags{};
 };
 static_assert(sizeof(MeshConstants) % 16 == 0);
-static_assert(offsetof(MeshConstants, worldMatrix) % 4 == 0);
-static_assert(offsetof(MeshConstants, normalMatrix) % 4 == 0);
-static_assert(offsetof(MeshConstants, baseColor) % 4 == 0);
-static_assert(offsetof(MeshConstants, metallic) % 4 == 0);
-static_assert(offsetof(MeshConstants, roughtness) % 4 == 0);
-static_assert(offsetof(MeshConstants, opacity) % 4 == 0);
-static_assert(offsetof(MeshConstants, textureFlags) % 4 == 0);
+static_assert(offsetof(MeshConstants, worldMatrix) % 16 == 0);
+static_assert(offsetof(MeshConstants, normalMatrix) % 16 == 0);
+static_assert(offsetof(MeshConstants, baseColor) % 16 == 0);
+static_assert(offsetof(MeshConstants, metallic    ) / 16 == (offsetof(MeshConstants, metallic    ) + sizeof(MeshConstants::metallic    ) - 1) / 16);
+static_assert(offsetof(MeshConstants, roughtness  ) / 16 == (offsetof(MeshConstants, roughtness  ) + sizeof(MeshConstants::roughtness  ) - 1) / 16);
+static_assert(offsetof(MeshConstants, opacity     ) / 16 == (offsetof(MeshConstants, opacity     ) + sizeof(MeshConstants::opacity     ) - 1) / 16);
+static_assert(offsetof(MeshConstants, textureFlags) / 16 == (offsetof(MeshConstants, textureFlags) + sizeof(MeshConstants::textureFlags) - 1) / 16);
 
 struct FrameConstantsZPrepass
 {
@@ -118,17 +118,17 @@ struct FrameConstantsZPrepass
     uint32_t PADDING_0{};
 };
 static_assert(sizeof(FrameConstantsZPrepass) % 16 == 0);
-static_assert(offsetof(FrameConstantsZPrepass, view) % 4 == 0);
-static_assert(offsetof(FrameConstantsZPrepass, proj) % 4 == 0);
-static_assert(offsetof(FrameConstantsZPrepass, eye) % 4 == 0);
-static_assert(offsetof(FrameConstantsZPrepass, PADDING_0) % 4 == 0);
+static_assert(offsetof(FrameConstantsZPrepass, view) % 16 == 0);
+static_assert(offsetof(FrameConstantsZPrepass, proj) % 16 == 0);
+static_assert(offsetof(FrameConstantsZPrepass, eye      ) / 16 == (offsetof(FrameConstantsZPrepass, eye      ) + sizeof(FrameConstantsZPrepass::eye      ) - 1) / 16);
+static_assert(offsetof(FrameConstantsZPrepass, PADDING_0) / 16 == (offsetof(FrameConstantsZPrepass, PADDING_0) + sizeof(FrameConstantsZPrepass::PADDING_0) - 1) / 16);
 
 struct MeshConstantsZPrepass
 {
     DirectX::XMFLOAT4X4 worldMatrix{};
 };
 static_assert(sizeof(MeshConstantsZPrepass) % 16 == 0);
-static_assert(offsetof(MeshConstantsZPrepass, worldMatrix) % 4 == 0);
+static_assert(offsetof(MeshConstantsZPrepass, worldMatrix) % 16 == 0);
 
 struct AtmosphereConstants
 {
@@ -146,18 +146,18 @@ struct AtmosphereConstants
     float PADDING_1{};
 };
 static_assert(sizeof(AtmosphereConstants) % 16 == 0);
-static_assert(offsetof(AtmosphereConstants, BetaR) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, PADDING_0) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, BetaMScatter) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, BetaMExtinct) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, MieG) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, HR) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, HM) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, Rg) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, Rt) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, SunIntensity) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, SunDir) % 4 == 0);
-static_assert(offsetof(AtmosphereConstants, PADDING_1) % 4 == 0);
+static_assert(offsetof(AtmosphereConstants, BetaR       ) / 16 == (offsetof(AtmosphereConstants, BetaR       ) + sizeof(AtmosphereConstants::BetaR       ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, PADDING_0   ) / 16 == (offsetof(AtmosphereConstants, PADDING_0   ) + sizeof(AtmosphereConstants::PADDING_0   ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, BetaMScatter) / 16 == (offsetof(AtmosphereConstants, BetaMScatter) + sizeof(AtmosphereConstants::BetaMScatter) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, BetaMExtinct) / 16 == (offsetof(AtmosphereConstants, BetaMExtinct) + sizeof(AtmosphereConstants::BetaMExtinct) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, MieG        ) / 16 == (offsetof(AtmosphereConstants, MieG        ) + sizeof(AtmosphereConstants::MieG        ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, HR          ) / 16 == (offsetof(AtmosphereConstants, HR          ) + sizeof(AtmosphereConstants::HR          ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, HM          ) / 16 == (offsetof(AtmosphereConstants, HM          ) + sizeof(AtmosphereConstants::HM          ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, Rg          ) / 16 == (offsetof(AtmosphereConstants, Rg          ) + sizeof(AtmosphereConstants::Rg          ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, Rt          ) / 16 == (offsetof(AtmosphereConstants, Rt          ) + sizeof(AtmosphereConstants::Rt          ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, SunIntensity) / 16 == (offsetof(AtmosphereConstants, SunIntensity) + sizeof(AtmosphereConstants::SunIntensity) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, SunDir      ) / 16 == (offsetof(AtmosphereConstants, SunDir      ) + sizeof(AtmosphereConstants::SunDir      ) - 1) / 16);
+static_assert(offsetof(AtmosphereConstants, PADDING_1   ) / 16 == (offsetof(AtmosphereConstants, PADDING_1   ) + sizeof(AtmosphereConstants::PADDING_1   ) - 1) / 16);
 
 inline bool operator!=(const AtmosphereConstants& lhs, AtmosphereConstants& rhs) noexcept
 {
@@ -187,14 +187,14 @@ struct EnvCaptureConstants
     float PADDING_1{};
 };
 static_assert(sizeof(EnvCaptureConstants) % 16 == 0);
-static_assert(offsetof(EnvCaptureConstants, view) % 4 == 0);
-static_assert(offsetof(EnvCaptureConstants, proj) % 4 == 0);
-static_assert(offsetof(EnvCaptureConstants, lightDir) % 4 == 0);
-static_assert(offsetof(EnvCaptureConstants, lightColor) % 4 == 0);
-static_assert(offsetof(EnvCaptureConstants, capturePos) % 4 == 0);
-static_assert(offsetof(EnvCaptureConstants, PADDING_0) % 4 == 0);
-static_assert(offsetof(EnvCaptureConstants, camPos) % 4 == 0);
-static_assert(offsetof(EnvCaptureConstants, PADDING_1) % 4 == 0);
+static_assert(offsetof(EnvCaptureConstants, view) % 16 == 0);
+static_assert(offsetof(EnvCaptureConstants, proj) % 16 == 0);
+static_assert(offsetof(EnvCaptureConstants, lightDir) % 16 == 0);
+static_assert(offsetof(EnvCaptureConstants, lightColor) % 16 == 0);
+static_assert(offsetof(EnvCaptureConstants, capturePos) / 16 == (offsetof(EnvCaptureConstants, capturePos) + sizeof(EnvCaptureConstants::capturePos) - 1) / 16);
+static_assert(offsetof(EnvCaptureConstants, PADDING_0 ) / 16 == (offsetof(EnvCaptureConstants, PADDING_0 ) + sizeof(EnvCaptureConstants::PADDING_0 ) - 1) / 16);
+static_assert(offsetof(EnvCaptureConstants, camPos    ) / 16 == (offsetof(EnvCaptureConstants, camPos    ) + sizeof(EnvCaptureConstants::camPos    ) - 1) / 16);
+static_assert(offsetof(EnvCaptureConstants, PADDING_1 ) / 16 == (offsetof(EnvCaptureConstants, PADDING_1 ) + sizeof(EnvCaptureConstants::PADDING_1 ) - 1) / 16);
 
 struct TerrainConstants
 {
@@ -218,24 +218,24 @@ struct TerrainConstants
     float morphFar{};
 };
 static_assert(sizeof(TerrainConstants) % 16 == 0);
-static_assert(offsetof(TerrainConstants, worldMatrix) % 4 == 0);
-static_assert(offsetof(TerrainConstants, maxHeight) % 4 == 0);
-static_assert(offsetof(TerrainConstants, worldTexelSpacingX) % 4 == 0);
-static_assert(offsetof(TerrainConstants, worldTexelSpacingZ) % 4 == 0);
-static_assert(offsetof(TerrainConstants, tessFactorScale) % 4 == 0);
-static_assert(offsetof(TerrainConstants, textureTilingFactor) % 4 == 0);
-static_assert(offsetof(TerrainConstants, PADDING_0) % 4 == 0);
-static_assert(offsetof(TerrainConstants, chunkUVOffset) % 4 == 0);
-static_assert(offsetof(TerrainConstants, chunkUVScale) % 4 == 0);
-static_assert(offsetof(TerrainConstants, heightmapSrvIndex) % 4 == 0);
-static_assert(offsetof(TerrainConstants, terrainDiffuseSrvIndex) % 4 == 0);
-static_assert(offsetof(TerrainConstants, pageHalo) % 4 == 0);
-static_assert(offsetof(TerrainConstants, PADDING_1) % 4 == 0);
-static_assert(offsetof(TerrainConstants, splatSrvIndices) % 4 == 0);
-static_assert(offsetof(TerrainConstants, impostorHeightmapSrvIndex) % 4 == 0);
-static_assert(offsetof(TerrainConstants, impostorDiffuseSrvIndex) % 4 == 0);
-static_assert(offsetof(TerrainConstants, morphNear) % 4 == 0);
-static_assert(offsetof(TerrainConstants, morphFar) % 4 == 0);
+static_assert(offsetof(TerrainConstants, worldMatrix) % 16 == 0);
+static_assert(offsetof(TerrainConstants, maxHeight                ) / 16 == (offsetof(TerrainConstants, maxHeight                ) + sizeof(TerrainConstants::maxHeight                ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, worldTexelSpacingX       ) / 16 == (offsetof(TerrainConstants, worldTexelSpacingX       ) + sizeof(TerrainConstants::worldTexelSpacingX       ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, worldTexelSpacingZ       ) / 16 == (offsetof(TerrainConstants, worldTexelSpacingZ       ) + sizeof(TerrainConstants::worldTexelSpacingZ       ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, tessFactorScale          ) / 16 == (offsetof(TerrainConstants, tessFactorScale          ) + sizeof(TerrainConstants::tessFactorScale          ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, textureTilingFactor      ) / 16 == (offsetof(TerrainConstants, textureTilingFactor      ) + sizeof(TerrainConstants::textureTilingFactor      ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, PADDING_0                ) / 16 == (offsetof(TerrainConstants, PADDING_0                ) + sizeof(TerrainConstants::PADDING_0                ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, chunkUVOffset            ) / 16 == (offsetof(TerrainConstants, chunkUVOffset            ) + sizeof(TerrainConstants::chunkUVOffset            ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, chunkUVScale             ) / 16 == (offsetof(TerrainConstants, chunkUVScale             ) + sizeof(TerrainConstants::chunkUVScale             ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, heightmapSrvIndex        ) / 16 == (offsetof(TerrainConstants, heightmapSrvIndex        ) + sizeof(TerrainConstants::heightmapSrvIndex        ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, terrainDiffuseSrvIndex   ) / 16 == (offsetof(TerrainConstants, terrainDiffuseSrvIndex   ) + sizeof(TerrainConstants::terrainDiffuseSrvIndex   ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, pageHalo                 ) / 16 == (offsetof(TerrainConstants, pageHalo                 ) + sizeof(TerrainConstants::pageHalo                 ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, PADDING_1                ) / 16 == (offsetof(TerrainConstants, PADDING_1                ) + sizeof(TerrainConstants::PADDING_1                ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, splatSrvIndices          ) / 16 == (offsetof(TerrainConstants, splatSrvIndices          ) + sizeof(TerrainConstants::splatSrvIndices          ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, impostorHeightmapSrvIndex) / 16 == (offsetof(TerrainConstants, impostorHeightmapSrvIndex) + sizeof(TerrainConstants::impostorHeightmapSrvIndex) - 1) / 16);
+static_assert(offsetof(TerrainConstants, impostorDiffuseSrvIndex  ) / 16 == (offsetof(TerrainConstants, impostorDiffuseSrvIndex  ) + sizeof(TerrainConstants::impostorDiffuseSrvIndex  ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, morphNear                ) / 16 == (offsetof(TerrainConstants, morphNear                ) + sizeof(TerrainConstants::morphNear                ) - 1) / 16);
+static_assert(offsetof(TerrainConstants, morphFar                 ) / 16 == (offsetof(TerrainConstants, morphFar                 ) + sizeof(TerrainConstants::morphFar                 ) - 1) / 16);
 
 struct ImpostorConstants
 {
@@ -255,20 +255,20 @@ struct ImpostorConstants
     float PADDING_0[2];
 };
 static_assert(sizeof(ImpostorConstants) % 16 == 0);
-static_assert(offsetof(ImpostorConstants, worldMatrix) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, maxHeight) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, worldTexelSpacingX) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, worldTexelSpacingZ) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, cullMargin) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, streamMin) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, streamMax) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, heightmapSrvIndex) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, diffuseSrvIndex) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, streamValid) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, sinkStart) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, sinkRate) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, maxSink) % 4 == 0);
-static_assert(offsetof(ImpostorConstants, PADDING_0) % 4 == 0);
+static_assert(offsetof(ImpostorConstants, worldMatrix) % 16 == 0);
+static_assert(offsetof(ImpostorConstants, maxHeight         ) / 16 == (offsetof(ImpostorConstants, maxHeight         ) + sizeof(ImpostorConstants::maxHeight         ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, worldTexelSpacingX) / 16 == (offsetof(ImpostorConstants, worldTexelSpacingX) + sizeof(ImpostorConstants::worldTexelSpacingX) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, worldTexelSpacingZ) / 16 == (offsetof(ImpostorConstants, worldTexelSpacingZ) + sizeof(ImpostorConstants::worldTexelSpacingZ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, cullMargin        ) / 16 == (offsetof(ImpostorConstants, cullMargin        ) + sizeof(ImpostorConstants::cullMargin        ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, streamMin         ) / 16 == (offsetof(ImpostorConstants, streamMin         ) + sizeof(ImpostorConstants::streamMin         ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, streamMax         ) / 16 == (offsetof(ImpostorConstants, streamMax         ) + sizeof(ImpostorConstants::streamMax         ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, heightmapSrvIndex ) / 16 == (offsetof(ImpostorConstants, heightmapSrvIndex ) + sizeof(ImpostorConstants::heightmapSrvIndex ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, diffuseSrvIndex   ) / 16 == (offsetof(ImpostorConstants, diffuseSrvIndex   ) + sizeof(ImpostorConstants::diffuseSrvIndex   ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, streamValid       ) / 16 == (offsetof(ImpostorConstants, streamValid       ) + sizeof(ImpostorConstants::streamValid       ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, sinkStart         ) / 16 == (offsetof(ImpostorConstants, sinkStart         ) + sizeof(ImpostorConstants::sinkStart         ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, sinkRate          ) / 16 == (offsetof(ImpostorConstants, sinkRate          ) + sizeof(ImpostorConstants::sinkRate          ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, maxSink           ) / 16 == (offsetof(ImpostorConstants, maxSink           ) + sizeof(ImpostorConstants::maxSink           ) - 1) / 16);
+static_assert(offsetof(ImpostorConstants, PADDING_0         ) / 16 == (offsetof(ImpostorConstants, PADDING_0         ) + sizeof(ImpostorConstants::PADDING_0         ) - 1) / 16);
 
 namespace NSBarrier
 {
