@@ -6,10 +6,49 @@ class MoxPPRecipe(ConanFile):
     generators = "PremakeDeps"
 
     def requirements(self):
-        self.requires("assimp/6.0.2")
-        self.requires("imgui/1.92.5")
+        # Needed everywhere: ASSERT macros are used across the shared
+        # headers, and imgui is used by the debug UI on every backend.
         self.requires("libassert/2.2.1")
-        self.requires("openexr/3.4.11")
+        self.requires("imgui/1.92.5")
+
+        # assimp (model loading) and openexr (HDR images) are only used by
+        # DXMaterial and DXTerrain, both of which are Windows-only —
+        # DXFoliage, the one project that builds on Linux, references
+        # neither. Skipping them on Linux avoids compiling two large
+        # libraries from source for nothing.
+        if self.settings.os == "Windows":
+            self.requires("assimp/6.0.2")
+            self.requires("openexr/3.4.11")
+
+        if self.settings.os == "Linux":
+            # Windowing + input for the Wayland platform backend. Managed
+            # here rather than assumed present as system packages, so a
+            # Linux build needs no apt prerequisites.
+            #   wayland           -> libwayland-client (+ the wayland-scanner tool)
+            #   wayland-protocols -> xdg-shell.xml, from which wayland-scanner
+            #                        generates the window-management bindings
+            #   xkbcommon         -> translates the keymap the compositor sends
+            #                        us into keysyms
+            self.requires("wayland/1.24.0")
+            self.requires("wayland-protocols/1.31")
+
+            # HLSL -> SPIR-V for the Vulkan backend. shaderc wraps glslang,
+            # whose HLSL frontend handles this project's shaders (verified:
+            # both compile and validate, with vertex inputs landing on the
+            # locations the pipeline expects). DXC stays the Windows/DXIL
+            # path — same HLSL source, one frontend per backend.
+            self.requires("shaderc/2025.3")
+            # with_x11=False: this is a Wayland-only target, and the X11
+            # backend would drag in xorg/system — i.e. require the X11 dev
+            # packages to be installed system-wide.
+            self.requires("xkbcommon/1.13.1", options={"with_x11": False})
+
+    def build_requirements(self):
+        if self.settings.os == "Linux":
+            # wayland-scanner has to run on the *build* machine (it
+            # generates C from XML at build time), so it's a tool
+            # requirement, not a library one.
+            self.tool_requires("wayland/1.24.0")
 
         # self.requires("gtest/1.16.0")
 

@@ -1,3 +1,8 @@
 conan==2.24.0
 compiledb>=0.10.1
 python-certifi-win32==1.6.1; sys_platform == "win32"
+# CMake needs Ninja (not "Unix Makefiles") to configure dependencies that
+# ship C++20 modules — libassert does, and fails to configure without it.
+# Taking it from PyPI keeps `mox init` free of any system-package/sudo
+# requirement. See profilegen.AddCMakeModuleWorkaround.
+ninja>=1.11

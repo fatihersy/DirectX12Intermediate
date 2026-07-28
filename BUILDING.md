@@ -7,6 +7,11 @@ This project supports the following platforms:
 | **Windows** | :white_check_mark: |
 | **Linux**   | :hourglass:        |
 
+Linux support is in progress and currently applies to **`DXFoliage` only**
+(`DXMaterial`/`DXTerrain` remain Windows-only). The Linux toolchain builds
+and links today; the Vulkan renderer backend and Wayland platform backend
+are still being implemented, so the binary does not render yet.
+
 ## Requirements
 
 * **Python 3** with venv support
@@ -15,6 +20,22 @@ This project supports the following platforms:
 * **Clang** or **GCC** (Linux), **MSVC** or **Clang-CL** (Windows)
 * **Visual Studio 2019+** with the C++ workloads (Windows, only when using the `visualstudio` build system)
 * **vcpkg** dependencies are fetched automatically during `init`
+
+### Linux
+
+Almost everything is managed for you: Conan provides Wayland, the Wayland
+protocol definitions, `wayland-scanner` and xkbcommon; vcpkg provides the
+Vulkan headers. Two things still come from the system:
+
+```sh
+sudo apt install xkb-data           # keymap data (xkeyboard-config); already
+                                    # present on any desktop install
+sudo apt install mesa-vulkan-drivers vulkan-tools   # a Vulkan driver + tools
+```
+
+A Vulkan-capable driver is a runtime requirement rather than a build one —
+`mesa-vulkan-drivers` also provides the `lavapipe` software rasteriser,
+which is enough to run without a suitable GPU.
 
 ## Dependencies
 

@@ -1,7 +1,13 @@
 #pragma once
 
+// COM smart pointer — Windows-only (wrl.h). Guarded so that neutral
+// headers including Defines.h (core/Math.h, EntityTypes.h, ...) stay
+// compilable on Linux. DX12 code is Windows-only anyway, so it always
+// sees this.
+#if defined(D12F_OS_WINDOWS)
 template<typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
+#endif
 
 template<typename T>
 using MemberRef = std::optional<std::reference_wrapper<T>>;
@@ -14,6 +20,7 @@ enum EArguments
 {
     ARG_CONSOLE_PID,
     ARG_WAIT_FOR_DEBUGGER,
+    ARG_RHI_BACKEND,
     ARG_MAX
 };
 
@@ -36,6 +43,13 @@ inline std::array<SCmdArg, static_cast<size_t>(ARG_MAX)> g_CmdArguments =
     {
         .aliases {"--debug", "-d"},
         .expectsValue = false
+    },
+    // Which graphics backend to run: "dx12" or "vulkan". Validated
+    // against what's actually compiled in — see rhi/RendererBackendFactory.
+    SCmdArg
+    {
+        .aliases {"--rhi="},
+        .expectsValue = true
     }
 };
 

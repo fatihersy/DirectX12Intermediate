@@ -66,7 +66,7 @@ def MSBuildBuild(conf):
     subprocess.run((msbuild, slnFiles[0], f"-p:Configuration={conf}"))
 
 
-def MakefileBuild(conf, arch=None):
+def MakefileBuild(conf, arch=None, project=None):
     make = FindMake()
     if make is None:
         print("GNU make not found on PATH! Building not possible!")
@@ -99,7 +99,13 @@ def MakefileBuild(conf, arch=None):
                 "Building without MSVC environment. Windows SDK headers may not be found."
             )
 
-    subprocess.run((make, f"config={conf.lower()}", "all"), env=env)
+    # premake's gmake2 generator emits a target per project alongside
+    # "all", so a single project can be built by name. Needed when not
+    # every project in the workspace supports the current target OS —
+    # e.g. only DXFoliage builds on Linux; DXMaterial/DXTerrain are
+    # Windows-only, so "all" would fail there.
+    target = project if project else "all"
+    subprocess.run((make, f"config={conf.lower()}", target), env=env)
 
     # Generate compile_commands.json for IDE integration (Zed, clangd, etc.)
     # Parse make's dry-run output to extract clang++ compile commands directly.
@@ -219,6 +225,13 @@ if __name__ == "__main__":
         default=None,
         help="Architecture for MSVC environment setup (e.g. x64, x86, arm64)",
     )
+    p.add_argument(
+        "project",
+        nargs="?",
+        default=None,
+        help="Build only this project (e.g. DXFoliage). Default: all projects. "
+        "Makefile build system only.",
+    )
     args = p.parse_args()
 
     # Resolve build system
@@ -230,6 +243,11 @@ if __name__ == "__main__":
 
     # Run build step
     if buildSystem == "makefile":
-        MakefileBuild(args.conf, args.arch)
+        MakefileBuild(args.conf, args.arch, args.project)
     else:
+        if args.project:
+            print(
+                "Note: building a single project is only supported with the "
+                "'makefile' build system; building the whole solution."
+            )
         MSBuildBuild(args.conf)

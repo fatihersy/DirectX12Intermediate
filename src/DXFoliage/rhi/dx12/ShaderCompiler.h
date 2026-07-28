@@ -1,5 +1,9 @@
 #pragma once
 
+// dxcapi.h / ComPtr came from the precompiled header before DirectX was
+// split out of it; included explicitly now.
+#include "PlatformHeaders_DX12.h"
+
 class ShaderCompiler
 {
 public:

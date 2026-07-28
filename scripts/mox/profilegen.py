@@ -24,6 +24,7 @@ SOFTWARE.
 import mox
 import moxwin
 import platform
+import shutil
 import subprocess
 
 VS_MSVC_MAPPINGS = {
@@ -78,6 +79,26 @@ class INIProfileGen:
         self.WritePair("compiler.version", gccversion)
         self.WritePair("compiler.libcxx", abiversion)
 
+    def AddClang(self, cppversion: str, clangversion: str, abiversion: str):
+        self.WritePair("compiler", "clang")
+        self.WritePair("compiler.cppstd", cppversion)
+        self.WritePair("compiler.version", clangversion)
+        # libstdc++11, not libc++: clang on Linux links GCC's libstdc++ by
+        # default, and mixing the two standard libraries is an ABI break.
+        self.WritePair("compiler.libcxx", abiversion)
+
+    def AddClangCompilerEnv(self):
+        """Point dependency builds at clang.
+
+        Conan's compiler *setting* only affects package-id computation; it
+        does not choose the compiler. Without CC/CXX, CMake would still
+        pick the system default (gcc) and we'd be back to deps built by a
+        different compiler than the project.
+        """
+        self.StartSection("buildenv")
+        self.WritePair("CC", "clang")
+        self.WritePair("CXX", "clang++")
+
     def AddMSVC(self, cppversion: str, msvcversion: str, runtime: str):
         self.WritePair("compiler", "msvc")
         self.WritePair("compiler.cppstd", cppversion)
@@ -100,13 +121,46 @@ class INIProfileGen:
         self.WritePair("CXX", f"{compilerprefix}-g++")
         self.WritePair("LD", f"{compilerprefix}-ld")
 
+    def AddCMakeModuleWorkaround(self):
+        """Let dependencies that ship C++20 modules configure on Linux.
+
+        Modern CMake refuses to configure a target whose sources 'may use'
+        C++20 modules unless the generator supports module scanning — only
+        Ninja and recent Visual Studio do; 'Unix Makefiles' does not. With
+        a new enough GCC this trips on libassert, which fails with:
+
+            The target named "libassert-lib" has C++ sources that may use
+            modules, but modules are not supported by this generator
+
+        Prefer Ninja when it's installed (it scans properly and is faster).
+        Otherwise fall back to switching scanning off, which is safe here
+        because nothing in this project consumes those deps as modules.
+        """
+        self.StartSection("conf")
+        if shutil.which("ninja"):
+            self.WritePair("tools.cmake.cmaketoolchain:generator", "Ninja")
+        else:
+            self.WritePair(
+                "tools.cmake.cmaketoolchain:extra_variables",
+                "{'CMAKE_CXX_SCAN_FOR_MODULES': 'OFF'}",
+            )
+
     def StartSection(self, section: str):
+        # Emit each section header at most once. Several Add* helpers write
+        # into the same section (e.g. AddClangCompilerEnv and AddTempFolder
+        # both use [buildenv]); duplicate headers happen to be tolerated by
+        # INI parsers, but emitting one keeps the profile readable.
+        if not hasattr(self, "_sections"):
+            self._sections = set()
+        if section in self._sections:
+            return
+        self._sections.add(section)
         self.file.write(f"[{section}]\n")
 
     def WritePair(self, key: str, value: str):
         self.file.write(f"{key}={value}\n")
 
-def ProfileGen(path: str, architecture: str, cppversion: str, tempfolder: str, vs_year: str = None):
+def ProfileGen(path: str, architecture: str, cppversion: str, tempfolder: str, vs_year: str = None, compiler: str = None):
     is_windows = platform.system().lower() == "windows"
     platformInfo = mox.GetPlatformInfo(architecture)
     arch = platformInfo["conan_arch"]
@@ -125,8 +179,26 @@ def ProfileGen(path: str, architecture: str, cppversion: str, tempfolder: str, v
             cppversion = max_std
         gen.AddMSVC(cppversion, msvc_version, "dynamic")
     else:
-        gcc_version = subprocess.check_output(("g++", "-dumpversion"), text=True).strip()
-        gen.AddGcc(cppversion, gcc_version, "libstdc++11")
+        # Build dependencies with the same compiler the project itself uses
+        # (cmox_compiler in mox.lua). GCC-built deps do link into a
+        # clang-built binary on Linux — same Itanium ABI, same libstdc++ —
+        # but keeping them consistent means conan's package ids actually
+        # describe what was built, and avoids the mismatch biting with LTO
+        # or sanitizers later.
+        use_clang = compiler is not None and compiler.lower() in ("clang", "clang-cl")
+        if use_clang:
+            # -dumpversion gives e.g. "21.1.8"; conan settings expect the
+            # major version.
+            clang_version = subprocess.check_output(("clang++", "-dumpversion"), text=True).strip()
+            gen.AddClang(cppversion, clang_version.split(".")[0], "libstdc++11")
+        else:
+            gcc_version = subprocess.check_output(("g++", "-dumpversion"), text=True).strip()
+            gen.AddGcc(cppversion, gcc_version, "libstdc++11")
+
         if architecture.lower() != platform.machine().lower():
             gen.AddGccCrossLink(platformInfo["gcc_linux_prefix"])
+        elif use_clang:
+            gen.AddClangCompilerEnv()
     gen.AddTempFolder(is_windows, tempfolder)
+    if not is_windows:
+        gen.AddCMakeModuleWorkaround()

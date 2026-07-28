@@ -1,627 +1,158 @@
 #include "stdafx.h"
 #include "Renderer.h"
 
-#include "imgui_impl_dx12.h"
+#include "rhi/RendererBackendFactory.h"
 
-#include "DXSampleHelper.h"
-#include "Logger.h"
+#include <cstring>
 
-// Temporary
-#include "ShaderCompiler.h"
-
-class BarrierBatch : public NSBarrier::IBarrierBatch
+namespace
 {
-public:
-    void Add(NSBarrier::BarrierKey key, CD3DX12_RESOURCE_BARRIER barrier) override
+    // Matches the pipeline's vertex attributes below: POSITION (3 floats)
+    // at offset 0, COLOR (4 floats) at offset 12. Declared locally because
+    // it's temporary demo content — the equivalent in RendererTypes.h
+    // (NSDebug::Vertex) lives in a header that still carries DX12 types.
+    struct DemoVertex
     {
-        std::vector<D3D12_RESOURCE_BARRIER>& queue = m_entries[key.name.data()];
+        float position[3];
+        float color[4];
+    };
+}
 
-        queue.push_back(barrier);
-    }
-    void Add(NSBarrier::BarrierKey key, std::vector<CD3DX12_RESOURCE_BARRIER>& barriers) override
+Renderer::Renderer() = default;
+Renderer::~Renderer() = default;
+
+bool Renderer::Initialize(NSPlatform::IWindow& window, uint32_t width, uint32_t height)
+{
+    m_width = width;
+    m_height = height;
+
+    m_backend = NSRHI::CreateRendererBackendFromArgs();
+    if (not m_backend)
     {
-        std::vector<D3D12_RESOURCE_BARRIER>& queue = m_entries[key.name.data()];
-
-        queue.insert(queue.cend(), barriers.begin(), barriers.end());
-    }
-    bool Remove(NSBarrier::BarrierKey key, CD3DX12_RESOURCE_BARRIER barrier) override
-    {
-        if (m_entries.empty() or not m_entries.contains(key.name.data())) return false;
-
-        std::vector<D3D12_RESOURCE_BARRIER>& batch = m_entries[key.name.data()];
-
-        const auto itr = std::find_if(batch.begin(), batch.end(), [&barrier](D3D12_RESOURCE_BARRIER& rhs)
-        {
-            return NSBarrier::operator==(barrier, rhs);
-        });
-
-        if (itr != batch.end())
-        {
-            batch.erase(itr);
-            return true;
-        }
-
         return false;
     }
-    void Flush() override
+
+    if (not m_backend->Initialize(window, width, height))
     {
-        for (auto entry : m_entries)
-        {
-            const auto itr = std::erase_if(entry.second, [](D3D12_RESOURCE_BARRIER& itrBarrier)
-            {
-                switch (itrBarrier.Type)
-                {
-                    case D3D12_RESOURCE_BARRIER_TYPE_TRANSITION: return not itrBarrier.Transition.pResource;
-                    case D3D12_RESOURCE_BARRIER_TYPE_ALIASING:   return not itrBarrier.Aliasing.pResourceBefore;
-                    case D3D12_RESOURCE_BARRIER_TYPE_UAV:        return not itrBarrier.UAV.pResource;
-
-                    default: return false;
-                }
-            });
-        }
-    }
-    void Clear(NSBarrier::BarrierKey key) override
-    {
-        if (m_entries.empty() or not m_entries.contains(key.name.data())) return;
-
-        m_entries[key.name.data()].clear();
-    }
-    bool Execute(NSBarrier::BarrierKey key, NSDX12::GraphicsCommandList cmdList) override
-    {
-        if (m_entries.empty() or not m_entries.contains(key.name.data())) return false;
-
-        std::vector<D3D12_RESOURCE_BARRIER>& queue = m_entries[key.name.data()];
-
-        cmdList.ResourceBarrier(static_cast<uint32_t>(queue.size()), queue.data());
-
-        return true;
+        return false;
     }
 
-private:
-    std::map<std::string, std::vector<D3D12_RESOURCE_BARRIER>> m_entries;
-};
+    CreateTriangleResources();
 
-Renderer::Renderer(){}
-Renderer::~Renderer(){}
+    return true;
+}
 
-void Renderer::OnInit(IDXGIFactory7* factory, ID3D12Device14* device, IWICImagingFactory2* wicFactory, NSRenderer::RendererDescription rendererDesc)
+void Renderer::CreateTriangleResources()
 {
-    m_factory = factory;
-    m_device = device;
-    m_wicFactory = wicFactory;
-    m_desc = rendererDesc;
+    NSRHI::IDevice& device = m_backend->GetDevice();
 
-    ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue1)));
+    // Empty layout — these shaders bind no resources at all.
+    m_pipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{});
 
-    m_infoQueue1->RegisterMessageCallback(
-        [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID, LPCSTR description, void*)
-        {
-            ELogLevel level = ELogLevel::EDEBUG;
-            switch (severity)
-            {
-            case D3D12_MESSAGE_SEVERITY_CORRUPTION: level = ELogLevel::EFATAL; break;
-            case D3D12_MESSAGE_SEVERITY_ERROR:      level = ELogLevel::EERROR; break;
-            case D3D12_MESSAGE_SEVERITY_WARNING:    level = ELogLevel::EWARN;  break;
-            case D3D12_MESSAGE_SEVERITY_INFO:       level = ELogLevel::EINFO;  break;
-            case D3D12_MESSAGE_SEVERITY_MESSAGE:    level = ELogLevel::EDEBUG; break;
-            }
-            if (g_PlatformConsoleWrite) {
-                g_PlatformConsoleWrite(level, description);
-            }
+    m_vertexStride = sizeof(DemoVertex);
+
+    m_pipeline = device.CreateGraphicsPipeline(NSRHI::GraphicsPipelineDesc{
+        .vertexShader = { L"vert.hlsl", L"mainVS", NSRHI::EShaderStage::Vertex },
+        .pixelShader = { L"pixel.hlsl", L"mainPS", NSRHI::EShaderStage::Pixel },
+        .vertexAttributes = {
+            { "POSITION", NSRHI::EFormat::R32G32B32_FLOAT, 0 },
+            { "COLOR", NSRHI::EFormat::R32G32B32A32_FLOAT, 12 }
         },
-        D3D12_MESSAGE_CALLBACK_FLAG_NONE,
-        nullptr,
-        &m_infoQueueCookie
-    );
+        .vertexStrideBytes = m_vertexStride,
+        .topology = NSRHI::EPrimitiveTopology::TriangleList,
+        .colorTargetFormats = { NSRHI::EFormat::R8G8B8A8_UNORM },
+        .depthTargetFormat = NSRHI::EFormat::Unknown,
+        .depthTestEnabled = false,
+        .depthWriteEnabled = false,
+        .layout = m_pipelineLayout.get()
+    });
 
-    m_shaderCompiler = std::make_unique<ShaderCompiler>();
+    const float aspectRatio = static_cast<float>(m_width) / static_cast<float>(m_height);
 
-    m_barrierBatch = std::make_unique<BarrierBatch>();
+    const DemoVertex triangleVertices[]{
+        { { 0.00f,  0.25f * aspectRatio, 0.f }, { 1.f, 0.f, 0.f, 1.f } },
+        { { 0.25f, -0.25f * aspectRatio, 0.f }, { 0.f, 1.f, 0.f, 1.f } },
+        { {-0.25f, -0.25f * aspectRatio, 0.f }, { 0.f, 0.f, 1.f, 1.f } },
+    };
 
-    // Command Queue
-    {
-        D3D12_COMMAND_QUEUE_DESC desc{};
-        desc.Flags = D3D12_COMMAND_QUEUE_FLAGS::D3D12_COMMAND_QUEUE_FLAG_NONE;
-        desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        ThrowIfFailed(m_device->CreateCommandQueue(&desc, IID_PPV_ARGS(&m_commandQueue)));
-        m_commandQueue->SetName(L"Renderer::m_commandQueue");
-    }
+    m_vertexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
+        .sizeBytes = sizeof(triangleVertices),
+        .usage = NSRHI::EBufferUsage::Vertex,
+        .cpuVisible = true
+    });
 
-    {
-        DXGI_SWAP_CHAIN_DESC1 desc{};
-        desc.BufferCount = IApp::ic_framesInFlight;
-        desc.Width = rendererDesc.width;
-        desc.Height = rendererDesc.height;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        desc.SwapEffect = DXGI_SWAP_EFFECT::DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        desc.SampleDesc.Count = 1;
-
-        ComPtr<IDXGISwapChain1> dummySc;
-        ThrowIfFailed(
-            factory->CreateSwapChainForHwnd(
-                m_commandQueue.Get(),
-                rendererDesc.wnd,
-                &desc,
-                nullptr, // We created the sc on a windowed window
-                nullptr, // There is one monitor to render
-                &dummySc
-            )
-        );
-
-        dummySc.As(&m_swapChain);
-        m_fenceGeneration = m_swapChain->GetCurrentBackBufferIndex();
-    }
-
-    // Create Descriptor heaps
-    {
-        D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
-        rtvDesc.NumDescriptors = IApp::ic_framesInFlight;
-        rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-        rtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&m_rtvHeap)));
-
-        m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(rtvDesc.Type);
-
-        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc{};
-        dsvDesc.NumDescriptors = IApp::ic_framesInFlight;
-        dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-        dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(m_device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&m_dsvHeap)));
-
-        m_dsvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(dsvDesc.Type);
-    }
-
-    // Frame resources
-    {
-        for (uint32_t frame{}; frame < IApp::ic_framesInFlight; frame++)
-        {
-            CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), frame, m_rtvDescriptorSize);
-
-            // Create a RTV for each frame
-            ThrowIfFailed(m_swapChain->GetBuffer(frame, IID_PPV_ARGS(&m_renderTargets[frame])));
-            m_device->CreateRenderTargetView(m_renderTargets[frame].Get(), nullptr, rtvHandle);
-
-            ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE::D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[frame])));
-        }
-    }
-
-    // Create Command Lists
-    {
-        ThrowIfFailed(m_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&m_commandList)));
-        m_commandList->SetName(L"Renderer::m_commandList");
-    }
-
-    // Create syncronization objects
-    {
-        ThrowIfFailed(m_device->CreateFence(m_fenceGeneration, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-        m_fence->SetName(L"Renderer::m_fence");
-        m_fenceGeneration++;
-
-        m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-        if (not m_fenceEvent)
-        {
-            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-        }
-    }
-
-    // ImGui
-    {
-        ImGui_ImplDX12_InitInfo m_imGuiInitInfo;
-        m_imGuiInitInfo.UserData = this;
-        m_imGuiInitInfo.Device = m_device;
-        m_imGuiInitInfo.CommandQueue = m_commandQueue.Get();
-        m_imGuiInitInfo.NumFramesInFlight = IApp::ic_framesInFlight;
-        m_imGuiInitInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-        m_imGuiInitInfo.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-
-        {
-            D3D12_DESCRIPTOR_HEAP_DESC desc{};
-            desc.NumDescriptors = 100u;
-            desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-            desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-            ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_imGuiSrvHeap)));
-            m_imGuiSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            m_imGuiSrvHeap->SetName(L"Renderer::m_imGuiSrvHeap");
-
-            for (uint32_t idx{}; idx < desc.NumDescriptors; idx++) m_freeImGuiSRVIndices.push_back(idx);
-        }
-
-        m_imGuiInitInfo.SrvDescriptorHeap = m_imGuiSrvHeap.Get();
-        m_imGuiInitInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc)
-        {
-            Renderer * userData = static_cast<Renderer*>(info->UserData);
-            if (userData->m_freeImGuiSRVIndices.empty())
-            {
-                g_FError("No free SRV descriptor available");
-                *out_cpu_desc = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
-                *out_gpu_desc = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
-                return;
-            }
-
-            int32_t idx = userData->m_freeImGuiSRVIndices.back();
-            userData->m_freeImGuiSRVIndices.pop_back();
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-            *out_cpu_desc = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
-
-            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-            *out_gpu_desc = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, userData->m_imGuiSrvDescriptorSize);
-        };
-        m_imGuiInitInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpuDesc, D3D12_GPU_DESCRIPTOR_HANDLE gpuDesc)
-        {
-            Renderer * userData = static_cast<Renderer*>(info->UserData);
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-            ptrdiff_t offset = cpuDesc.ptr - cpuHandle.ptr;
-            if (offset % userData->m_imGuiSrvDescriptorSize != 0 || offset < 0 )
-            {
-                g_FError("Invalid SRV handle");
-                return;
-            }
-
-            int32_t idx = static_cast<uint32_t>(offset / userData->m_imGuiSrvDescriptorSize);
-            if (idx >= static_cast<int32_t>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
-            {
-                g_FError("SRV index is out of bound");
-                return;
-            }
-
-            userData->m_freeImGuiSRVIndices.push_back(idx);
-        };
-
-        ImGui_ImplDX12_Init(&m_imGuiInitInfo);
-
-        m_debugUtils.ImGuiSrvDescriptorAllocFn = [this](D3D12_CPU_DESCRIPTOR_HANDLE * out_cpu_desc, D3D12_GPU_DESCRIPTOR_HANDLE * out_gpu_desc)
-        {
-            if (m_freeImGuiSRVIndices.empty())
-            {
-                g_FError("No free SRV descriptor available");
-                *out_cpu_desc = CD3DX12_CPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
-                *out_gpu_desc = CD3DX12_GPU_DESCRIPTOR_HANDLE(D3D12_DEFAULT);
-                return;
-            }
-
-            int32_t idx = m_freeImGuiSRVIndices.back();
-            m_freeImGuiSRVIndices.pop_back();
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(m_imGuiSrvHeap->GetCPUDescriptorHandleForHeapStart());
-            *out_cpu_desc = CD3DX12_CPU_DESCRIPTOR_HANDLE(cpuHandle, idx, m_imGuiSrvDescriptorSize);
-
-            CD3DX12_GPU_DESCRIPTOR_HANDLE gpuHandle(m_imGuiSrvHeap->GetGPUDescriptorHandleForHeapStart());
-            *out_gpu_desc = CD3DX12_GPU_DESCRIPTOR_HANDLE(gpuHandle, idx, m_imGuiSrvDescriptorSize);
-        };
-        m_imGuiInitInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo * info, D3D12_CPU_DESCRIPTOR_HANDLE cpuDesc, D3D12_GPU_DESCRIPTOR_HANDLE gpuDesc)
-        {
-            Renderer * userData = static_cast<Renderer*>(info->UserData);
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-            ptrdiff_t offset = cpuDesc.ptr - cpuHandle.ptr;
-            if (offset % userData->m_imGuiSrvDescriptorSize != 0 || offset < 0 )
-            {
-                g_FError("Invalid SRV handle");
-                return;
-            }
-
-            int32_t idx = static_cast<uint32_t>(offset / userData->m_imGuiSrvDescriptorSize);
-            if (idx >= static_cast<int32_t>(info->SrvDescriptorHeap->GetDesc().NumDescriptors))
-            {
-                g_FError("SRV index is out of bound");
-                return;
-            }
-
-            userData->m_freeImGuiSRVIndices.push_back(idx);
-        };
-    }
-
-    // temporary pipeline
-    {
-        // Pipeline state
-        {
-            D3D12_INPUT_ELEMENT_DESC inputElementDesc[]
-            {
-                {"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-                {"COLOR", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
-            };
-
-            GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-            psoDesc.InputLayout = {inputElementDesc, _countof(inputElementDesc)};
-            psoDesc.SampleMask = UINT_MAX;
-            psoDesc.PrimitiveTopologyType =  D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-            psoDesc.NumRenderTargets = 1;
-            psoDesc.RTVFormats[0] = DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM;
-            psoDesc.SampleDesc.Count = 1;
-
-            m_pipeline = GraphicsPipeline(m_device, L"Renderer::m_pipeline", [](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
-            {
-                CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc{};
-                rsDesc.Init_1_1(
-                    0, nullptr,
-                    0, nullptr,
-                    D3D12_ROOT_SIGNATURE_FLAGS::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
-                );
-
-                return D3DX12SerializeVersionedRootSignature(&rsDesc, version, &signature, &error);
-            }).Init(psoDesc, CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT), {}, CD3DX12_BLEND_DESC(D3D12_DEFAULT),
-                {
-                    L"vert.hlsl",
-                    {
-                        L"-E", L"mainVS",
-                        L"-T", L"vs_6_0",
-                        L"-Zi",
-                        L"-Od"
-                    }
-                },
-                {
-                    L"pixel.hlsl",
-                    {
-                        L"-E", L"mainPS",
-                        L"-T", L"ps_6_0",
-                        L"-Zi",
-                        L"-Od"
-                    }
-                }
-            );
-        }
-
-        // VERTEX BUFFER
-        {
-            NSDebug::Vertex triangleVertices[] {
-                { {0.f, 0.25f * IApp::GetInstance()->im_aspectRatio, 0.f}, {1.f, 0.f, 0.f, 1.f} },
-                { {0.25f, -0.25f * IApp::GetInstance()->im_aspectRatio, 0.f}, {0.f, 1.f, 0.f, 1.f} },
-                { {-0.25f, -0.25f * IApp::GetInstance()->im_aspectRatio, 0.f}, {0.f, 0.f, 1.f, 1.f} },
-            };
-
-            const UINT vertexBufferSize = sizeof(triangleVertices);
-
-            CD3DX12_HEAP_PROPERTIES prop{D3D12_HEAP_TYPE_UPLOAD};
-            CD3DX12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
-
-            ThrowIfFailed(m_device->CreateCommittedResource(
-                &prop,
-                D3D12_HEAP_FLAGS::D3D12_HEAP_FLAG_NONE,
-                &resDesc,
-                D3D12_RESOURCE_STATE_GENERIC_READ,
-                nullptr, IID_PPV_ARGS(&m_vertexBuffer))
-            );
-
-            UINT8* vertexDataBegin = nullptr;
-            CD3DX12_RANGE readRange(0,0);
-            ThrowIfFailed(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&vertexDataBegin)));
-            memcpy(vertexDataBegin, triangleVertices, sizeof(triangleVertices));
-            m_vertexBuffer->Unmap(0, nullptr);
-
-            m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-            m_vertexBufferView.SizeInBytes = vertexBufferSize;
-            m_vertexBufferView.StrideInBytes = sizeof(NSDebug::Vertex);
-        }
-    }
+    void* mapped = m_vertexBuffer->Map();
+    std::memcpy(mapped, triangleVertices, sizeof(triangleVertices));
+    m_vertexBuffer->Unmap();
 }
-void Renderer::OnDestroy()
+
+void Renderer::Shutdown()
 {
-    WaitForGPU();
+    // Release front-end-owned GPU resources before the backend (and with
+    // it the device) goes away.
+    m_vertexBuffer.reset();
+    m_pipeline.reset();
+    m_pipelineLayout.reset();
 
-    NSRenderer::Ctx ctx = GetCtx();
-
-    m_sceneColor.Reset();
-    m_commandList.Reset();
-    m_copyCommandList.Reset();
-    m_commandQueue.Reset();
-    m_fence.Reset();
-    if (m_fenceEvent)
+    if (m_backend)
     {
-        CloseHandle(m_fenceEvent);
-        m_fenceEvent = nullptr;
+        m_backend->Shutdown();
+        m_backend.reset();
     }
-    m_rtvHeap.Reset();
-    m_dsvHeap.Reset();
-    m_pipeline.Reset();
-    m_copyCommandList.Reset();
-    m_vertexBuffer.Reset();
-
-    for (uint32_t frame{}; frame < IApp::ic_framesInFlight; frame++)
-    {
-        m_depthStencil[frame].Reset();
-        m_renderTargets[frame].Reset();
-        m_commandAllocators[frame].Reset();
-        m_copyCommandAllocators[frame].Reset();
-    }
-
-    m_swapChain.Reset();
-    m_infoQueue1.Reset();
-
-    ImGui_ImplDX12_Shutdown();
-    m_imGuiSrvHeap.Reset();
 }
-
-void Renderer::Update()
-{
-
-}
-void Renderer::BeginFrame()
-{
-    ImGui_ImplDX12_NewFrame();
-    ImGui::NewFrame();
-
-    uint32_t frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-
-    ThrowIfFailed(m_commandAllocators[frameIndex]->Reset());
-    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[frameIndex].Get(), nullptr));
-
-    {
-        CD3DX12_RESOURCE_BARRIER barriers[] =
-        {
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                m_renderTargets[frameIndex].Get(),
-                D3D12_RESOURCE_STATES::D3D12_RESOURCE_STATE_PRESENT,
-                D3D12_RESOURCE_STATES::D3D12_RESOURCE_STATE_RENDER_TARGET
-            )
-        };
-        m_commandList->ResourceBarrier(_countof(barriers), barriers);
-    }
-
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, m_rtvDescriptorSize);
-    m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, 0);
-
-    m_commandList->ClearRenderTargetView(rtvHandle, CLEAR_COLOR, 0, nullptr);
-
-    uint32_t width = IApp::GetInstance()->im_width;
-    uint32_t height = IApp::GetInstance()->im_height;
-    CD3DX12_VIEWPORT viewport(0.f, 0.f, static_cast<FLOAT>(width), static_cast<FLOAT>(height));
-    CD3DX12_RECT scissor(0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height));
-
-   m_commandList->RSSetViewports(1, &viewport);
-   m_commandList->RSSetScissorRects(1, &scissor);
-}
-void Renderer::DrawScene(std::shared_ptr<NSScene::IScene> scene)
-{
-    m_pipeline.Bind(NSDX12::GraphicsCommandList(m_commandList.Get()));
-
-    m_commandList->IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-    m_commandList->DrawInstanced(3, 1, 0, 0);
-}
-void Renderer::EndFrame()
-{
-    ImGui::Render();
-
-    CD3DX12_CPU_DESCRIPTOR_HANDLE backRtv(
-        m_rtvHeap->GetCPUDescriptorHandleForHeapStart(),
-        m_swapChain->GetCurrentBackBufferIndex(),
-        m_rtvDescriptorSize
-    );
-    m_commandList->OMSetRenderTargets(1, &backRtv, FALSE, nullptr);
-
-    ID3D12DescriptorHeap* imGuiDescHeap[] = { m_imGuiSrvHeap.Get() };
-    m_commandList->SetDescriptorHeaps(_countof(imGuiDescHeap), imGuiDescHeap);
-    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
-
-    {
-        CD3DX12_RESOURCE_BARRIER barriers[] =
-        {
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                m_renderTargets[m_swapChain->GetCurrentBackBufferIndex()].Get(),
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PRESENT
-            )
-        };
-        m_commandList->ResourceBarrier(_countof(barriers), barriers);
-    }
-
-    ThrowIfFailed(m_commandList->Close());
-
-
-    {
-        ID3D12CommandList* const lists[] = { m_commandList.Get() };
-        m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
-    }
-
-    ThrowIfFailed(m_swapChain->Present(1, 0));
-
-    MoveToNextFrame();
-}
-
-std::shared_ptr<NSRenderer::Model> Renderer::RegisterModel(std::wstring_view modelName, ObserverKey sceneKey, NSDX12::GraphicsCommandList cmdList, Flag<NSRenderer::ERegModelFlag> flag)
-{
-    ASSERT(false, "Reserved for later");
-
-    return nullptr;
-}
-void Renderer::UnloadModel(ObserverKey key) {}
 
 void Renderer::Resize(uint32_t width, uint32_t height)
 {
-    WaitForGPU();
+    if (width == 0 or height == 0) return;
 
-    for (uint32_t frame{}; frame < IApp::ic_framesInFlight; frame++)
-    {
-        m_renderTargets[frame].Reset();
-        m_depthStencil[frame].Reset();
-    }
-    m_sceneColor.Reset();
+    m_width = width;
+    m_height = height;
 
-    {
-        DXGI_SWAP_CHAIN_DESC1 desc{};
-        m_swapChain->GetDesc1(&desc);
-        ThrowIfFailed(m_swapChain->ResizeBuffers(IApp::ic_framesInFlight, width, height, desc.Format, desc.Flags));
-    }
-
-    uint32_t frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-
-    for (uint32_t frame{}; frame < IApp::ic_framesInFlight; frame++)
-    {
-        CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), frame);
-
-        ThrowIfFailed(m_swapChain->GetBuffer(frame, IID_PPV_ARGS(&m_renderTargets[frame])));
-        m_device->CreateRenderTargetView(m_renderTargets[frame].Get(), nullptr, cpuHandle);
-
-        {
-            D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-
-            CD3DX12_HEAP_PROPERTIES heapProp(D3D12_HEAP_TYPE_DEFAULT);
-            CD3DX12_RESOURCE_DESC resDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT::DXGI_FORMAT_D32_FLOAT, width, height);
-            CD3DX12_CLEAR_VALUE clearVal(DXGI_FORMAT::DXGI_FORMAT_D32_FLOAT, 0, 0);
-            ThrowIfFailed(m_device->CreateCommittedResource(&heapProp, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearVal, IID_PPV_ARGS(&m_depthStencil[frame])));
-
-            D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
-            desc.Format = DXGI_FORMAT_D32_FLOAT;
-            desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-            desc.Flags = D3D12_DSV_FLAG_NONE;
-            m_device->CreateDepthStencilView(m_depthStencil[frame].Get(), &desc, cpuHandle);
-        }
-    }
-}
-void Renderer::Execute(FnRendererExecutionBody Record)
-{
-    MoveToNextFrame();
-
-    uint32_t frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-
-    ThrowIfFailed(m_commandAllocators[frameIndex]->Reset());
-    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[frameIndex].Get(), nullptr));
-
-    Record(GetCtx(), NSDX12::GraphicsCommandList(m_commandList.Get()));
-
-    ThrowIfFailed(m_commandList->Close());
-    ID3D12CommandList* const lists[] = { m_commandList.Get() };
-    m_commandQueue->ExecuteCommandLists(_countof(lists), lists);
-
-    WaitForGPU();
+    if (m_backend) m_backend->Resize(width, height);
 }
 
-void Renderer::DrawDebugImage(){}
-
-void Renderer::CreateSwapChain(HWND hwnd, uint32_t width, uint32_t height)
+void Renderer::BeginFrame()
 {
-    ASSERT(false, "Reserved for later");
+    if (not m_backend) return;
+
+    m_cmd = &m_backend->BeginFrame();
+
+    // The backend already transitioned the backbuffer to a render target;
+    // the front-end decides what to render into it.
+    NSRHI::RenderingAttachment color{};
+    color.target = &m_backend->CurrentBackBuffer();
+    color.clear = true;
+    color.clearColor = { 0.f, 0.f, 0.f, 0.f };
+
+    m_cmd->BeginRendering({ color }, nullptr);
+
+    m_cmd->SetViewport(NSRHI::Viewport{
+        .x = 0.f, .y = 0.f,
+        .width = static_cast<float>(m_width),
+        .height = static_cast<float>(m_height)
+    });
+    m_cmd->SetScissor(NSRHI::ScissorRect{
+        .left = 0, .top = 0,
+        .right = static_cast<int32_t>(m_width),
+        .bottom = static_cast<int32_t>(m_height)
+    });
 }
-void Renderer::CreateDepthStencil(std::wstring_view name, NSRenderer::DepthStencilCreateDescription desc)
+
+void Renderer::DrawScene(std::shared_ptr<NSScene::IScene>)
 {
-    ASSERT(false, "Reserved for later");
+    if (not m_cmd) return;
+
+    m_cmd->SetPipeline(m_pipeline.get());
+    m_cmd->SetVertexBuffer(m_vertexBuffer.get(), m_vertexStride);
+    m_cmd->Draw(3);
 }
-void Renderer::CreateFallbackTexture()
+
+void Renderer::EndFrame()
 {
-    ASSERT(false, "Reserved for later");
-}
+    if (not m_cmd) return;
 
-void Renderer::MoveToNextFrame()
-{
-    UINT64 fenceGen = m_fenceGeneration;
-    ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), fenceGen));
-    m_fenceGeneration++;
+    m_cmd->EndRendering();
+    m_cmd = nullptr;
 
-    if (m_fence->GetCompletedValue() < fenceGen)
-    {
-        ThrowIfFailed(m_fence->SetEventOnCompletion(fenceGen, m_fenceEvent));
-        WaitForSingleObjectEx(m_fenceEvent, INFINITE, false);
-    }
-}
-void Renderer::WaitForGPU()
-{
-    ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceGeneration));
-
-    ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceGeneration, m_fenceEvent));
-    WaitForSingleObjectEx(m_fenceEvent, INFINITE, false);
-
-    m_fenceGeneration++;
+    m_backend->EndFrame();
 }

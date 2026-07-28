@@ -39,12 +39,28 @@ FindArgResult FindArg(std::string_view cmdLine, SCmdArg& cmdArg)
 }
 
 
-_Use_decl_annotations_
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR _cmdLine, int nCmdShow)
+// One real entry point on every platform. On Windows this only works
+// because build.lua tells the linker to start at mainCRTStartup instead
+// of WinMainCRTStartup (see the /ENTRY: linkoption there) — the OS still
+// launches a windowed, console-less app, but the CRT hands control to
+// main() instead of WinMain(), with argc/argv already parsed from the
+// Windows command line exactly like a console app would get. That
+// linker-level trick is the only thing that changes between platforms;
+// this function itself doesn't need to.
+int main(int argc, char** argv)
 {
-    std::string_view cmdLine = _cmdLine ? _cmdLine : "";
-
-    g_CmdArguments[static_cast<size_t>(ARG_CONSOLE_PID)].value = std::to_string(ATTACH_PARENT_PROCESS);
+    // FindArg()/g_CmdArguments below expect one joined string to search
+    // substrings in — that's what WinMain's LPSTR used to hand over
+    // directly. argv comes pre-split on every platform, so we rejoin it
+    // here rather than rewriting the (otherwise OS-neutral) parsing logic
+    // to work off argv directly.
+    std::string joinedArgs;
+    for (int i = 1; i < argc; ++i)
+    {
+        if (i > 1) joinedArgs += ' ';
+        joinedArgs += argv[i];
+    }
+    std::string_view cmdLine = joinedArgs;
 
     if (not cmdLine.empty())
     {
@@ -60,26 +76,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR _cmdLine, int nCmdShow)
         }
     }
 
-    if (g_CmdArguments[ARG_WAIT_FOR_DEBUGGER].present)
-    {
-        AttachConsole(ATTACH_PARENT_PROCESS);
-        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-
-        const std::string message = std::format("DXFoliage waiting for debugger. PID: {}\n", GetCurrentProcessId());
-
-        WriteConsoleA(hConsole, message.c_str(), message.size(), nullptr, nullptr);
-
-        while (not IsDebuggerPresent())
-        {
-            Sleep(5000);
-
-            WriteConsoleA(hConsole, "*\n", 2, nullptr, nullptr);
-        }
-
-        __debugbreak();
-    }
-
-    app app(1280, 720, PROJECT_NAME, hInstance, nCmdShow);
+    // g_CmdArguments is now fully populated; NSPlatform::CreatePlatform()
+    // (called from app's constructor) reads whatever launch flags it
+    // needs straight out of it — see PlatformFactory_Win32.cpp.
+    app app(1280, 720, PROJECT_NAME);
     app.OnInit();
 
     return app.Run();

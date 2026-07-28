@@ -54,3 +54,6 @@ Makefile
 
 # App
 /app
+
+# Backup destinations (machine-specific, per-machine paths)
+/mox.backup.json

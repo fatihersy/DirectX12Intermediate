@@ -67,6 +67,43 @@ function mox_runpy_prebuild(command)
     }
 end
 
+-- Sets premake's `system` from the --mox_target_os option instead of the
+-- project hardcoding it. Use this in a project's build.lua in place of
+-- `system "windows"` so the same build.lua can target either OS.
+function mox_target_system()
+    if _OPTIONS["mox_target_os"] == "linux" then
+        system "linux"
+    else
+        system "windows"
+    end
+end
+
+-- Resolves a Linux system library through pkg-config at premake-generation
+-- time. Used for wayland-client / xkbcommon, which come from system
+-- packages rather than vcpkg: xkbcommon needs the system xkeyboard-config
+-- data at runtime anyway, and the Wayland protocol XML has to match the
+-- compositor being targeted. No-op when not targeting Linux.
+--
+-- Note this runs pkg-config on the machine generating the project files,
+-- so it only works when premake is invoked natively on Linux — which is
+-- the only Linux path this repo supports (there's no cross-compile-to-
+-- Linux-from-Windows story here).
+function mox_link_pkgconfig(pkgname)
+    if _OPTIONS["mox_target_os"] ~= "linux" then return end
+
+    local cflags = os.outputof("pkg-config --cflags " .. pkgname)
+    local libs = os.outputof("pkg-config --libs " .. pkgname)
+
+    if cflags == nil or libs == nil then
+        error("pkg-config could not resolve '" .. pkgname .. "'. Install its -dev package.")
+    end
+
+    filter { "system:linux" }
+    if cflags ~= "" then buildoptions { cflags } end
+    if libs ~= "" then linkoptions { libs } end
+    filter {}
+end
+
 -- For you usable functions
 function mox_project(name, output_name, target_subdir)
     hmox_project_name = name
@@ -190,7 +227,13 @@ function mox_project(name, output_name, target_subdir)
         for idx, conf in pairs(cmox_configurations_n) do
             local is_debug = cmox_configurations_d[idx]
 
-            filter { "configurations:" .. conf, "kind:ConsoleApp or WindowedApp" }
+            -- Windows-only: this step copies runtime .dll files next to
+            -- the binary, which has no meaning on Linux. Without the
+            -- system filter it still runs there, fails (there is no
+            -- dlls/ directory), and — because postbuild commands run in
+            -- declaration order and make stops at the first failure —
+            -- takes every later postbuild step down with it.
+            filter { "configurations:" .. conf, "kind:ConsoleApp or WindowedApp", "system:windows" }
             if is_debug and not hmox_conan_release_only then
                 mox_runpy_postbuild('"distdlls" "%{wks.location}/dlls/Debug-%{cfg.architecture}" "%{cfg.targetdir}"')
             else

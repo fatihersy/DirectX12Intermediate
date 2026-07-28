@@ -25,6 +25,7 @@ SOFTWARE.
 import mox
 import moxwin
 
+import glob
 import os
 import re
 import sys
@@ -95,6 +96,48 @@ def DownloadPremake(version = '5.0.0-beta8'):
             with tarfile.open(premakeTargetZip, 'r') as tarFile:
                 tarFile.extractall(premakeTargetFolder, filter=tarfile.data_filter)
             os.chmod(premakeTargetExe, os.stat(premakeTargetExe).st_mode | stat.S_IEXEC)
+
+
+def GenerateWaylandProtocols(targetOs):
+    """Turn the Wayland protocol XML into C bindings.
+
+    Wayland ships its window-management protocol (xdg-shell) as an XML
+    interface description rather than a library: wayland-scanner reads it
+    and emits the client-side marshalling code. It's the moral equivalent
+    of windows.h declaring CreateWindow — a fixed API surface, not build
+    output — so it's generated once here rather than on every build. The
+    only thing that changes it is the pinned wayland-protocols version in
+    conanfile.py, and changing that means re-running init anyway.
+
+    Both inputs come from conan (see conanfile.py), so this must run after
+    'conan install'.
+    """
+    if targetOs != 'linux':
+        return
+
+    outDir = './dependencies/wayland'
+    protocols = ['xdg-shell']
+
+    scanners = glob.glob('./dependencies/full_deploy/build/wayland/*/*/*/bin/wayland-scanner')
+    if not scanners:
+        print('Warning: wayland-scanner not found in conan output; skipping protocol generation')
+        return
+    scanner = scanners[0]
+
+    os.makedirs(outDir, exist_ok=True)
+    for name in protocols:
+        matches = glob.glob(f'./dependencies/full_deploy/host/wayland-protocols/*/res/wayland-protocols/stable/{name}/{name}.xml')
+        if not matches:
+            print(f'Warning: {name}.xml not found in conan output; skipping')
+            continue
+        xml = matches[0]
+
+        # private-code: the marshalling implementation, compiled into us.
+        # client-header: the declarations our C++ includes.
+        for mode, ext in (('private-code', 'protocol.c'), ('client-header', 'client-protocol.h')):
+            dest = f'{outDir}/{name}-{ext}'
+            subprocess.run((scanner, mode, xml, dest), check=True)
+            print(f'Generated {dest}')
 
 
 def GetVcpkgDownloadUrl():
@@ -246,8 +289,8 @@ if __name__ == '__main__':
     # Generate conan profiles
     os.makedirs("./profiles/", exist_ok=True)
     cpp_version = re.search(r'(\d+)', mox.ExtractLuaDef("./mox.lua", "cmox_cpp_version")).group(1)
-    mox.ProfileGen("./profiles/build", platform.machine().lower(), cpp_version, tempFolder, vs_version)
-    mox.ProfileGen(f"./profiles/host_{arch}", arch, cpp_version, tempFolder, vs_version)
+    mox.ProfileGen("./profiles/build", platform.machine().lower(), cpp_version, tempFolder, vs_version, compiler)
+    mox.ProfileGen(f"./profiles/host_{arch}", arch, cpp_version, tempFolder, vs_version, compiler)
 
     # Download tool applications
     DownloadPremake()
@@ -278,6 +321,10 @@ if __name__ == '__main__':
             './scripts/copydlls.py',
             arch
         ))
+
+    # Generate Wayland protocol bindings (needs conan's wayland-scanner +
+    # wayland-protocols, so it has to come after the conan step)
+    GenerateWaylandProtocols(targetOs)
 
     # GCC Prefix (based on target OS, not host)
     gccPrefix = hostArch[f'gcc_{targetOs}_prefix'] + '-'

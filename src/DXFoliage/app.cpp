@@ -1,52 +1,47 @@
 #include "stdafx.h"
 #include "app.h"
 
-#include "dxgidebug.h"
-
-#include "DXSampleHelper.h"
-#include "Platform.h"
+#include "Logger.h"
+#include "platform/PlatformUtils.h"
 
 IApp* IApp::s_instance = nullptr;
 
-Platform plat;
-
-app::app(uint32_t width, uint32_t height, std::wstring_view title, HINSTANCE hInstance, int nCmdShow) : IApp(width, height)
+app::app(uint32_t width, uint32_t height, std::wstring_view title) : IApp(width, height)
 {
     s_instance = this;
 
-    im_windowedRECT = { 0L, 0L, static_cast<LONG>(width), static_cast<LONG>(height)};
     im_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 
-    plat.OnInit(SWindow
+    // Whichever OS this actually compiles for decides what a "window"
+    // and an "input source" concretely are — this file never finds out.
+    NSPlatform::PlatformHandles platform = NSPlatform::CreatePlatform(NSPlatform::WindowDesc{ .width = width, .height = height, .title = title });
+    m_window = std::move(platform.window);
+    m_input = std::move(platform.input);
+
+    if (not m_window or not m_input)
     {
-        .hInstance = hInstance,
-        .hWnd = nullptr,
-        .pApp = this,
-        .nCmdShow = nCmdShow,
-        .width = width,
-        .height = height,
-        .title = title
-    });
+        // Platform creation can legitimately fail (no compositor, no
+        // display, backend not implemented for this OS yet). Bail out
+        // clearly instead of dereferencing null below.
+        g_FError("Platform creation failed — no window/input available");
+        im_isQuitting = true;
+        return;
+    }
+
+    m_window->SetResizeCallback([this](uint32_t w, uint32_t h) { OnResize(w, h); });
+    m_window->SetCloseCallback([this]() { OnDestroy(); });
 
     im_assetsPath = std::filesystem::current_path();
-
-    WCHAR executablePath[512];
-    GetExecutablePath(executablePath, _countof(executablePath));
-    im_executablePath = executablePath;
-
-    ThrowIfFailed(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
-    ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&im_wicFactory)));
-
-    m_keyboard = std::make_unique<DirectX::Keyboard>();
-    m_mouse = std::make_unique<DirectX::Mouse>();
-    m_mouse->SetWindow(plat.GetWindow());
+    im_executablePath = NSPlatform::GetExecutableDirectory();
 }
 void app::OnInit()
 {
+    if (im_isQuitting) return; // platform creation failed in the ctor
+
     LoadPipeline();
     LoadAssets();
 
-    plat.ShowWindow();
+    m_window->Show();
 
     m_keyboardTracker.Reset();
 }
@@ -56,105 +51,40 @@ app::~app()
 }
 void app::OnDestroy()
 {
-    m_renderer.OnDestroy();
-
-    if (m_mouse.release()) {};
-    m_mouse.reset();
-    if (m_keyboard.release()) {};
-    m_keyboard.reset();
-
-    im_wicFactory.Reset();
-    m_factory.Reset();
-    im_device.Reset();
-
-    ComPtr<IDXGIDebug1> dxgiDebug;
-    if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
-    {
-        dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_DETAIL);
-    }
-    dxgiDebug.Reset();
+    // The DXGI live-object leak report that used to be here moved into
+    // DX12RendererBackend::Shutdown — it reports *DX12* object leaks, so
+    // it belongs with the backend that created them, and it has to run
+    // after those objects are released anyway.
+    m_renderer.Shutdown();
 };
 int app::Run()
 {
-    MSG msg{};
+    if (im_isQuitting) return EXIT_FAILURE; // platform creation failed
 
-    while (msg.message != WM_QUIT)
+    // Rendering is now driven explicitly here, once per PumpEvents() call,
+    // instead of implicitly from inside a WM_PAINT handler (see
+    // Win32Window's header comment for why that was actually a disguised
+    // free-running loop already).
+    while (m_window->PumpEvents())
     {
-        plat.Dispatch(msg);
+        OnUpdate();
+        OnRender();
     }
 
-    return static_cast<int>(msg.wParam);
+    return 0;
 }
 void app::LoadPipeline()
 {
-    UINT dxgiFactoryFlags{};
-
-    ComPtr<ID3D12Debug6> debugController;
-    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+    // Everything GPU-side — which backend (--rhi=), the device, the
+    // swapchain — is decided and owned below this call. app just says
+    // "render into this window at this size".
+    if (not m_renderer.Initialize(*m_window, im_width, im_height))
     {
-        debugController->EnableDebugLayer();
-
-        dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+        // Nothing can be drawn without a renderer, so don't enter the
+        // frame loop — Run() bails out on this flag.
+        g_FError("Renderer initialization failed");
+        im_isQuitting = true;
     }
-
-    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_factory)));
-
-    // Seeking compatible device
-    {
-        ComPtr<IDXGIAdapter1> adapter;
-        ComPtr<IDXGIFactory7> factory;
-        if (SUCCEEDED(m_factory->QueryInterface(IID_PPV_ARGS(&factory))))
-        {
-            for (
-                UINT adapterIndex{};
-                SUCCEEDED(factory->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter)));
-                adapterIndex++
-            ) {
-                DXGI_ADAPTER_DESC1 desc{};
-                adapter->GetDesc1(&desc);
-
-                if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
-
-                if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, __uuidof(ID3D12Device), nullptr)))
-                {
-                    break;
-                }
-            }
-        }
-
-        if (adapter.Get() == nullptr)
-        {
-            for (UINT adapterIndex{}; SUCCEEDED(m_factory->EnumAdapters1(adapterIndex, &adapter)); adapterIndex++)
-            {
-                DXGI_ADAPTER_DESC1 desc{};
-                adapter->GetDesc1(&desc);
-
-                if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
-
-                if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, __uuidof(ID3D12Device), nullptr)))
-                {
-                    break;
-                }
-            }
-        }
-
-        ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&im_device)));
-    }
-
-    D3D12_FEATURE_DATA_SHADER_MODEL shaderModel{};
-    shaderModel.HighestShaderModel = D3D_SHADER_MODEL_6_7;
-
-    ThrowIfFailed(im_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
-
-    ASSERT(static_cast<int>(shaderModel.HighestShaderModel) <= static_cast<int>(D3D_SHADER_MODEL_6_7), "Device doesn't support shader model 6.7");
-
-    m_renderer.OnInit(m_factory.Get(), im_device.Get(), im_wicFactory.Get(),
-    {
-        .wnd = plat.GetWindow(),
-        .width = im_width,
-        .height = im_height,
-        .streamingDistance = 2500
-    });
 }
 void app::LoadAssets()
 {
@@ -175,7 +105,7 @@ void app::OnRender()
     m_renderer.EndFrame();
 };
 
-void app::OnResize(UINT width, UINT height)
+void app::OnResize(uint32_t width, uint32_t height)
 {
     if (width == 0 or height == 0 or (width == im_width and height == im_height))
     {
@@ -184,71 +114,47 @@ void app::OnResize(UINT width, UINT height)
 
     im_width = width;
     im_height = height;
-    im_aspectRatio = static_cast<FLOAT>(im_width) / static_cast<FLOAT>(im_height);
+    im_aspectRatio = static_cast<float>(im_width) / static_cast<float>(im_height);
+
+    // Previously the renderer was never told about resizes at all, so the
+    // swapchain kept its original size. Now that Renderer::Resize goes
+    // through the backend cleanly, wire it up.
+    m_renderer.Resize(width, height);
 };
 void app::ToggleFullScreen()
 {
-    im_isFullscreen = not im_isFullscreen;
-
-    MONITORINFO monitorInfo = { sizeof(MONITORINFO) };
-    GetMonitorInfo(MonitorFromWindow(plat.GetWindow(), MONITOR_DEFAULTTOPRIMARY), &monitorInfo);
-    const UINT monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
-    const UINT monitorHeight = monitorInfo.rcMonitor.top = monitorInfo.rcMonitor.bottom;
-    const UINT monitorLeft = monitorInfo.rcMonitor.left;
-    const UINT monitorTop = monitorInfo.rcMonitor.top;
-
-    if (im_isFullscreen)
-    {
-        SetWindowLong(plat.GetWindow(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
-        SetWindowPos(plat.GetWindow(),
-            HWND_TOP,
-            monitorLeft,
-            monitorTop,
-            monitorWidth,
-            monitorHeight,
-            SWP_FRAMECHANGED | SWP_SHOWWINDOW
-        );
-
-        this->OnResize(monitorWidth, monitorHeight);
-        return;
-    }
-
-    const UINT windowWidth = im_windowedRECT.right - im_windowedRECT.left;
-    const UINT windowHeight = im_windowedRECT.bottom - im_windowedRECT.top;
-
-    const UINT windowLeft = monitorLeft + static_cast<UINT>(monitorWidth / 2.f) - static_cast<UINT>(windowWidth / 2.f);
-    const UINT windowTop = monitorHeight + static_cast<UINT>(monitorHeight / 2.f) - static_cast<UINT>(windowHeight / 2.f);
-
-    SetWindowLong(plat.GetWindow(), GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
-    SetWindowPos(plat.GetWindow(),
-        HWND_TOP,
-        windowLeft,
-        windowTop,
-        windowWidth,
-        windowHeight,
-        SWP_FRAMECHANGED | SWP_SHOWWINDOW
-    );
-
-    this->OnResize(windowWidth, windowHeight);
+    // The actual Win32 fullscreen-toggle logic (SetWindowLong/
+    // SetWindowPos/monitor geometry) now lives in Win32Window, since
+    // that's genuinely a windowing concern, not an app one. Nothing else
+    // in this codebase calls IApp::ToggleFullScreen() directly anymore
+    // (Win32WindowProc's Alt+Enter handler calls window->ToggleFullscreen()
+    // directly) — this override exists so the method stays meaningful for
+    // any future caller that goes through the IApp interface.
+    m_window->ToggleFullscreen();
 };
 
 void app::UpdateBindings()
 {
-    DirectX::Keyboard::State kbState = m_keyboard->GetState();
-    DirectX::Mouse::State mouseState = m_mouse->GetState();
+    m_input->Update();
 
+    const NSInput::KeyboardState kbState = m_input->GetKeyboardState();
     m_keyboardTracker.Update(kbState);
 
-    if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::End))
+    if (m_keyboardTracker.IsKeyReleased(NSInput::EKey::End))
     {
-        PostMessage(plat.GetWindow(), WM_CLOSE, 0, 0);
+        m_window->RequestClose();
     }
-    if (m_keyboardTracker.IsKeyReleased(DirectX::Keyboard::Insert))
+    if (m_keyboardTracker.IsKeyReleased(NSInput::EKey::Insert))
     {
-        if (m_mouse->GetState().positionMode == DirectX::Mouse::MODE_RELATIVE)
+        const NSInput::MouseState mouseState = m_input->GetMouseState();
+
+        if (mouseState.mode == NSInput::EMouseMode::Relative)
         {
-            m_mouse->SetMode(DirectX::Mouse::MODE_ABSOLUTE);
+            m_input->SetMouseMode(NSInput::EMouseMode::Absolute);
         }
-        else m_mouse->SetMode(DirectX::Mouse::MODE_RELATIVE);
+        else
+        {
+            m_input->SetMouseMode(NSInput::EMouseMode::Relative);
+        }
     }
 }

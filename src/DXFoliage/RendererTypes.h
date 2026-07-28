@@ -57,11 +57,11 @@ namespace NSBarrier
 
 struct FrameConstants
 {
-    DirectX::XMFLOAT4X4 view{};
-    DirectX::XMFLOAT4X4 proj{};
-    DirectX::XMFLOAT4 lightDir{};
-    DirectX::XMFLOAT4 lightColor{};
-    DirectX::XMFLOAT3 eye{};
+    NSMath::Float4x4 view{};
+    NSMath::Float4x4 proj{};
+    NSMath::Float4 lightDir{};
+    NSMath::Float4 lightColor{};
+    NSMath::Float3 eye{};
     uint32_t PADDING_0{};
 };
 static_assert(sizeof(FrameConstants) % 16 == 0);
@@ -74,8 +74,8 @@ static_assert(offsetof(FrameConstants, PADDING_0) / 16 == (offsetof(FrameConstan
 
 struct PostConstants
 {
-    DirectX::XMFLOAT4X4 invViewProj{};
-    DirectX::XMFLOAT3 camPos{};
+    NSMath::Float4x4 invViewProj{};
+    NSMath::Float3 camPos{};
     uint32_t sceneColorSrvIndex{};
     uint32_t depthSrvIndex{};
     uint32_t transmittanceSrvIndex{};
@@ -93,9 +93,9 @@ static_assert(offsetof(PostConstants, PADDING_0            ) / 16 == (offsetof(P
 
 struct MeshConstants
 {
-    DirectX::XMFLOAT4X4 worldMatrix{};
-    DirectX::XMFLOAT3X4 normalMatrix{};
-    DirectX::XMFLOAT4 baseColor{};
+    NSMath::Float4x4 worldMatrix{};
+    NSMath::Float3x4 normalMatrix{};
+    NSMath::Float4 baseColor{};
     float metallic{};
     float roughtness{};
     float opacity{};
@@ -112,9 +112,9 @@ static_assert(offsetof(MeshConstants, textureFlags) / 16 == (offsetof(MeshConsta
 
 struct FrameConstantsZPrepass
 {
-    DirectX::XMFLOAT4X4 view{};
-    DirectX::XMFLOAT4X4 proj{};
-    DirectX::XMFLOAT3 eye{};
+    NSMath::Float4x4 view{};
+    NSMath::Float4x4 proj{};
+    NSMath::Float3 eye{};
     uint32_t PADDING_0{};
 };
 static_assert(sizeof(FrameConstantsZPrepass) % 16 == 0);
@@ -125,14 +125,14 @@ static_assert(offsetof(FrameConstantsZPrepass, PADDING_0) / 16 == (offsetof(Fram
 
 struct MeshConstantsZPrepass
 {
-    DirectX::XMFLOAT4X4 worldMatrix{};
+    NSMath::Float4x4 worldMatrix{};
 };
 static_assert(sizeof(MeshConstantsZPrepass) % 16 == 0);
 static_assert(offsetof(MeshConstantsZPrepass, worldMatrix) % 16 == 0);
 
 struct AtmosphereConstants
 {
-    DirectX::XMFLOAT3 BetaR{};
+    NSMath::Float3 BetaR{};
     float PADDING_0{};
     float BetaMScatter{};
     float BetaMExtinct{};
@@ -142,7 +142,7 @@ struct AtmosphereConstants
     float Rg{};
     float Rt{};
     float SunIntensity{};
-    DirectX::XMFLOAT3 SunDir{};
+    NSMath::Float3 SunDir{};
     float PADDING_1{};
 };
 static_assert(sizeof(AtmosphereConstants) % 16 == 0);
@@ -177,13 +177,13 @@ inline bool operator!=(const AtmosphereConstants& lhs, AtmosphereConstants& rhs)
 
 struct EnvCaptureConstants
 {
-    DirectX::XMFLOAT4X4 view{};
-    DirectX::XMFLOAT4X4 proj{};
-    DirectX::XMFLOAT4 lightDir{};
-    DirectX::XMFLOAT4 lightColor{};
-    DirectX::XMFLOAT3 capturePos{};
+    NSMath::Float4x4 view{};
+    NSMath::Float4x4 proj{};
+    NSMath::Float4 lightDir{};
+    NSMath::Float4 lightColor{};
+    NSMath::Float3 capturePos{};
     float PADDING_0{};
-    DirectX::XMFLOAT3 camPos{};
+    NSMath::Float3 camPos{};
     float PADDING_1{};
 };
 static_assert(sizeof(EnvCaptureConstants) % 16 == 0);
@@ -198,15 +198,15 @@ static_assert(offsetof(EnvCaptureConstants, PADDING_1 ) / 16 == (offsetof(EnvCap
 
 struct TerrainConstants
 {
-    DirectX::XMFLOAT4X4 worldMatrix{};
+    NSMath::Float4x4 worldMatrix{};
     float maxHeight{};
     float worldTexelSpacingX{};
     float worldTexelSpacingZ{};
     float tessFactorScale{};
     float textureTilingFactor{};
     uint32_t PADDING_0[3]{};
-    DirectX::XMFLOAT2 chunkUVOffset{};
-    DirectX::XMFLOAT2 chunkUVScale{};
+    NSMath::Float2 chunkUVOffset{};
+    NSMath::Float2 chunkUVScale{};
     uint32_t heightmapSrvIndex{};
     uint32_t terrainDiffuseSrvIndex{};
     uint32_t pageHalo{};
@@ -239,13 +239,13 @@ static_assert(offsetof(TerrainConstants, morphFar                 ) / 16 == (off
 
 struct ImpostorConstants
 {
-    DirectX::XMFLOAT4X4 worldMatrix{};
+    NSMath::Float4x4 worldMatrix{};
     float maxHeight{};
     float worldTexelSpacingX{};
     float worldTexelSpacingZ{};
     float cullMargin{};
-    DirectX::XMFLOAT2 streamMin{};
-    DirectX::XMFLOAT2 streamMax{};
+    NSMath::Float2 streamMin{};
+    NSMath::Float2 streamMax{};
     uint32_t heightmapSrvIndex{};
     uint32_t diffuseSrvIndex{};
     uint32_t streamValid{};
@@ -329,7 +329,7 @@ namespace NSRenderer
         struct Neighbor
         {
             EntityID id;
-            DirectX::XMFLOAT3 position;
+            NSMath::Float3 position;
         };
 
         bool isDirty{};
@@ -428,8 +428,8 @@ namespace NSDebug
 {
     struct Vertex
     {
-        DirectX::XMFLOAT3 position;
-        DirectX::XMFLOAT4 color;
+        NSMath::Float3 position;
+        NSMath::Float4 color;
     };
 
     struct Line

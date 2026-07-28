@@ -10,6 +10,10 @@
 //*********************************************************
 
 #pragma once
+
+// ID3D12Object/HRESULT used to arrive via the precompiled header.
+#include "PlatformHeaders_DX12.h"
+
 #include "Logger.h"
 
 #include <dxgidebug.h>

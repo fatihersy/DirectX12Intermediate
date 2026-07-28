@@ -25,6 +25,16 @@ inline void g_FError(const std::string_view fmt)
     g_PlatformConsoleWrite(ELogLevel::EERROR, fmt);
 }
 
+// g_FDebug/g_FError already had this no-args overload; g_FWarn didn't.
+// Without it a plain one-argument warning instantiates the variadic
+// template, which hands the message to snprintf as a runtime format
+// string — that's a -Wformat-security warning, and fatalwarnings "All"
+// turns it into a build error.
+inline void g_FWarn(const std::string_view fmt)
+{
+    g_PlatformConsoleWrite(ELogLevel::EWARN, fmt);
+}
+
 template<typename... Args>
 inline void g_FDebug(const std::string_view fmt, Args&&... args)
 {

@@ -3,7 +3,21 @@
   "name": "directx12intermediate",
   "version": "1.0.0",
   "dependencies": [
-    "directxtk12",
-    "directx-dxc"
+    {
+      "name": "directxtk12",
+      "platform": "windows"
+    },
+    {
+      "name": "directx-dxc",
+      "platform": "windows"
+    },
+    {
+      "name": "vulkan-headers",
+      "platform": "linux"
+    },
+    {
+      "name": "vulkan-memory-allocator",
+      "platform": "linux"
+    }
   ]
 }

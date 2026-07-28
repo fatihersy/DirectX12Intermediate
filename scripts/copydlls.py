@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 import os
+import sys
 import mox
 import shutil
 import platform
@@ -81,8 +82,21 @@ def copy_binaries(source_root, debug_dest, release_dest, conan_arch):
                             shutil.copy2(binary_file.resolve(), dest_file)
                             print(f"Copied (materialized) {binary_file} -> {dest_file}")
 
-def copy_vcpkg_binaries(vcpkg_root, debug_dest, release_dest, triplet="x64-windows"):
+def default_vcpkg_triplet():
+    """Triplet for the machine we're running on.
+
+    Was hardcoded to x64-windows, which made a Linux build log two
+    misleading 'vcpkg bin directory does not exist' warnings while
+    pointing at a Windows path that will never exist there.
+    """
+    return "x64-linux" if sys.platform.startswith("linux") else "x64-windows"
+
+
+def copy_vcpkg_binaries(vcpkg_root, debug_dest, release_dest, triplet=None):
     """Copy vcpkg DLLs to destination directories."""
+    if triplet is None:
+        triplet = default_vcpkg_triplet()
+
     vcpkg_root = Path(vcpkg_root).resolve()
     debug_dest = Path(debug_dest).resolve()
     release_dest = Path(release_dest).resolve()

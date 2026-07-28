@@ -3,8 +3,205 @@
 
 #include "EntityTypes.h"
 
+// Engine math types. These replace the DirectXMath (XMFLOAT3/XMVECTOR/...)
+// types that used to be used directly: even though DirectXMath is largely
+// portable, it's a Windows-SDK-shipped, API-flavoured dependency, and the
+// neutral layers of this engine shouldn't be tied to it.
+//
+// Conventions (kept identical to what DirectXMath used, so shader-facing
+// data and existing semantics are unchanged):
+//   - Storage is ROW-MAJOR: Float4x4::m[row][col], and _rc names row r,
+//     col c (1-based), matching XMFLOAT4X4.
+//   - Row-vector convention: transforms compose as v * M, so a combined
+//     matrix is World * View * Proj.
+//   - Layout is plain floats with no padding, so these are drop-in
+//     replacements inside constant-buffer structs (the 16-byte-alignment
+//     static_asserts in RendererTypes.h still hold).
+//
+// Scalar (non-SIMD) implementation on purpose: it's simple, portable and
+// correct. If profiling ever shows math is hot, the internals can move to
+// SIMD without changing this interface.
 namespace NSMath
 {
+    inline constexpr float kEpsilon = 1.192092896e-7f; // FLT_EPSILON, same value DirectX::g_XMEpsilon used
+    inline constexpr float kPi = 3.14159265358979323846f;
+
+    // --- Vectors -----------------------------------------------------
+
+    struct Float2
+    {
+        float x{};
+        float y{};
+
+        constexpr Float2() = default;
+        constexpr Float2(float inX, float inY) : x(inX), y(inY) {}
+    };
+
+    struct Float3
+    {
+        float x{};
+        float y{};
+        float z{};
+
+        constexpr Float3() = default;
+        constexpr Float3(float inX, float inY, float inZ) : x(inX), y(inY), z(inZ) {}
+    };
+
+    struct Float4
+    {
+        float x{};
+        float y{};
+        float z{};
+        float w{};
+
+        constexpr Float4() = default;
+        constexpr Float4(float inX, float inY, float inZ, float inW) : x(inX), y(inY), z(inZ), w(inW) {}
+        constexpr Float4(const Float3& v, float inW) : x(v.x), y(v.y), z(v.z), w(inW) {}
+    };
+
+    // --- Vector operators --------------------------------------------
+
+    constexpr Float3 operator+(const Float3& a, const Float3& b) { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
+    constexpr Float3 operator-(const Float3& a, const Float3& b) { return { a.x - b.x, a.y - b.y, a.z - b.z }; }
+    constexpr Float3 operator*(const Float3& a, float s)         { return { a.x * s, a.y * s, a.z * s }; }
+    constexpr Float3 operator*(float s, const Float3& a)         { return a * s; }
+    constexpr Float3 operator-(const Float3& a)                  { return { -a.x, -a.y, -a.z }; }
+
+    constexpr Float4 operator+(const Float4& a, const Float4& b) { return { a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w }; }
+    constexpr Float4 operator-(const Float4& a, const Float4& b) { return { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w }; }
+    constexpr Float4 operator*(const Float4& a, float s)         { return { a.x * s, a.y * s, a.z * s, a.w * s }; }
+
+    constexpr Float2 operator+(const Float2& a, const Float2& b) { return { a.x + b.x, a.y + b.y }; }
+    constexpr Float2 operator-(const Float2& a, const Float2& b) { return { a.x - b.x, a.y - b.y }; }
+    constexpr Float2 operator*(const Float2& a, float s)         { return { a.x * s, a.y * s }; }
+
+    // --- Vector functions --------------------------------------------
+
+    constexpr float Dot(const Float3& a, const Float3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+    constexpr float Dot(const Float4& a, const Float4& b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+
+    constexpr Float3 Cross(const Float3& a, const Float3& b)
+    {
+        return {
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x
+        };
+    }
+
+    inline float LengthSq(const Float3& v) { return Dot(v, v); }
+    inline float Length(const Float3& v) { return std::sqrt(Dot(v, v)); }
+
+    inline Float3 Normalize(const Float3& v)
+    {
+        const float len = Length(v);
+        return (len > kEpsilon) ? v * (1.f / len) : Float3{};
+    }
+
+    // --- Matrices ----------------------------------------------------
+
+    // 4x4, row-major. The union mirrors XMFLOAT4X4 so both m[r][c] and
+    // the _rc names work (same as the code this replaces).
+    struct Float4x4
+    {
+        union
+        {
+            float m[4][4];
+            struct
+            {
+                float _11, _12, _13, _14;
+                float _21, _22, _23, _24;
+                float _31, _32, _33, _34;
+                float _41, _42, _43, _44;
+            };
+        };
+
+        constexpr Float4x4()
+            : _11(1.f), _12(0.f), _13(0.f), _14(0.f)
+            , _21(0.f), _22(1.f), _23(0.f), _24(0.f)
+            , _31(0.f), _32(0.f), _33(1.f), _34(0.f)
+            , _41(0.f), _42(0.f), _43(0.f), _44(1.f)
+        {}
+
+        static constexpr Float4x4 Identity() { return Float4x4{}; }
+    };
+
+    // 3x4 (3 rows of 4) — used for normal matrices, where the 4th row is
+    // implicit. Matches XMFLOAT3X4's layout.
+    struct Float3x4
+    {
+        union
+        {
+            float m[3][4];
+            struct
+            {
+                float _11, _12, _13, _14;
+                float _21, _22, _23, _24;
+                float _31, _32, _33, _34;
+            };
+        };
+
+        constexpr Float3x4()
+            : _11(1.f), _12(0.f), _13(0.f), _14(0.f)
+            , _21(0.f), _22(1.f), _23(0.f), _24(0.f)
+            , _31(0.f), _32(0.f), _33(1.f), _34(0.f)
+        {}
+    };
+
+    inline Float4x4 Multiply(const Float4x4& a, const Float4x4& b)
+    {
+        Float4x4 result{};
+        for (int row{}; row < 4; ++row)
+        {
+            for (int col{}; col < 4; ++col)
+            {
+                result.m[row][col] =
+                    a.m[row][0] * b.m[0][col] +
+                    a.m[row][1] * b.m[1][col] +
+                    a.m[row][2] * b.m[2][col] +
+                    a.m[row][3] * b.m[3][col];
+            }
+        }
+        return result;
+    }
+
+    inline Float4x4 Transpose(const Float4x4& in)
+    {
+        Float4x4 result{};
+        for (int row{}; row < 4; ++row)
+        {
+            for (int col{}; col < 4; ++col) result.m[row][col] = in.m[col][row];
+        }
+        return result;
+    }
+
+    // Row-vector transform: v * M, with v.w = 1 (a position).
+    inline Float3 TransformPoint(const Float3& v, const Float4x4& mtx)
+    {
+        return {
+            v.x * mtx._11 + v.y * mtx._21 + v.z * mtx._31 + mtx._41,
+            v.x * mtx._12 + v.y * mtx._22 + v.z * mtx._32 + mtx._42,
+            v.x * mtx._13 + v.y * mtx._23 + v.z * mtx._33 + mtx._43
+        };
+    }
+
+    // --- Planes ------------------------------------------------------
+    // A plane is (a, b, c, d) with a*x + b*y + c*z + d = 0.
+
+    inline Float4 NormalizePlane(const Float4& plane)
+    {
+        const float len = std::sqrt(plane.x * plane.x + plane.y * plane.y + plane.z * plane.z);
+        return (len > kEpsilon) ? plane * (1.f / len) : Float4{};
+    }
+
+    // Signed distance from a point to a plane (XMPlaneDotCoord's job).
+    constexpr float PlaneDotCoord(const Float4& plane, const Float3& point)
+    {
+        return plane.x * point.x + plane.y * point.y + plane.z * point.z + plane.w;
+    }
+
+    // --- Scalar helpers ----------------------------------------------
+
     inline float Saturate(float v)
     {
         return std::clamp(v, 0.0f, 1.0f);
@@ -75,34 +272,31 @@ namespace NSMath
 
         return Saturate(value);
     }
-    static bool fLessThan(float lhs, float rhs, float epsilon = DirectX::g_XMEpsilon.f[0]) noexcept
+    inline bool fLessThan(float lhs, float rhs, float epsilon = kEpsilon) noexcept
     {
         return lhs - rhs < -epsilon;
     }
-    static bool fLessEqual(float lhs, float rhs, float epsilon = DirectX::g_XMEpsilon.f[0]) noexcept
+    inline bool fLessEqual(float lhs, float rhs, float epsilon = kEpsilon) noexcept
     {
         return lhs - rhs <= epsilon;
     }
-    static bool fGreaterThan(float lhs, float rhs, float epsilon = DirectX::g_XMEpsilon.f[0]) noexcept
+    inline bool fGreaterThan(float lhs, float rhs, float epsilon = kEpsilon) noexcept
     {
         return lhs - rhs > epsilon;
     }
-    static bool fGreaterEqual(float lhs, float rhs, float epsilon = DirectX::g_XMEpsilon.f[0]) noexcept
+    inline bool fGreaterEqual(float lhs, float rhs, float epsilon = kEpsilon) noexcept
     {
         return lhs - rhs >= -epsilon;
     }
-    static bool Float3Equals(const DirectX::XMFLOAT3& lhs, const DirectX::XMFLOAT3& rhs, float epsilon = DirectX::g_XMEpsilon.f[0])
+    inline bool Float3Equals(const Float3& lhs, const Float3& rhs, float epsilon = kEpsilon)
     {
-        using namespace DirectX;
-
-        const XMVECTOR vLHS = XMLoadFloat3(&lhs);
-        const XMVECTOR vRHS = XMLoadFloat3(&rhs);
-        const XMVECTOR vEps = XMVectorReplicate(epsilon);
-
-        const XMVECTOR diff = XMVectorAbs(XMVectorSubtract(vLHS, vRHS));
-
-        return XMVector3Less(diff, vEps);
+        return std::abs(lhs.x - rhs.x) < epsilon
+            and std::abs(lhs.y - rhs.y) < epsilon
+            and std::abs(lhs.z - rhs.z) < epsilon;
     }
+
+    // --- Shapes / culling --------------------------------------------
+
     struct SRectU32
     {
         uint32_t x{};
@@ -126,15 +320,15 @@ namespace NSMath
     };
     struct SBoundSphere
     {
-        DirectX::XMFLOAT3 position{};
+        Float3 position{};
         float radius{};
         uint32_t sliceCount{};
         uint32_t stackCount{};
     };
     struct SBoundAABB
     {
-        DirectX::XMFLOAT3 min{};
-        DirectX::XMFLOAT3 max{};
+        Float3 min{};
+        Float3 max{};
     };
 
     using BoundingBox = std::variant<SBoundSphere, SBoundAABB>;
@@ -148,25 +342,21 @@ namespace NSMath
     struct SFrustum
     {
         SFrustum() {};
-        SFrustum(DirectX::XMMATRIX viewProj);
+        explicit SFrustum(const Float4x4& viewProj);
 
-        DirectX::XMVECTOR planes[6]{};
+        Float4 planes[6]{};
 
         bool TestBounds(const BoundingBox& bb) const
         {
-            using namespace DirectX;
-
             bool collides = true;
 
             std::visit(overloaded
             {
                 [this, &collides](const SBoundSphere& sphere)
                 {
-                    for (DirectX::XMVECTOR plane : planes)
+                    for (const Float4& plane : planes)
                     {
-                        const float dist = XMVectorGetX(XMPlaneDotCoord(plane, XMLoadFloat3(&sphere.position)));
-
-                        if (dist < -sphere.radius)
+                        if (PlaneDotCoord(plane, sphere.position) < -sphere.radius)
                         {
                             collides = false;
                             break;
@@ -175,15 +365,18 @@ namespace NSMath
                 },
                 [this, &collides](const SBoundAABB& aabb)
                 {
-                    for (DirectX::XMVECTOR plane : planes)
+                    for (const Float4& plane : planes)
                     {
-                        XMVECTOR pVertex = XMVectorSelect(
-                            XMLoadFloat3(&aabb.min),
-                            XMLoadFloat3(&aabb.max),
-                            XMVectorGreaterOrEqual(plane, XMVectorZero())
-                        );
+                        // Pick the AABB corner furthest along the plane
+                        // normal ("positive vertex"); if even that is
+                        // behind the plane, the whole box is outside.
+                        const Float3 pVertex{
+                            (plane.x >= 0.f) ? aabb.max.x : aabb.min.x,
+                            (plane.y >= 0.f) ? aabb.max.y : aabb.min.y,
+                            (plane.z >= 0.f) ? aabb.max.z : aabb.min.z
+                        };
 
-                        if (XMVectorGetX(XMPlaneDotCoord(plane, pVertex)) < 0.f)
+                        if (PlaneDotCoord(plane, pVertex) < 0.f)
                         {
                             collides = false;
                             break;
