@@ -50,6 +50,18 @@ MOX_ARCH_MAP = {
     "aarch64_be":   { "conan_arch": "armv8",    "premake_arch": "ARM64",    "gcc_linux_prefix": "aarch64_be-linux-gnu",     "gcc_windows_prefix": "" },                     # Seen on linux
 }
 
+def Launcher():
+    """Absolute path to this repository's mox launcher script.
+
+    The name differs per OS (mox.bat on Windows, mox.sh elsewhere), and it
+    has to be absolute: the repository root is not on PATH, so a bare name
+    only ever resolved on Windows, where the current directory is searched
+    implicitly. Scripts that shell back out to mox must use this.
+    """
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(repo_root, "mox.bat" if os.name == "nt" else "mox.sh")
+
+
 def GetThisPlatformInfo():
     return GetPlatformInfo(platform.machine())
 

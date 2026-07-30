@@ -62,6 +62,11 @@ namespace NSInput
         int32_t y{};
         int32_t deltaX{};
         int32_t deltaY{};
+        // Scroll accumulated since the last Update(), in NOTCHES: 1.0 is
+        // one detent of a conventional mouse wheel, and fractional values
+        // are normal from touchpads and free-spinning wheels. Each backend
+        // normalises into this unit - Wayland reports ~10.0 per notch,
+        // Win32's WHEEL_DELTA is 120 - so callers never see the difference.
         float wheelDelta{};
         MouseButtonMask buttonsDown;
         EMouseMode mode{ EMouseMode::Absolute };

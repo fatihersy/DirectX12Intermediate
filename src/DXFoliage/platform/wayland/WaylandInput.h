@@ -6,13 +6,14 @@
 
 struct wl_display;
 struct wl_keyboard;
+struct wl_pointer;
 struct wl_registry;
 struct wl_seat;
 struct xkb_context;
 struct xkb_keymap;
 struct xkb_state;
 
-// Wayland keyboard input.
+// Wayland keyboard and pointer input.
 //
 // Wayland delivers input as events, but IInputSource is polled - so this
 // class accumulates event state as it arrives and hands out a snapshot on
@@ -74,13 +75,35 @@ namespace NSPlatformWayland
         void OnKey(uint32_t key, uint32_t state);
         void OnModifiers(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
 
+        void OnPointerEnter(double x, double y);
+        void OnPointerLeave();
+        void OnPointerMotion(double x, double y);
+        void OnPointerButton(uint32_t button, uint32_t state);
+        void OnPointerAxis(uint32_t axis, double value);
+
     private:
         void DestroyKeyboard();
+        void DestroyPointer();
 
         wl_display* m_display{ nullptr };    // owned by WaylandWindow
         wl_registry* m_registry{ nullptr };
         wl_seat* m_seat{ nullptr };
         wl_keyboard* m_keyboardDevice{ nullptr };
+        wl_pointer* m_pointerDevice{ nullptr };
+
+        // Deltas are derived by differencing successive positions, so the
+        // first motion after the cursor enters has nothing to difference
+        // against and must not produce a jump.
+        bool m_hasPointerPosition{ false };
+
+        // Accumulators, kept separate from the published MouseState.
+        // Events arrive many times per frame; the consumer reads once per
+        // frame AFTER calling Update(). If Update() cleared the published
+        // values directly, the caller would only ever see zero - so it
+        // publishes these, then clears them for the next frame.
+        int32_t m_pendingDeltaX{ 0 };
+        int32_t m_pendingDeltaY{ 0 };
+        float m_pendingWheel{ 0.0f };
 
         xkb_context* m_xkbContext{ nullptr };
         xkb_keymap* m_xkbKeymap{ nullptr };

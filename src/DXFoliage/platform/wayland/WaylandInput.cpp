@@ -6,6 +6,8 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include <linux/input-event-codes.h>
+
 #include <cstring>
 
 #include <sys/mman.h>
@@ -85,6 +87,27 @@ namespace NSPlatformWayland
                 default:                   return NSInput::EKey::Unknown;
             }
         }
+
+        // Wayland reports raw evdev button codes, not an enum of its own.
+        NSInput::EMouseButton ToMouseButton(uint32_t code, bool& recognised)
+        {
+            recognised = true;
+            switch (code)
+            {
+                case BTN_LEFT:   return NSInput::EMouseButton::Left;
+                case BTN_RIGHT:  return NSInput::EMouseButton::Right;
+                case BTN_MIDDLE: return NSInput::EMouseButton::Middle;
+                default:
+                    // Side buttons, tilt, and anything else this project
+                    // has no name for.
+                    recognised = false;
+                    return NSInput::EMouseButton::Left;
+            }
+        }
+
+        // Wayland scroll is ~10 units per wheel detent; IInputSource
+        // specifies notches. See MouseState::wheelDelta.
+        constexpr double kScrollUnitsPerNotch = 10.0;
     }
 
     // Wayland's C API takes listener structs of plain function pointers with
@@ -123,6 +146,35 @@ namespace NSPlatformWayland
             static_cast<WaylandInput*>(data)->OnModifiers(depressed, latched, locked, group);
         }
         static void RepeatInfo(void*, wl_keyboard*, int32_t, int32_t) {}
+
+        static void PointerEnter(void* data, wl_pointer*, uint32_t, wl_surface*,
+                                 wl_fixed_t x, wl_fixed_t y)
+        {
+            static_cast<WaylandInput*>(data)->OnPointerEnter(
+                wl_fixed_to_double(x), wl_fixed_to_double(y));
+        }
+        static void PointerLeave(void* data, wl_pointer*, uint32_t, wl_surface*)
+        {
+            static_cast<WaylandInput*>(data)->OnPointerLeave();
+        }
+        static void PointerMotion(void* data, wl_pointer*, uint32_t, wl_fixed_t x, wl_fixed_t y)
+        {
+            static_cast<WaylandInput*>(data)->OnPointerMotion(
+                wl_fixed_to_double(x), wl_fixed_to_double(y));
+        }
+        static void PointerButton(void* data, wl_pointer*, uint32_t, uint32_t,
+                                  uint32_t button, uint32_t state)
+        {
+            static_cast<WaylandInput*>(data)->OnPointerButton(button, state);
+        }
+        static void PointerAxis(void* data, wl_pointer*, uint32_t, uint32_t axis, wl_fixed_t value)
+        {
+            static_cast<WaylandInput*>(data)->OnPointerAxis(axis, wl_fixed_to_double(value));
+        }
+        static void PointerFrame(void*, wl_pointer*) {}
+        static void PointerAxisSource(void*, wl_pointer*, uint32_t) {}
+        static void PointerAxisStop(void*, wl_pointer*, uint32_t, uint32_t) {}
+        static void PointerAxisDiscrete(void*, wl_pointer*, uint32_t, int32_t) {}
     };
 
     namespace
@@ -135,6 +187,23 @@ namespace NSPlatformWayland
         const wl_seat_listener kSeatListener{
             WaylandInputCallbacks::SeatCapabilities,
             WaylandInputCallbacks::SeatName,
+        };
+
+        // Designated initialisers: wl_pointer_listener also declares
+        // axis_value120 (protocol v8) and axis_relative_direction (v9),
+        // which are left null deliberately. We bind version 5, so the
+        // compositor may never send them - and naming the fields keeps
+        // this correct if the struct grows again.
+        const wl_pointer_listener kPointerListener{
+            .enter = WaylandInputCallbacks::PointerEnter,
+            .leave = WaylandInputCallbacks::PointerLeave,
+            .motion = WaylandInputCallbacks::PointerMotion,
+            .button = WaylandInputCallbacks::PointerButton,
+            .axis = WaylandInputCallbacks::PointerAxis,
+            .frame = WaylandInputCallbacks::PointerFrame,
+            .axis_source = WaylandInputCallbacks::PointerAxisSource,
+            .axis_stop = WaylandInputCallbacks::PointerAxisStop,
+            .axis_discrete = WaylandInputCallbacks::PointerAxisDiscrete,
         };
 
         const wl_keyboard_listener kKeyboardListener{
@@ -191,6 +260,7 @@ namespace NSPlatformWayland
     WaylandInput::~WaylandInput()
     {
         DestroyKeyboard();
+        DestroyPointer();
         if (m_seat) wl_seat_release(m_seat);
         if (m_registry) wl_registry_destroy(m_registry);
         if (m_xkbContext) xkb_context_unref(m_xkbContext);
@@ -206,9 +276,22 @@ namespace NSPlatformWayland
         m_keyboard.down.reset();
     }
 
+    void WaylandInput::DestroyPointer()
+    {
+        if (m_pointerDevice) { wl_pointer_destroy(m_pointerDevice); m_pointerDevice = nullptr; }
+
+        // Same reasoning as the keyboard: a button held when the device
+        // vanished can never be released.
+        m_mouse.buttonsDown.reset();
+        m_hasPointerPosition = false;
+        m_pendingDeltaX = 0;
+        m_pendingDeltaY = 0;
+    }
+
     void WaylandInput::OnSeatCapabilities(uint32_t capabilities)
     {
         const bool hasKeyboard = (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) != 0;
+        const bool hasPointer = (capabilities & WL_SEAT_CAPABILITY_POINTER) != 0;
 
         if (hasKeyboard and not m_keyboardDevice)
         {
@@ -218,6 +301,17 @@ namespace NSPlatformWayland
         else if (not hasKeyboard and m_keyboardDevice)
         {
             DestroyKeyboard();
+        }
+
+        if (hasPointer and not m_pointerDevice)
+        {
+            m_pointerDevice = wl_seat_get_pointer(m_seat);
+            wl_pointer_add_listener(m_pointerDevice, &kPointerListener, this);
+            g_FDebug("Wayland: pointer attached");
+        }
+        else if (not hasPointer and m_pointerDevice)
+        {
+            DestroyPointer();
         }
     }
 
@@ -306,14 +400,84 @@ namespace NSPlatformWayland
         xkb_state_update_mask(m_xkbState, depressed, latched, locked, 0, 0, group);
     }
 
+    void WaylandInput::OnPointerEnter(double x, double y)
+    {
+        // Seed the position without producing a delta - the cursor did not
+        // travel from wherever it happened to be last time.
+        m_mouse.x = static_cast<int32_t>(x);
+        m_mouse.y = static_cast<int32_t>(y);
+        m_hasPointerPosition = true;
+    }
+
+    void WaylandInput::OnPointerLeave()
+    {
+        m_mouse.buttonsDown.reset();
+        m_hasPointerPosition = false;
+    }
+
+    void WaylandInput::OnPointerMotion(double x, double y)
+    {
+        const int32_t newX = static_cast<int32_t>(x);
+        const int32_t newY = static_cast<int32_t>(y);
+
+        if (m_hasPointerPosition)
+        {
+            // Derived from successive absolute positions, so it stops at
+            // the window edge. Genuine unbounded relative motion needs the
+            // relative-pointer and pointer-constraints protocols, which is
+            // why EMouseMode::Relative still reports nothing useful.
+            m_pendingDeltaX += newX - m_mouse.x;
+            m_pendingDeltaY += newY - m_mouse.y;
+        }
+
+        m_mouse.x = newX;
+        m_mouse.y = newY;
+        m_hasPointerPosition = true;
+
+        // than once a frame, so only a sample is printed.
+    }
+
+    void WaylandInput::OnPointerButton(uint32_t button, uint32_t state)
+    {
+        bool recognised = false;
+        const NSInput::EMouseButton mapped = ToMouseButton(button, recognised);
+        if (not recognised) return;
+
+        m_mouse.buttonsDown[static_cast<size_t>(mapped)] =
+            (state == WL_POINTER_BUTTON_STATE_PRESSED);
+
+    }
+
+    void WaylandInput::OnPointerAxis(uint32_t axis, double value)
+    {
+        // Horizontal scroll has nowhere to go in MouseState, so it is
+        // dropped rather than folded into the vertical value.
+        if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL) return;
+
+        // Wayland's axis is positive when scrolling DOWN; callers expect
+        // the wheel-forward convention where positive is up, matching
+        // Win32's WHEEL_DELTA sign.
+        m_pendingWheel -= static_cast<float>(value / kScrollUnitsPerNotch);
+
+    }
+
     void WaylandInput::Update()
     {
         // Nothing to poll: the events above already ran during
         // WaylandWindow::PumpEvents(), which shares this display
-        // connection. Per-frame values that accumulate rather than latch -
-        // mouse deltas and wheel - get reset here once the pointer lands.
-        m_mouse.deltaX = 0;
-        m_mouse.deltaY = 0;
-        m_mouse.wheelDelta = 0.0f;
+        // connection.
+        //
+        // What happens here is publishing one frame's worth of accumulated
+        // motion and scroll, then resetting the accumulators. Callers read
+        // GetMouseState() AFTER Update(), so clearing the published fields
+        // here instead would hand them zeros every frame. Position and
+        // buttons are levels rather than accumulations and simply persist.
+        m_mouse.deltaX = m_pendingDeltaX;
+        m_mouse.deltaY = m_pendingDeltaY;
+        m_mouse.wheelDelta = m_pendingWheel;
+
+        m_pendingDeltaX = 0;
+        m_pendingDeltaY = 0;
+        m_pendingWheel = 0.0f;
     }
 }

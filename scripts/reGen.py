@@ -1,13 +1,20 @@
-import os
+"""
+Regenerates the project files (clean project, then init).
+
+  ./mox.sh reGen    Regenerate Makefiles / solutions after editing build.lua
+
+Required after adding or removing source files, or editing any build.lua -
+`build` reuses the existing Makefile and will silently use stale settings.
+"""
+
 import subprocess
 import sys
 
-# The launcher script differs per OS: mox.bat on Windows, mox.sh elsewhere.
-# It also has to be addressed by path — the repository root isn't on PATH,
-# so a bare name only resolves on Windows, where the current directory is
-# searched implicitly.
-repoRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-mox = os.path.join(repoRoot, "mox.bat" if os.name == "nt" else "mox.sh")
+import mox
 
-subprocess.run((mox, "clean", "project"))
-subprocess.run((mox, "init", *sys.argv[1:]))
+launcher = mox.Launcher()
+
+if subprocess.run((launcher, "clean", "project")).returncode != 0:
+    sys.exit(1)
+
+sys.exit(subprocess.run((launcher, "init", *sys.argv[1:])).returncode)
