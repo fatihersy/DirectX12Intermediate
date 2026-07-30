@@ -150,6 +150,12 @@ def GenerateWaylandProtocols(targetOs):
         # takes a zwp_tablet_tool_v2, so its generated code references
         # that interface symbol and will not link without this.
         'unstable/tablet/tablet-unstable-v2.xml',
+        # Relative mouse. Two halves: constraints LOCK the pointer so it
+        # stops moving and cannot leave the window; relative-pointer then
+        # delivers motion deltas that are unbounded, because they are no
+        # longer differences between clamped positions.
+        'unstable/relative-pointer/relative-pointer-unstable-v1.xml',
+        'unstable/pointer-constraints/pointer-constraints-unstable-v1.xml',
     ]
 
     scanners = glob.glob('./dependencies/full_deploy/build/wayland/*/*/*/bin/wayland-scanner')

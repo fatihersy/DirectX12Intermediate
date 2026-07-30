@@ -259,6 +259,15 @@ namespace NSPlatformWayland
         xdg_toplevel_set_title(m_toplevel, title.c_str());
         xdg_toplevel_set_app_id(m_toplevel, "DXFoliage");
 
+        // A floor on the size the compositor may impose. Renderer::Resize
+        // already guards against a zero extent, but a 1x1 window still
+        // means a swapchain rebuild per pixel of drag - and some drivers
+        // dislike degenerate extents. No maximum: 0,0 means unbounded,
+        // which is what a 3D view wants.
+        // (Win32's equivalent is handling WM_GETMINMAXINFO, if this ever
+        // needs to be symmetric.)
+        xdg_toplevel_set_min_size(m_toplevel, 320, 240);
+
         // A surface only becomes real after a commit + the compositor's
         // configure round-trip.
         wl_surface_commit(m_surface);

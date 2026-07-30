@@ -7,6 +7,8 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include <cursor-shape-v1-client-protocol.h>
+#include <pointer-constraints-unstable-v1-client-protocol.h>
+#include <relative-pointer-unstable-v1-client-protocol.h>
 
 #include <linux/input-event-codes.h>
 
@@ -149,11 +151,25 @@ namespace NSPlatformWayland
         }
         static void RepeatInfo(void*, wl_keyboard*, int32_t, int32_t) {}
 
-        static void PointerEnter(void* data, wl_pointer*, uint32_t serial, wl_surface*,
+        static void PointerEnter(void* data, wl_pointer*, uint32_t serial, wl_surface* surface,
                                  wl_fixed_t x, wl_fixed_t y)
         {
-            static_cast<WaylandInput*>(data)->OnPointerEnter(
-                serial, wl_fixed_to_double(x), wl_fixed_to_double(y));
+            auto* self = static_cast<WaylandInput*>(data);
+            self->SetPointerSurface(surface);
+            self->OnPointerEnter(serial, wl_fixed_to_double(x), wl_fixed_to_double(y));
+        }
+
+        // dx/dy are accelerated (pointer-speed settings applied);
+        // dx_unaccel is raw device movement. Accelerated is what a cursor
+        // would have done, which is what feels right for camera look -
+        // raw is for things that must ignore desktop tuning.
+        static void RelativeMotion(void* data, zwp_relative_pointer_v1*,
+                                   uint32_t, uint32_t,
+                                   wl_fixed_t dx, wl_fixed_t dy,
+                                   wl_fixed_t, wl_fixed_t)
+        {
+            static_cast<WaylandInput*>(data)->OnRelativeMotion(
+                wl_fixed_to_double(dx), wl_fixed_to_double(dy));
         }
         static void PointerLeave(void* data, wl_pointer*, uint32_t, wl_surface*)
         {
@@ -208,6 +224,10 @@ namespace NSPlatformWayland
             .axis_discrete = WaylandInputCallbacks::PointerAxisDiscrete,
         };
 
+        const zwp_relative_pointer_v1_listener kRelativePointerListener{
+            WaylandInputCallbacks::RelativeMotion,
+        };
+
         const wl_keyboard_listener kKeyboardListener{
             WaylandInputCallbacks::Keymap,
             WaylandInputCallbacks::Enter,
@@ -224,6 +244,20 @@ namespace NSPlatformWayland
         {
             m_cursorShapeManager = static_cast<wp_cursor_shape_manager_v1*>(
                 wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1));
+            return;
+        }
+
+        if (std::strcmp(interface, zwp_relative_pointer_manager_v1_interface.name) == 0)
+        {
+            m_relativePointerManager = static_cast<zwp_relative_pointer_manager_v1*>(
+                wl_registry_bind(registry, name, &zwp_relative_pointer_manager_v1_interface, 1));
+            return;
+        }
+
+        if (std::strcmp(interface, zwp_pointer_constraints_v1_interface.name) == 0)
+        {
+            m_pointerConstraints = static_cast<zwp_pointer_constraints_v1*>(
+                wl_registry_bind(registry, name, &zwp_pointer_constraints_v1_interface, 1));
             return;
         }
 
@@ -270,6 +304,10 @@ namespace NSPlatformWayland
     {
         DestroyKeyboard();
         DestroyPointer();
+        if (m_lockedPointer) zwp_locked_pointer_v1_destroy(m_lockedPointer);
+        if (m_relativePointer) zwp_relative_pointer_v1_destroy(m_relativePointer);
+        if (m_pointerConstraints) zwp_pointer_constraints_v1_destroy(m_pointerConstraints);
+        if (m_relativePointerManager) zwp_relative_pointer_manager_v1_destroy(m_relativePointerManager);
         if (m_cursorShapeManager) wp_cursor_shape_manager_v1_destroy(m_cursorShapeManager);
         if (m_seat) wl_seat_release(m_seat);
         if (m_registry) wl_registry_destroy(m_registry);
@@ -295,8 +333,8 @@ namespace NSPlatformWayland
         // vanished can never be released.
         m_mouse.buttonsDown.reset();
         m_hasPointerPosition = false;
-        m_pendingDeltaX = 0;
-        m_pendingDeltaY = 0;
+        m_pendingDeltaX = 0.0;
+        m_pendingDeltaY = 0.0;
     }
 
     void WaylandInput::OnSeatCapabilities(uint32_t capabilities)
@@ -440,6 +478,62 @@ namespace NSPlatformWayland
 
         m_mouse.mode = mode;
         ApplyCursorVisibility();
+        ApplyPointerLock();
+    }
+
+    void WaylandInput::SetPointerSurface(wl_surface* surface)
+    {
+        m_pointerSurface = surface;
+    }
+
+    void WaylandInput::ApplyPointerLock()
+    {
+        const bool wantLock = (m_mouse.mode == NSInput::EMouseMode::Relative);
+
+        if (not wantLock)
+        {
+            if (m_lockedPointer) { zwp_locked_pointer_v1_destroy(m_lockedPointer); m_lockedPointer = nullptr; }
+            if (m_relativePointer) { zwp_relative_pointer_v1_destroy(m_relativePointer); m_relativePointer = nullptr; }
+            return;
+        }
+
+        if (not m_pointerDevice or not m_pointerSurface) return;
+        if (not m_relativePointerManager or not m_pointerConstraints)
+        {
+            // Falls back to position differencing in OnPointerMotion,
+            // which works until the cursor reaches a window edge.
+            return;
+        }
+
+        if (not m_relativePointer)
+        {
+            m_relativePointer = zwp_relative_pointer_manager_v1_get_relative_pointer(
+                m_relativePointerManager, m_pointerDevice);
+            zwp_relative_pointer_v1_add_listener(m_relativePointer, &kRelativePointerListener, this);
+        }
+
+        if (not m_lockedPointer)
+        {
+            // PERSISTENT rather than ONESHOT: the lock must survive the
+            // pointer losing and regaining focus, otherwise alt-tabbing
+            // back into the window silently drops camera control.
+            m_lockedPointer = zwp_pointer_constraints_v1_lock_pointer(
+                m_pointerConstraints, m_pointerSurface, m_pointerDevice, nullptr,
+                ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+        }
+    }
+
+    void WaylandInput::OnRelativeMotion(double dx, double dy)
+    {
+        // Only meaningful while locked; ignoring it otherwise stops these
+        // deltas double-counting with the position-differenced ones.
+        if (m_mouse.mode != NSInput::EMouseMode::Relative) return;
+
+        m_pendingDeltaX += dx;
+        m_pendingDeltaY += dy;
+
+
+
     }
 
     void WaylandInput::ApplyCursorVisibility()
@@ -476,7 +570,10 @@ namespace NSPlatformWayland
         const int32_t newX = static_cast<int32_t>(x);
         const int32_t newY = static_cast<int32_t>(y);
 
-        if (m_hasPointerPosition)
+        // While locked, the relative-pointer protocol is the delta source
+        // and the cursor does not move - differencing would contribute
+        // nothing but would double-count if it ever did.
+        if (m_hasPointerPosition and m_mouse.mode != NSInput::EMouseMode::Relative)
         {
             // Derived from successive absolute positions, so it stops at
             // the window edge. Genuine unbounded relative motion needs the
@@ -528,12 +625,14 @@ namespace NSPlatformWayland
         // GetMouseState() AFTER Update(), so clearing the published fields
         // here instead would hand them zeros every frame. Position and
         // buttons are levels rather than accumulations and simply persist.
-        m_mouse.deltaX = m_pendingDeltaX;
-        m_mouse.deltaY = m_pendingDeltaY;
+        m_mouse.deltaX = static_cast<int32_t>(m_pendingDeltaX);
+        m_mouse.deltaY = static_cast<int32_t>(m_pendingDeltaY);
         m_mouse.wheelDelta = m_pendingWheel;
 
-        m_pendingDeltaX = 0;
-        m_pendingDeltaY = 0;
+        // Carry the sub-pixel remainder rather than discarding it: six
+        // frames of 0.4 should become two pixels of movement, not zero.
+        m_pendingDeltaX -= m_mouse.deltaX;
+        m_pendingDeltaY -= m_mouse.deltaY;
         m_pendingWheel = 0.0f;
     }
 }

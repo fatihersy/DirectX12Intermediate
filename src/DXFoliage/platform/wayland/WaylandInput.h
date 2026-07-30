@@ -9,8 +9,13 @@ struct wl_keyboard;
 struct wl_pointer;
 struct wl_registry;
 struct wl_seat;
+struct wl_surface;
 struct wp_cursor_shape_device_v1;
 struct wp_cursor_shape_manager_v1;
+struct zwp_locked_pointer_v1;
+struct zwp_pointer_constraints_v1;
+struct zwp_relative_pointer_manager_v1;
+struct zwp_relative_pointer_v1;
 struct xkb_context;
 struct xkb_keymap;
 struct xkb_state;
@@ -44,6 +49,14 @@ struct xkb_state;
 // without wp_cursor_shape_v1 it means loading the user's cursor theme,
 // wrapping an image in a wl_buffer, and running a timer for animated
 // cursors. With it, the compositor is simply told a shape name.
+//
+// EMouseMode::Relative additionally LOCKS the pointer. That is two
+// protocols working together: pointer-constraints freezes the cursor in
+// place so it can never reach a screen edge, and relative-pointer then
+// delivers motion that is genuinely unbounded rather than the difference
+// between two clamped positions. Without the lock, deltas silently stop
+// at the window border - which is what the position-differencing fallback
+// in OnPointerMotion still does when these protocols are unavailable.
 //
 // Two Wayland behaviours have no Win32 equivalent and are easy to get wrong:
 //
@@ -94,6 +107,8 @@ namespace NSPlatformWayland
         void OnPointerMotion(double x, double y);
         void OnPointerButton(uint32_t button, uint32_t state);
         void OnPointerAxis(uint32_t axis, double value);
+        void OnRelativeMotion(double dx, double dy);
+        void SetPointerSurface(wl_surface* surface);
 
     private:
         void DestroyKeyboard();
@@ -102,6 +117,7 @@ namespace NSPlatformWayland
         // Must be re-applied on every pointer enter: the compositor resets
         // the cursor per surface-entry, so setting it once does not stick.
         void ApplyCursorVisibility();
+        void ApplyPointerLock();
 
         wl_display* m_display{ nullptr };    // owned by WaylandWindow
         wl_registry* m_registry{ nullptr };
@@ -119,6 +135,16 @@ namespace NSPlatformWayland
         // user interaction.
         uint32_t m_pointerEnterSerial{ 0 };
 
+        // Handed to us by wl_pointer.enter. Pointer constraints lock to a
+        // surface, and taking it from the enter event means input still
+        // never has to know the window object exists.
+        wl_surface* m_pointerSurface{ nullptr };
+
+        zwp_relative_pointer_manager_v1* m_relativePointerManager{ nullptr };
+        zwp_pointer_constraints_v1* m_pointerConstraints{ nullptr };
+        zwp_relative_pointer_v1* m_relativePointer{ nullptr };
+        zwp_locked_pointer_v1* m_lockedPointer{ nullptr };
+
         // Deltas are derived by differencing successive positions, so the
         // first motion after the cursor enters has nothing to difference
         // against and must not produce a jump.
@@ -129,8 +155,17 @@ namespace NSPlatformWayland
         // frame AFTER calling Update(). If Update() cleared the published
         // values directly, the caller would only ever see zero - so it
         // publishes these, then clears them for the next frame.
-        int32_t m_pendingDeltaX{ 0 };
-        int32_t m_pendingDeltaY{ 0 };
+        //
+        // DOUBLE, not int: relative-pointer deltas are wl_fixed_t and are
+        // routinely fractional (0.4, 1.1) because pointer acceleration is
+        // applied. Truncating each event would discard every slow movement
+        // entirely and shave the fraction off every fast one. Update()
+        // publishes the whole-pixel part and carries the remainder, so
+        // sub-pixel motion accumulates into real movement instead of
+        // vanishing. Win32 raw input is integral, which is why MouseState
+        // itself can stay int32_t.
+        double m_pendingDeltaX{ 0.0 };
+        double m_pendingDeltaY{ 0.0 };
         float m_pendingWheel{ 0.0f };
 
         xkb_context* m_xkbContext{ nullptr };
