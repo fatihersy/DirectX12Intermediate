@@ -44,6 +44,13 @@ namespace NSPlatformWin32
 
         NSPlatform::NativeWindowHandle GetNativeHandle() const override;
 
+        // Win32 client-area size is already in physical pixels, so these
+        // match until this window opts into per-monitor DPI awareness.
+        // When it does, Width()/Height() become GetDpiForWindow-scaled and
+        // only these two keep reporting raw pixels.
+        uint32_t FramebufferWidth() const override { return Width(); }
+        uint32_t FramebufferHeight() const override { return Height(); }
+
         uint32_t Width() const override { return m_width; }
         uint32_t Height() const override { return m_height; }
 

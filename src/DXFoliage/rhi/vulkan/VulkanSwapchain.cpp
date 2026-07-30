@@ -68,6 +68,7 @@ namespace NSRHIVulkan
             imageCount = caps.maxImageCount;
         }
 
+
         const VkSurfaceFormatKHR surfaceFormat = ChooseFormat(m_device.PhysicalDevice(), m_device.Surface());
         m_format = surfaceFormat.format;
 

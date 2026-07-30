@@ -5,6 +5,8 @@
 
 #include <wayland-client.h>
 #include <xdg-shell-client-protocol.h>
+#include <fractional-scale-v1-client-protocol.h>
+#include <viewporter-client-protocol.h>
 
 #include <cstring>
 
@@ -41,6 +43,21 @@ namespace NSPlatformWayland
         {
             static_cast<WaylandWindow*>(data)->OnToplevelClose();
         }
+        static void FractionalScale(void* data, wp_fractional_scale_v1*, uint32_t scale120)
+        {
+            static_cast<WaylandWindow*>(data)->OnFractionalScale(scale120);
+        }
+
+        // Integer fallback, used only when the compositor has no
+        // fractional-scale support.
+        static void SurfacePreferredBufferScale(void* data, wl_surface*, int32_t scale)
+        {
+            static_cast<WaylandWindow*>(data)->OnPreferredBufferScale(scale);
+        }
+        static void SurfaceEnter(void*, wl_surface*, wl_output*) {}
+        static void SurfaceLeave(void*, wl_surface*, wl_output*) {}
+        static void SurfacePreferredBufferTransform(void*, wl_surface*, uint32_t) {}
+
         static void ToplevelConfigureBounds(void*, xdg_toplevel*, int32_t, int32_t) {}
         static void ToplevelWmCapabilities(void*, xdg_toplevel*, wl_array*) {}
     };
@@ -54,9 +71,22 @@ namespace NSPlatformWayland
         const xdg_wm_base_listener kWmBaseListener{
             WaylandCallbacks::WmBasePing,
         };
-        const xdg_surface_listener kSurfaceListener{
+        const xdg_surface_listener kXdgSurfaceListener{
             WaylandCallbacks::SurfaceConfigure,
         };
+        const wp_fractional_scale_v1_listener kFractionalScaleListener{
+            WaylandCallbacks::FractionalScale,
+        };
+
+        // Designated initialisers: enter/leave are v1, the preferred_*
+        // events arrived in wl_compositor v6.
+        const wl_surface_listener kSurfaceListener{
+            .enter = WaylandCallbacks::SurfaceEnter,
+            .leave = WaylandCallbacks::SurfaceLeave,
+            .preferred_buffer_scale = WaylandCallbacks::SurfacePreferredBufferScale,
+            .preferred_buffer_transform = WaylandCallbacks::SurfacePreferredBufferTransform,
+        };
+
         const xdg_toplevel_listener kToplevelListener{
             WaylandCallbacks::ToplevelConfigure,
             WaylandCallbacks::ToplevelClose,
@@ -72,8 +102,20 @@ namespace NSPlatformWayland
         // against both older and newer compositors.
         if (std::strcmp(interface, wl_compositor_interface.name) == 0)
         {
-            const uint32_t bindVersion = version < 4u ? version : 4u;
+            // Version 6 for wl_surface.preferred_buffer_scale, the integer
+            // scaling fallback. Older compositors simply never send it.
+            const uint32_t bindVersion = version < 6u ? version : 6u;
             m_compositor = static_cast<wl_compositor*>(wl_registry_bind(registry, name, &wl_compositor_interface, bindVersion));
+        }
+        else if (std::strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0)
+        {
+            m_fractionalScaleManager = static_cast<wp_fractional_scale_manager_v1*>(
+                wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1));
+        }
+        else if (std::strcmp(interface, wp_viewporter_interface.name) == 0)
+        {
+            m_viewporter = static_cast<wp_viewporter*>(
+                wl_registry_bind(registry, name, &wp_viewporter_interface, 1));
         }
         else if (std::strcmp(interface, xdg_wm_base_interface.name) == 0)
         {
@@ -101,6 +143,57 @@ namespace NSPlatformWayland
 
         m_width = newWidth;
         m_height = newHeight;
+
+        // ApplyScale re-declares the viewport destination for the new
+        // logical size and fires the resize callback itself.
+        ApplyScale();
+    }
+
+    void WaylandWindow::OnFractionalScale(uint32_t scale120)
+    {
+        if (scale120 == 0 or scale120 == m_scale120) return;
+
+        m_scale120 = scale120;
+        g_FDebug("Wayland: display scale %u%%, framebuffer %ux%u",
+            (scale120 * 100u) / 120u, FramebufferWidth(), FramebufferHeight());
+        ApplyScale();
+    }
+
+    void WaylandWindow::OnPreferredBufferScale(int32_t scale)
+    {
+        // Ignored when fractional scaling is active: that path is exact,
+        // and this one would round 150% down to 100%.
+        if (m_fractionalScale or scale <= 0) return;
+
+        const uint32_t asScale120 = static_cast<uint32_t>(scale) * 120u;
+        if (asScale120 == m_scale120) return;
+
+        m_scale120 = asScale120;
+        ApplyScale();
+    }
+
+    void WaylandWindow::ApplyScale()
+    {
+        if (m_viewport)
+        {
+            // Fractional path: the buffer is physical-sized and the
+            // viewport declares the logical area it covers. buffer_scale
+            // stays 1 - the two mechanisms are alternatives, not layers.
+            wp_viewport_set_destination(m_viewport,
+                static_cast<int32_t>(m_width), static_cast<int32_t>(m_height));
+        }
+        else
+        {
+            // Integer path. Only whole numbers survive the division, which
+            // is precisely why the fractional protocol exists.
+            wl_surface_set_buffer_scale(m_surface, static_cast<int32_t>(m_scale120 / 120u));
+        }
+
+        wl_surface_commit(m_surface);
+
+        // The logical size did not change, but the pixel count did - so
+        // the swapchain has to be rebuilt. The resize callback carries
+        // logical units; the renderer reads FramebufferWidth/Height.
         if (m_resizeCallback) m_resizeCallback(m_width, m_height);
     }
 
@@ -136,8 +229,23 @@ namespace NSPlatformWayland
         }
 
         m_surface = wl_compositor_create_surface(m_compositor);
+        wl_surface_add_listener(m_surface, &kSurfaceListener, this);
+
+        // Both are per-surface objects, so they can only be made once the
+        // surface exists. Either may be absent - a compositor need not
+        // support fractional scaling, and then we fall back to the integer
+        // path or to no scaling at all.
+        if (m_fractionalScaleManager and m_viewporter)
+        {
+            m_fractionalScale = wp_fractional_scale_manager_v1_get_fractional_scale(
+                m_fractionalScaleManager, m_surface);
+            wp_fractional_scale_v1_add_listener(m_fractionalScale, &kFractionalScaleListener, this);
+
+            m_viewport = wp_viewporter_get_viewport(m_viewporter, m_surface);
+        }
+
         m_xdgSurface = xdg_wm_base_get_xdg_surface(m_wmBase, m_surface);
-        xdg_surface_add_listener(m_xdgSurface, &kSurfaceListener, this);
+        xdg_surface_add_listener(m_xdgSurface, &kXdgSurfaceListener, this);
 
         m_toplevel = xdg_surface_get_toplevel(m_xdgSurface);
         xdg_toplevel_add_listener(m_toplevel, &kToplevelListener, this);
@@ -170,6 +278,10 @@ namespace NSPlatformWayland
 
     void WaylandWindow::Destroy()
     {
+        if (m_viewport) { wp_viewport_destroy(m_viewport); m_viewport = nullptr; }
+        if (m_fractionalScale) { wp_fractional_scale_v1_destroy(m_fractionalScale); m_fractionalScale = nullptr; }
+        if (m_viewporter) { wp_viewporter_destroy(m_viewporter); m_viewporter = nullptr; }
+        if (m_fractionalScaleManager) { wp_fractional_scale_manager_v1_destroy(m_fractionalScaleManager); m_fractionalScaleManager = nullptr; }
         if (m_toplevel) { xdg_toplevel_destroy(m_toplevel); m_toplevel = nullptr; }
         if (m_xdgSurface) { xdg_surface_destroy(m_xdgSurface); m_xdgSurface = nullptr; }
         if (m_surface) { wl_surface_destroy(m_surface); m_surface = nullptr; }

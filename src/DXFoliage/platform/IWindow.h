@@ -59,8 +59,25 @@ namespace NSPlatform
 
         virtual NativeWindowHandle GetNativeHandle() const = 0;
 
+        // LOGICAL size, in the units the windowing system lays out in.
+        // Mouse coordinates and UI metrics are in these units. On a
+        // display scaled to 150% this stays 1280x720 while the window
+        // physically covers 1920x1080 pixels.
         virtual uint32_t Width() const = 0;
         virtual uint32_t Height() const = 0;
+
+        // PHYSICAL size, in real pixels. This is what a swapchain must be
+        // sized to; using the logical size instead makes the compositor
+        // upscale a too-small image, which looks like rendering at half
+        // resolution.
+        //
+        // Separate accessors rather than one "size" because the two units
+        // genuinely differ and conflating them is the classic HiDPI bug.
+        // GLFW draws the same distinction (window size vs framebuffer
+        // size) and says outright: do not pass the window size to
+        // pixel-based calls.
+        virtual uint32_t FramebufferWidth() const = 0;
+        virtual uint32_t FramebufferHeight() const = 0;
 
         virtual void ToggleFullscreen() = 0;
 

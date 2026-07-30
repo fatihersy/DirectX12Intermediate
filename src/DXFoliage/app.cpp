@@ -78,7 +78,7 @@ void app::LoadPipeline()
     // Everything GPU-side — which backend (--rhi=), the device, the
     // swapchain — is decided and owned below this call. app just says
     // "render into this window at this size".
-    if (not m_renderer.Initialize(*m_window, im_width, im_height))
+    if (not m_renderer.Initialize(*m_window, m_window->FramebufferWidth(), m_window->FramebufferHeight()))
     {
         // Nothing can be drawn without a renderer, so don't enter the
         // frame loop — Run() bails out on this flag.
@@ -119,7 +119,9 @@ void app::OnResize(uint32_t width, uint32_t height)
     // Previously the renderer was never told about resizes at all, so the
     // swapchain kept its original size. Now that Renderer::Resize goes
     // through the backend cleanly, wire it up.
-    m_renderer.Resize(width, height);
+    // Logical size came in from the compositor; the swapchain needs
+    // PHYSICAL pixels, which differ on a scaled display.
+    m_renderer.Resize(m_window->FramebufferWidth(), m_window->FramebufferHeight());
 };
 void app::ToggleFullScreen()
 {

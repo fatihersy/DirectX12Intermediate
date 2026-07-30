@@ -111,12 +111,29 @@ def GenerateWaylandProtocols(targetOs):
 
     Both inputs come from conan (see conanfile.py), so this must run after
     'conan install'.
+
+    Protocols are listed by their full path inside the wayland-protocols
+    tree, because that tree is not flat: a protocol lives under stable/,
+    unstable/, or staging/ depending on maturity, and the file name does
+    not follow from the directory name (viewporter/viewporter.xml but
+    xdg-decoration/xdg-decoration-unstable-v1.xml). Spelling the path out
+    is unambiguous - 'xdg-shell' alone would match both the stable
+    protocol and two obsolete unstable revisions - and documents which
+    stability tier we depend on.
     """
     if targetOs != 'linux':
         return
 
     outDir = './dependencies/wayland'
-    protocols = ['xdg-shell']
+    protocols = [
+        # Window management: title, close, resize, fullscreen.
+        'stable/xdg-shell/xdg-shell.xml',
+        # HiDPI. fractional-scale reports a non-integer scale; viewporter
+        # is how a buffer at that scale declares its logical size, since
+        # wl_surface.set_buffer_scale only accepts integers.
+        'staging/fractional-scale/fractional-scale-v1.xml',
+        'stable/viewporter/viewporter.xml',
+    ]
 
     scanners = glob.glob('./dependencies/full_deploy/build/wayland/*/*/*/bin/wayland-scanner')
     if not scanners:
@@ -125,12 +142,17 @@ def GenerateWaylandProtocols(targetOs):
     scanner = scanners[0]
 
     os.makedirs(outDir, exist_ok=True)
-    for name in protocols:
-        matches = glob.glob(f'./dependencies/full_deploy/host/wayland-protocols/*/res/wayland-protocols/stable/{name}/{name}.xml')
+    for relPath in protocols:
+        matches = glob.glob(f'./dependencies/full_deploy/host/wayland-protocols/*/res/wayland-protocols/{relPath}')
         if not matches:
-            print(f'Warning: {name}.xml not found in conan output; skipping')
+            print(f'Warning: {relPath} not found in conan output; skipping')
             continue
         xml = matches[0]
+
+        # Output names follow the XML file, not the directory, which is
+        # the convention every Wayland client uses for the generated
+        # headers (fractional-scale-v1-client-protocol.h).
+        name = os.path.splitext(os.path.basename(xml))[0]
 
         # private-code: the marshalling implementation, compiled into us.
         # client-header: the declarations our C++ includes.
