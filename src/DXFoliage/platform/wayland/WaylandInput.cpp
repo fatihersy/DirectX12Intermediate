@@ -6,6 +6,8 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include <cursor-shape-v1-client-protocol.h>
+
 #include <linux/input-event-codes.h>
 
 #include <cstring>
@@ -147,11 +149,11 @@ namespace NSPlatformWayland
         }
         static void RepeatInfo(void*, wl_keyboard*, int32_t, int32_t) {}
 
-        static void PointerEnter(void* data, wl_pointer*, uint32_t, wl_surface*,
+        static void PointerEnter(void* data, wl_pointer*, uint32_t serial, wl_surface*,
                                  wl_fixed_t x, wl_fixed_t y)
         {
             static_cast<WaylandInput*>(data)->OnPointerEnter(
-                wl_fixed_to_double(x), wl_fixed_to_double(y));
+                serial, wl_fixed_to_double(x), wl_fixed_to_double(y));
         }
         static void PointerLeave(void* data, wl_pointer*, uint32_t, wl_surface*)
         {
@@ -218,6 +220,13 @@ namespace NSPlatformWayland
 
     void WaylandInput::OnRegistryGlobal(wl_registry* registry, uint32_t name, const char* interface, uint32_t)
     {
+        if (std::strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0)
+        {
+            m_cursorShapeManager = static_cast<wp_cursor_shape_manager_v1*>(
+                wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1));
+            return;
+        }
+
         if (std::strcmp(interface, wl_seat_interface.name) != 0) return;
 
         // Only the first seat. Multi-seat systems exist and SDL/Godot
@@ -261,6 +270,7 @@ namespace NSPlatformWayland
     {
         DestroyKeyboard();
         DestroyPointer();
+        if (m_cursorShapeManager) wp_cursor_shape_manager_v1_destroy(m_cursorShapeManager);
         if (m_seat) wl_seat_release(m_seat);
         if (m_registry) wl_registry_destroy(m_registry);
         if (m_xkbContext) xkb_context_unref(m_xkbContext);
@@ -278,6 +288,7 @@ namespace NSPlatformWayland
 
     void WaylandInput::DestroyPointer()
     {
+        if (m_cursorShapeDevice) { wp_cursor_shape_device_v1_destroy(m_cursorShapeDevice); m_cursorShapeDevice = nullptr; }
         if (m_pointerDevice) { wl_pointer_destroy(m_pointerDevice); m_pointerDevice = nullptr; }
 
         // Same reasoning as the keyboard: a button held when the device
@@ -307,7 +318,15 @@ namespace NSPlatformWayland
         {
             m_pointerDevice = wl_seat_get_pointer(m_seat);
             wl_pointer_add_listener(m_pointerDevice, &kPointerListener, this);
-            g_FDebug("Wayland: pointer attached");
+
+            if (m_cursorShapeManager)
+            {
+                m_cursorShapeDevice = wp_cursor_shape_manager_v1_get_pointer(
+                    m_cursorShapeManager, m_pointerDevice);
+            }
+
+            g_FDebug("Wayland: pointer attached%s",
+                m_cursorShapeManager ? "" : " (no cursor-shape support; cursor hiding disabled)");
         }
         else if (not hasPointer and m_pointerDevice)
         {
@@ -400,13 +419,50 @@ namespace NSPlatformWayland
         xkb_state_update_mask(m_xkbState, depressed, latched, locked, 0, 0, group);
     }
 
-    void WaylandInput::OnPointerEnter(double x, double y)
+    void WaylandInput::OnPointerEnter(uint32_t serial, double x, double y)
     {
+        m_pointerEnterSerial = serial;
+
+        // The compositor resets the cursor whenever the pointer enters a
+        // surface, so a hidden cursor reappears unless re-hidden here.
+        ApplyCursorVisibility();
+
         // Seed the position without producing a delta - the cursor did not
         // travel from wherever it happened to be last time.
         m_mouse.x = static_cast<int32_t>(x);
         m_mouse.y = static_cast<int32_t>(y);
         m_hasPointerPosition = true;
+    }
+
+    void WaylandInput::SetMouseMode(NSInput::EMouseMode mode)
+    {
+        if (m_mouse.mode == mode) return;
+
+        m_mouse.mode = mode;
+        ApplyCursorVisibility();
+    }
+
+    void WaylandInput::ApplyCursorVisibility()
+    {
+        if (not m_pointerDevice or m_pointerEnterSerial == 0) return;
+
+        // Without cursor-shape there is no way to put the cursor back, so
+        // refuse to take it away. A visible cursor in relative mode is a
+        // cosmetic flaw; one that can never be restored is a broken app.
+        if (not m_cursorShapeDevice) return;
+
+        if (m_mouse.mode == NSInput::EMouseMode::Relative)
+        {
+            // Null surface = no cursor drawn over ours.
+            wl_pointer_set_cursor(m_pointerDevice, m_pointerEnterSerial, nullptr, 0, 0);
+        }
+        else
+        {
+            // The compositor already knows the user's theme; we name a
+            // shape rather than supplying pixels.
+            wp_cursor_shape_device_v1_set_shape(m_cursorShapeDevice, m_pointerEnterSerial,
+                WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
+        }
     }
 
     void WaylandInput::OnPointerLeave()

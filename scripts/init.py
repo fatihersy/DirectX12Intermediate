@@ -98,6 +98,14 @@ def DownloadPremake(version = '5.0.0-beta8'):
             os.chmod(premakeTargetExe, os.stat(premakeTargetExe).st_mode | stat.S_IEXEC)
 
 
+def VersionKey(path):
+    """Sort key that orders 1.45 above 1.9, which string sorting does not."""
+    match = re.search(r'/wayland-protocols/([^/]+)/res/', path)
+    if not match:
+        return ()
+    return tuple(int(part) if part.isdigit() else 0 for part in match.group(1).split('.'))
+
+
 def GenerateWaylandProtocols(targetOs):
     """Turn the Wayland protocol XML into C bindings.
 
@@ -133,6 +141,15 @@ def GenerateWaylandProtocols(targetOs):
         # wl_surface.set_buffer_scale only accepts integers.
         'staging/fractional-scale/fractional-scale-v1.xml',
         'stable/viewporter/viewporter.xml',
+        # Cursor by semantic name (default / text / *-resize), so hiding
+        # and restoring the pointer needs no cursor theme, no wl_buffer,
+        # and no animation timer. Wayland core has no "restore default
+        # cursor" request, which is what makes this worth a dependency.
+        'staging/cursor-shape/cursor-shape-v1.xml',
+        # Not used directly. cursor-shape's get_tablet_tool_v2 request
+        # takes a zwp_tablet_tool_v2, so its generated code references
+        # that interface symbol and will not link without this.
+        'unstable/tablet/tablet-unstable-v2.xml',
     ]
 
     scanners = glob.glob('./dependencies/full_deploy/build/wayland/*/*/*/bin/wayland-scanner')
@@ -147,7 +164,17 @@ def GenerateWaylandProtocols(targetOs):
         if not matches:
             print(f'Warning: {relPath} not found in conan output; skipping')
             continue
-        xml = matches[0]
+
+        # conan's full_deploy ACCUMULATES: bumping a version leaves the old
+        # tree in place beside the new one. Taking matches[0] then silently
+        # picks whichever sorts first - which is how a bump to
+        # wayland-protocols 1.45 kept generating from 1.31. Sort by parsed
+        # version so the newest always wins, and say so when there is more
+        # than one, because a stale deploy is worth knowing about.
+        if len(matches) > 1:
+            matches.sort(key=lambda m: VersionKey(m))
+            print(f'Note: {len(matches)} deployed versions of wayland-protocols; using the newest')
+        xml = matches[-1] if len(matches) > 1 else matches[0]
 
         # Output names follow the XML file, not the directory, which is
         # the convention every Wayland client uses for the generated

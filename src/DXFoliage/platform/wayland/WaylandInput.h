@@ -9,6 +9,8 @@ struct wl_keyboard;
 struct wl_pointer;
 struct wl_registry;
 struct wl_seat;
+struct wp_cursor_shape_device_v1;
+struct wp_cursor_shape_manager_v1;
 struct xkb_context;
 struct xkb_keymap;
 struct xkb_state;
@@ -30,6 +32,18 @@ struct xkb_state;
 // bind time because their window and input are one subsystem; keeping ours
 // separate means input must do its own registry pass. Both registries live
 // on the same wl_display, so PumpEvents() still dispatches everything.
+//
+// Cursor visibility is carried by EMouseMode rather than a separate
+// switch: Absolute shows the cursor, Relative hides it. That matches
+// DirectXTK's Mouse::MODE_RELATIVE, which the Win32 backend already
+// forwards to and which already hides the cursor there - so this is the
+// contract the interface inherited, not a new one.
+//
+// Hiding is wl_pointer.set_cursor with a null surface. RESTORING is the
+// awkward half: Wayland core has no "show the default cursor" request, so
+// without wp_cursor_shape_v1 it means loading the user's cursor theme,
+// wrapping an image in a wl_buffer, and running a timer for animated
+// cursors. With it, the compositor is simply told a shape name.
 //
 // Two Wayland behaviours have no Win32 equivalent and are easy to get wrong:
 //
@@ -63,7 +77,7 @@ namespace NSPlatformWayland
         NSInput::KeyboardState GetKeyboardState() const override { return m_keyboard; }
         NSInput::MouseState GetMouseState() const override { return m_mouse; }
 
-        void SetMouseMode(NSInput::EMouseMode mode) override { m_mouse.mode = mode; }
+        void SetMouseMode(NSInput::EMouseMode mode) override;
 
         // Compositor event handlers. Declared here so the C listener structs
         // in the .cpp can reach the instance state - same pattern as
@@ -75,7 +89,7 @@ namespace NSPlatformWayland
         void OnKey(uint32_t key, uint32_t state);
         void OnModifiers(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
 
-        void OnPointerEnter(double x, double y);
+        void OnPointerEnter(uint32_t serial, double x, double y);
         void OnPointerLeave();
         void OnPointerMotion(double x, double y);
         void OnPointerButton(uint32_t button, uint32_t state);
@@ -85,11 +99,25 @@ namespace NSPlatformWayland
         void DestroyKeyboard();
         void DestroyPointer();
 
+        // Must be re-applied on every pointer enter: the compositor resets
+        // the cursor per surface-entry, so setting it once does not stick.
+        void ApplyCursorVisibility();
+
         wl_display* m_display{ nullptr };    // owned by WaylandWindow
         wl_registry* m_registry{ nullptr };
         wl_seat* m_seat{ nullptr };
         wl_keyboard* m_keyboardDevice{ nullptr };
         wl_pointer* m_pointerDevice{ nullptr };
+
+        // Absent on compositors older than the cursor-shape protocol. We
+        // then decline to hide at all rather than hide with no way back.
+        wp_cursor_shape_manager_v1* m_cursorShapeManager{ nullptr };
+        wp_cursor_shape_device_v1* m_cursorShapeDevice{ nullptr };
+
+        // set_cursor must quote the serial of the enter event it responds
+        // to; the compositor uses it to confirm the request follows real
+        // user interaction.
+        uint32_t m_pointerEnterSerial{ 0 };
 
         // Deltas are derived by differencing successive positions, so the
         // first motion after the cursor enters has nothing to difference

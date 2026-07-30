@@ -30,7 +30,12 @@ class MoxPPRecipe(ConanFile):
             #   xkbcommon         -> translates the keymap the compositor sends
             #                        us into keysyms
             self.requires("wayland/1.24.0")
-            self.requires("wayland-protocols/1.31")
+            # 1.45 rather than 1.31 for cursor-shape-v1 (added in 1.32),
+            # which sets the pointer by semantic name and avoids loading
+            # cursor themes through libwayland-cursor - Wayland core has no
+            # "restore default cursor" request, so without it, un-hiding a
+            # cursor means building a wl_buffer from a theme image.
+            self.requires("wayland-protocols/1.45")
 
             # HLSL -> SPIR-V for the Vulkan backend. shaderc wraps glslang,
             # whose HLSL frontend handles this project's shaders (verified:
