@@ -43,6 +43,10 @@ namespace NSPlatformWayland
 
         NSPlatform::NativeWindowHandle GetNativeHandle() const override;
 
+        // WaylandInput opens its own wl_registry on this same connection;
+        // see its header for why the seat is not bound here.
+        wl_display* GetDisplay() const { return m_display; }
+
         uint32_t Width() const override { return m_width; }
         uint32_t Height() const override { return m_height; }
 

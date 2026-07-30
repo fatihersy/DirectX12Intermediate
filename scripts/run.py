@@ -81,10 +81,12 @@ if __name__ == "__main__":
         else:
             exepath = bindir
 
-        if sys.platform.startswith("linux"):
-            exepath = "../" + exepath
-        else:
-            exepath = "./" + exepath
+        # Absolute, because a relative program path means different things
+        # per platform: POSIX resolves it against the CHILD's cwd (execve
+        # runs after chdir), Windows against the PARENT's (CreateProcess).
+        # Since cwd below is ./app/{proj}, the relative form needs a
+        # different number of '..' on each - and got it wrong on Linux.
+        exepath = os.path.abspath(exepath)
 
         path = f"./app/{proj}"
         os.makedirs(path, exist_ok=True)

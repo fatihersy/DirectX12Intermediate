@@ -43,13 +43,19 @@ namespace NSRHIDX12
 
         NSRHI::IDevice& GetDevice() override { return *m_device; }
 
+        NSRHI::EFormat BackBufferFormat() const override
+        {
+            return m_swapchain ? m_swapchain->GetBackBuffer(0)->Format()
+                               : NSRHI::EFormat::Unknown;
+        }
+
         NSRHI::ICommandList& BeginFrame() override;
         void EndFrame() override;
         NSRHI::ITexture& CurrentBackBuffer() override;
+        void WaitForGPU() override;
 
     private:
         void MoveToNextFrame();
-        void WaitForGPU();
 
         static constexpr uint32_t kFramesInFlight = 2;
 

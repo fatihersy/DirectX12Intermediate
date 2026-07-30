@@ -30,10 +30,21 @@ namespace NSRHIVulkan
 
             NSRHI::IDevice& GetDevice() override { return *m_device; }
 
+            NSRHI::EFormat BackBufferFormat() const override
+            {
+                return m_swapchain ? m_swapchain->GetBackBufferTexture(0)->Format()
+                                   : NSRHI::EFormat::Unknown;
+            }
+
             NSRHI::ICommandList& BeginFrame() override;
             void EndFrame() override;
 
             NSRHI::ITexture& CurrentBackBuffer() override;
+
+            void WaitForGPU() override
+            {
+                if (m_device) vkDeviceWaitIdle(m_device->Device());
+            }
 
         private:
             struct FrameResources

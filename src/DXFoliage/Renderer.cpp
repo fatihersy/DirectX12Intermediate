@@ -60,7 +60,10 @@ void Renderer::CreateTriangleResources()
         },
         .vertexStrideBytes = m_vertexStride,
         .topology = NSRHI::EPrimitiveTopology::TriangleList,
-        .colorTargetFormats = { NSRHI::EFormat::R8G8B8A8_UNORM },
+        // Ask the backend rather than assuming: the swapchain picks
+        // whatever the surface supports (B8G8R8A8 on this compositor,
+        // R8G8B8A8 elsewhere) and a mismatch here is a validation error.
+        .colorTargetFormats = { m_backend->BackBufferFormat() },
         .depthTargetFormat = NSRHI::EFormat::Unknown,
         .depthTestEnabled = false,
         .depthWriteEnabled = false,
@@ -88,8 +91,14 @@ void Renderer::CreateTriangleResources()
 
 void Renderer::Shutdown()
 {
-    // Release front-end-owned GPU resources before the backend (and with
-    // it the device) goes away.
+    // Drain first: these resources may still be referenced by a command
+    // buffer the GPU has not finished, and destroying them under it is
+    // undefined behaviour. The backend's own Shutdown() waits too, but
+    // that runs after these resets - too late.
+    if (m_backend) m_backend->WaitForGPU();
+
+    // Then release front-end-owned GPU resources, before the backend (and
+    // with it the device) goes away.
     m_vertexBuffer.reset();
     m_pipeline.reset();
     m_pipelineLayout.reset();

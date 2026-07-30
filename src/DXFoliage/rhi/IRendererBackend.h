@@ -49,6 +49,18 @@ namespace NSRHI
         // --- Exposed resource factory ---
         virtual IDevice& GetDevice() = 0;
 
+        // The pixel format of the swapchain's backbuffers.
+        //
+        // The front-end needs this when it builds a pipeline, because
+        // Vulkan bakes attachment formats into VkPipeline and D3D12 puts
+        // them in the PSO desc - and that happens before any frame has
+        // begun, so it cannot come from CurrentBackBuffer(). The format is
+        // whatever the surface actually supports, which is NOT something
+        // the front-end can assume: it varies by driver and compositor,
+        // and hardcoding a guess produces a mismatch that only shows up as
+        // a validation error or swapped colour channels.
+        virtual EFormat BackBufferFormat() const = 0;
+
         // --- Frame boundary ---
         // BeginFrame acquires this frame's backbuffer, transitions it to a
         // render target, begins command recording, and returns the command
@@ -57,6 +69,19 @@ namespace NSRHI
         // frame fence stay backend-private; command *recording* is exposed.
         virtual ICommandList& BeginFrame() = 0;
         virtual void EndFrame() = 0;
+
+        // Blocks until the GPU has finished everything submitted so far.
+        //
+        // Needed because destroying a resource the GPU may still be reading
+        // is undefined behaviour on both APIs, and the front-end owns
+        // resources whose lifetime it controls - so only the front-end
+        // knows when it is about to release them. Both backends already had
+        // this internally (vkDeviceWaitIdle / a fence wait); it is exposed
+        // so Renderer::Shutdown can drain before releasing.
+        //
+        // Expensive by design: a full pipeline stall. Shutdown and resize
+        // only, never per frame.
+        virtual void WaitForGPU() = 0;
 
         // The current frame's backbuffer, as a render-target ITexture the
         // front-end passes to cmd.BeginRendering(). Valid between

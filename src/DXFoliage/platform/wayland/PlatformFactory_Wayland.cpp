@@ -23,6 +23,12 @@ namespace NSPlatform
             {
                 std::FILE* out = (level == ELogLevel::EERROR or level == ELogLevel::EFATAL) ? stderr : stdout;
                 std::fprintf(out, "%.*s\n", static_cast<int>(message.size()), message.data());
+
+                // stdout is block-buffered whenever it is not a terminal, so
+                // without this every log line is lost if the process is
+                // killed or crashes - exactly when the log matters most.
+                // stderr is unbuffered already; flushing it costs nothing.
+                std::fflush(out);
             };
         }
     }
@@ -37,6 +43,11 @@ namespace NSPlatform
             return PlatformHandles{};
         }
 
-        return PlatformHandles{ .window = std::move(window), .input = std::make_unique<NSPlatformWayland::WaylandInput>() };
+        // Input shares the window's display connection but binds its own
+        // wl_seat - see WaylandInput.h for why it cannot reuse one bound
+        // by the window.
+        auto input = std::make_unique<NSPlatformWayland::WaylandInput>(window->GetDisplay());
+
+        return PlatformHandles{ .window = std::move(window), .input = std::move(input) };
     }
 }
