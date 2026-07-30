@@ -47,12 +47,20 @@ def SaveConfig(config):
 
 
 def Git(*args, capture=True, check=False):
-    """Run git in the repository root. Returns a CompletedProcess."""
+    """Run git in the repository root. Returns a CompletedProcess.
+
+    GIT_TERMINAL_PROMPT=0 makes git fail immediately instead of asking for
+    a username/password on the terminal. A backup command that stops to ask
+    a question is a backup command that hangs forever when it is run
+    unattended, and HTTPS credential prompts are the usual cause.
+    """
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     return subprocess.run(
         ("git", "-C", RepoRoot(), *args),
         capture_output=capture,
         text=True,
         check=check,
+        env=env,
     )
 
 

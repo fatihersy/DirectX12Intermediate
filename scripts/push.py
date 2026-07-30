@@ -77,6 +77,15 @@ def PushOrigin(config, dry_run):
         return None
 
     if not PushRefs("origin", url):
+        if url.startswith("https://"):
+            # This command never prompts (see GIT_TERMINAL_PROMPT in
+            # moxbackup.Git), so credentials have to be established once
+            # outside it - plain git, which is allowed to ask.
+            print("  ! HTTPS auth failed, and this command cannot prompt for")
+            print("    credentials by design. Establish them once with plain git:")
+            print("      git push origin HEAD        (password = access token)")
+            print("    or switch the remote to SSH:")
+            print("      git remote set-url origin git@github.com:USER/REPO.git")
         return False
 
     mb.Ok(url)
