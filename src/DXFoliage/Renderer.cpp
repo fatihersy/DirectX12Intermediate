@@ -47,7 +47,12 @@ void Renderer::CreateTriangleResources()
     NSRHI::IDevice& device = m_backend->GetDevice();
 
     // Empty layout — these shaders bind no resources at all.
-    m_pipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{});
+        // Two 32-bit values: a float2 screen-space offset the vertex shader
+    // adds. Small enough to be a push constant on Vulkan and a root
+    // constant on DX12, which is what this layout describes.
+    m_pipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{
+        .num32BitRootConstants = 2
+    });
 
     m_vertexStride = sizeof(DemoVertex);
 
@@ -87,6 +92,23 @@ void Renderer::CreateTriangleResources()
     void* mapped = m_vertexBuffer->Map();
     std::memcpy(mapped, triangleVertices, sizeof(triangleVertices));
     m_vertexBuffer->Unmap();
+
+    // Indexed drawing, exercising SetIndexBuffer/DrawIndexed. For one
+    // triangle this is pure overhead - the point is that the mechanism is
+    // proven on known-good geometry before a cube depends on it. 16-bit
+    // because a cube needs 36 indices, nowhere near the 65535 limit.
+    const uint16_t triangleIndices[]{ 0, 1, 2 };
+    m_indexCount = static_cast<uint32_t>(std::size(triangleIndices));
+
+    m_indexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
+        .sizeBytes = sizeof(triangleIndices),
+        .usage = NSRHI::EBufferUsage::Index,
+        .cpuVisible = true
+    });
+
+    void* mappedIndices = m_indexBuffer->Map();
+    std::memcpy(mappedIndices, triangleIndices, sizeof(triangleIndices));
+    m_indexBuffer->Unmap();
 }
 
 void Renderer::Shutdown()
@@ -100,6 +122,7 @@ void Renderer::Shutdown()
     // Then release front-end-owned GPU resources, before the backend (and
     // with it the device) goes away.
     m_vertexBuffer.reset();
+    m_indexBuffer.reset();
     m_pipeline.reset();
     m_pipelineLayout.reset();
 
@@ -152,8 +175,14 @@ void Renderer::DrawScene(std::shared_ptr<NSScene::IScene>)
     if (not m_cmd) return;
 
     m_cmd->SetPipeline(m_pipeline.get());
+
+    // TEMP-PUSH: a constant, visible nudge to the right. If push constants
+    // are not reaching the shader the triangle stays centred.
+    const float offset[2]{ 0.4f, 0.0f };  // TEMP-PUSH
+    m_cmd->SetRootConstants(0, 2, offset);  // TEMP-PUSH
     m_cmd->SetVertexBuffer(m_vertexBuffer.get(), m_vertexStride);
-    m_cmd->Draw(3);
+    m_cmd->SetIndexBuffer(m_indexBuffer.get(), false);   // false = 16-bit
+    m_cmd->DrawIndexed(m_indexCount);
 }
 
 void Renderer::EndFrame()

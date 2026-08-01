@@ -46,7 +46,9 @@ private:
     std::unique_ptr<NSRHI::IPipelineLayout> m_pipelineLayout;
     std::unique_ptr<NSRHI::IPipeline> m_pipeline;
     std::unique_ptr<NSRHI::IBuffer> m_vertexBuffer;
+    std::unique_ptr<NSRHI::IBuffer> m_indexBuffer;
     uint32_t m_vertexStride{};
+    uint32_t m_indexCount{};
 
     uint32_t m_width{};
     uint32_t m_height{};

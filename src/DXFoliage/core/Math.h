@@ -165,6 +165,116 @@ namespace NSMath
         return result;
     }
 
+    // --- Matrix builders ---------------------------------------------
+    //
+    // ROW-VECTOR, LEFT-HANDED, matching DirectXMath's XMMatrix*LH family
+    // and therefore the conventions DXTerrain and DXMaterial already use.
+    // Two consequences worth stating, because getting either wrong
+    // produces geometry that is wrong in ways that look like other bugs:
+    //
+    //   Composition is left to right - Model * View * Projection - and a
+    //   point transforms as v * M (see TransformPoint).
+    //
+    //   These are uploaded to shaders WITHOUT transposing. HLSL packs
+    //   float4x4 column-major by default, so writing row-major data into
+    //   one transposes it on arrival, and the shader then compensates by
+    //   using mul(matrix, vector) rather than mul(vector, matrix). That
+    //   cancellation is why the existing projects never call
+    //   XMMatrixTranspose. Keep both halves or neither.
+    //
+    // Depth maps to 0..1, which is correct for D3D12 AND Vulkan (only
+    // OpenGL wants -1..1), so one projection serves both backends. The
+    // Y-flip Vulkan needs is handled by the negative-height viewport in
+    // VulkanCommandList::SetViewport, not here.
+
+    inline Float4x4 Translation(float x, float y, float z)
+    {
+        Float4x4 out{};
+        out._41 = x; out._42 = y; out._43 = z;
+        return out;
+    }
+
+    inline Float4x4 Scaling(float x, float y, float z)
+    {
+        Float4x4 out{};
+        out._11 = x; out._22 = y; out._33 = z;
+        return out;
+    }
+
+    inline Float4x4 RotationX(float radians)
+    {
+        const float c = std::cos(radians);
+        const float s = std::sin(radians);
+
+        Float4x4 out{};
+        out._22 = c;  out._23 = s;
+        out._32 = -s; out._33 = c;
+        return out;
+    }
+
+    inline Float4x4 RotationY(float radians)
+    {
+        const float c = std::cos(radians);
+        const float s = std::sin(radians);
+
+        Float4x4 out{};
+        out._11 = c; out._13 = -s;
+        out._31 = s; out._33 = c;
+        return out;
+    }
+
+    inline Float4x4 RotationZ(float radians)
+    {
+        const float c = std::cos(radians);
+        const float s = std::sin(radians);
+
+        Float4x4 out{};
+        out._11 = c;  out._12 = s;
+        out._21 = -s; out._22 = c;
+        return out;
+    }
+
+    // Camera transform: world space -> view space, looking from `eye`
+    // toward `at`. `up` need not be perpendicular to the view direction;
+    // it only has to be non-parallel, since the basis is re-orthogonalised.
+    inline Float4x4 LookAtLH(const Float3& eye, const Float3& at, const Float3& up)
+    {
+        const Float3 zaxis = Normalize(at - eye);
+        const Float3 xaxis = Normalize(Cross(up, zaxis));
+        const Float3 yaxis = Cross(zaxis, xaxis);
+
+        Float4x4 out{};
+        out._11 = xaxis.x; out._12 = yaxis.x; out._13 = zaxis.x;
+        out._21 = xaxis.y; out._22 = yaxis.y; out._23 = zaxis.y;
+        out._31 = xaxis.z; out._32 = yaxis.z; out._33 = zaxis.z;
+        // The translation row is the eye position expressed in the new
+        // basis, negated - rotating first and then translating.
+        out._41 = -Dot(xaxis, eye);
+        out._42 = -Dot(yaxis, eye);
+        out._43 = -Dot(zaxis, eye);
+        return out;
+    }
+
+    // Perspective projection from a vertical field of view.
+    //
+    // Note _34 = 1 and _44 = 0: that is what puts view-space z into the
+    // w component, so the perspective divide happens. A matrix that looks
+    // right but leaves _44 = 1 gives an orthographic projection.
+    inline Float4x4 PerspectiveFovLH(float fovYRadians, float aspect, float nearZ, float farZ)
+    {
+        const float yScale = 1.0f / std::tan(fovYRadians * 0.5f);
+        const float xScale = yScale / aspect;
+
+        Float4x4 out{};
+        out._11 = xScale;
+        out._22 = yScale;
+        out._33 = farZ / (farZ - nearZ);
+        out._34 = 1.0f;
+        out._43 = -nearZ * farZ / (farZ - nearZ);
+        out._44 = 0.0f;
+        return out;
+    }
+
     inline Float4x4 Transpose(const Float4x4& in)
     {
         Float4x4 result{};
