@@ -43,6 +43,21 @@ class MoxPPRecipe(ConanFile):
             # locations the pipeline expects). DXC stays the Windows/DXIL
             # path — same HLSL source, one frontend per backend.
             self.requires("shaderc/2025.3")
+
+            # Vulkan Memory Allocator. Vulkan makes the application own GPU
+            # memory: every resource otherwise needs create / query
+            # requirements / choose a memory type / allocate / bind, and each
+            # of those is somewhere to get alignment or memory-type flags
+            # wrong. VMA collapses it into one call and sub-allocates from a
+            # few large blocks instead of asking the driver per resource.
+            #
+            # Adopted for that reduced surface rather than for the allocation
+            # limit - this GPU reports maxMemoryAllocationCount = UINT32_MAX,
+            # so the spec's 4096 floor is a portability concern, not a live
+            # one. AMD ships d3d12-memory-allocator as a near-identical
+            # counterpart, so both backends can eventually share one
+            # allocation model.
+            self.requires("vulkan-memory-allocator/3.3.0")
             # with_x11=False: this is a Wayland-only target, and the X11
             # backend would drag in xorg/system — i.e. require the X11 dev
             # packages to be installed system-wide.

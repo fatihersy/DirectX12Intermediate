@@ -64,11 +64,6 @@ namespace NSRHIVulkan
             }
         }
 
-        bool IsDepthState(NSRHI::EResourceState state)
-        {
-            return state == NSRHI::EResourceState::DepthWrite
-                or state == NSRHI::EResourceState::DepthRead;
-        }
     }
 
     void VulkanCommandList::TransitionTexture(NSRHI::ITexture* texture, NSRHI::EResourceState before, NSRHI::EResourceState after)
@@ -89,9 +84,12 @@ namespace NSRHIVulkan
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = vkTexture->Image();
-        barrier.subresourceRange.aspectMask = (IsDepthState(before) or IsDepthState(after))
-            ? VK_IMAGE_ASPECT_DEPTH_BIT
-            : VK_IMAGE_ASPECT_COLOR_BIT;
+        // From the texture, not from the states being transitioned
+        // between. Inferring it happens to work for Present->RenderTarget
+        // but not for Undefined->DepthWrite, and a combined depth/stencil
+        // format needs BOTH aspects named or the stencil half is left
+        // behind in the wrong layout.
+        barrier.subresourceRange.aspectMask = vkTexture->Aspect();
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.layerCount = 1;
 

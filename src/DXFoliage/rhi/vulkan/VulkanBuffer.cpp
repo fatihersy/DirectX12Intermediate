@@ -26,43 +26,48 @@ namespace NSRHIVulkan
         info.size = desc.sizeBytes;
         info.usage = ToUsage(desc.usage);
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        VK_CHECK(vkCreateBuffer(device.Device(), &info, nullptr, &m_buffer));
 
-        VkMemoryRequirements reqs{};
-        vkGetBufferMemoryRequirements(device.Device(), m_buffer, &reqs);
+        // Describe the INTENT and let VMA choose the memory type, rather
+        // than naming heap properties and searching for a match by hand.
+        // AUTO inspects the usage flags above; HOST_ACCESS_SEQUENTIAL_WRITE
+        // additionally says "the CPU will write this, front to back, and
+        // never read it" - which is what an upload buffer does, and lets
+        // VMA prefer write-combined memory where that exists.
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        if (desc.cpuVisible)
+        {
+            allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+                            | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        }
 
-        // HOST_VISIBLE|HOST_COHERENT is the equivalent of D3D12's UPLOAD
-        // heap: mappable, and writes are visible to the GPU without an
-        // explicit flush. DEVICE_LOCAL matches the DEFAULT heap.
-        const VkMemoryPropertyFlags props = desc.cpuVisible
-            ? (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-            : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-        VkMemoryAllocateInfo alloc{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        alloc.allocationSize = reqs.size;
-        alloc.memoryTypeIndex = device.FindMemoryType(reqs.memoryTypeBits, props);
-        VK_CHECK(vkAllocateMemory(device.Device(), &alloc, nullptr, &m_memory));
-
-        VK_CHECK(vkBindBufferMemory(device.Device(), m_buffer, m_memory, 0));
+        // One call replaces vkCreateBuffer + vkGetBufferMemoryRequirements
+        // + memory-type search + vkAllocateMemory + vkBindBufferMemory.
+        VK_CHECK(vmaCreateBuffer(device.Allocator(), &info, &allocInfo,
+            &m_buffer, &m_allocation, &m_allocationInfo));
     }
 
     VulkanBuffer::~VulkanBuffer()
     {
-        if (m_buffer) vkDestroyBuffer(m_device.Device(), m_buffer, nullptr);
-        if (m_memory) vkFreeMemory(m_device.Device(), m_memory, nullptr);
+        // Frees the suballocation and destroys the buffer together; there
+        // is no separate vkFreeMemory to forget.
+        if (m_buffer) vmaDestroyBuffer(m_device.Allocator(), m_buffer, m_allocation);
     }
 
     void* VulkanBuffer::Map()
     {
         ASSERT(m_cpuVisible, "Buffer isn't CPU-visible");
 
-        void* data = nullptr;
-        VK_CHECK(vkMapMemory(m_device.Device(), m_memory, 0, m_size, 0, &data));
-        return data;
+        // MAPPED_BIT above means VMA already holds a persistent mapping,
+        // so this is a pointer read rather than a driver call. Mapping and
+        // unmapping per frame was never free.
+        return m_allocationInfo.pMappedData;
     }
 
     void VulkanBuffer::Unmap()
     {
-        vkUnmapMemory(m_device.Device(), m_memory);
+        // Nothing to do: the mapping is persistent for the buffer's
+        // lifetime. Kept so callers kept the symmetric pattern and so the
+        // DX12 backend, which does need it, can stay identical.
     }
 }

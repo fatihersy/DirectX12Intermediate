@@ -3,6 +3,7 @@
 
 #include "VulkanBuffer.h"
 #include "VulkanPipeline.h"
+#include "VulkanTexture.h"
 #include "VulkanPipelineLayout.h"
 
 #include <cstring>
@@ -67,11 +68,15 @@ namespace NSRHIVulkan
         if (not CreateInstance()) return;
         if (not CreateSurface(display, surface)) return;
         if (not PickPhysicalDevice()) return;
-        CreateLogicalDevice();
+        if (not CreateLogicalDevice()) return;
+        CreateAllocator();
     }
 
     VulkanDevice::~VulkanDevice()
     {
+        // Before the device: every allocation it holds belongs to that
+        // device, and vkDestroyDevice with live allocations is undefined.
+        if (m_allocator) vmaDestroyAllocator(m_allocator);
         if (m_device) vkDestroyDevice(m_device, nullptr);
         if (m_surface) vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
 
@@ -263,20 +268,23 @@ namespace NSRHIVulkan
         return true;
     }
 
-    uint32_t VulkanDevice::FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const
+    bool VulkanDevice::CreateAllocator()
     {
-        VkPhysicalDeviceMemoryProperties memProps{};
-        vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProps);
+        VmaAllocatorCreateInfo info{};
+        info.instance = m_instance;
+        info.physicalDevice = m_physicalDevice;
+        info.device = m_device;
+        // Must agree with the instance's apiVersion; VMA gates optional
+        // behaviour on it and assumes 1.0 otherwise.
+        info.vulkanApiVersion = VK_API_VERSION_1_3;
 
-        for (uint32_t i{}; i < memProps.memoryTypeCount; ++i)
+        const VkResult result = vmaCreateAllocator(&info, &m_allocator);
+        if (result != VK_SUCCESS)
         {
-            const bool typeAllowed = (typeBits & (1u << i)) != 0;
-            const bool hasProps = (memProps.memoryTypes[i].propertyFlags & properties) == properties;
-            if (typeAllowed and hasProps) return i;
+            g_FError("Vulkan: vmaCreateAllocator failed with %s", VkResultToString(result));
+            return false;
         }
-
-        g_FError("Vulkan: no memory type matching the requested properties");
-        return 0;
+        return true;
     }
 
     std::unique_ptr<NSRHI::IBuffer> VulkanDevice::CreateBuffer(const NSRHI::BufferDesc& desc)
@@ -284,13 +292,9 @@ namespace NSRHIVulkan
         return std::make_unique<VulkanBuffer>(*this, desc);
     }
 
-    std::unique_ptr<NSRHI::ITexture> VulkanDevice::CreateTexture(const NSRHI::TextureDesc&)
+    std::unique_ptr<NSRHI::ITexture> VulkanDevice::CreateTexture(const NSRHI::TextureDesc& desc)
     {
-        // Reserved for later, matching the DX12 backend: VulkanTexture
-        // currently only wraps swapchain images, which the swapchain
-        // creates itself. Sampled textures land with the model work.
-        ASSERT(false, "CreateTexture: sampled-texture creation not implemented yet");
-        return nullptr;
+        return std::make_unique<VulkanTexture>(*this, desc);
     }
 
     std::unique_ptr<NSRHI::IPipelineLayout> VulkanDevice::CreatePipelineLayout(const NSRHI::PipelineLayoutDesc& desc)

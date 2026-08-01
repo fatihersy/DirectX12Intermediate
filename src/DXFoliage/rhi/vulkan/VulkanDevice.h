@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VulkanCommon.h"
+#include "VulkanMemory.h"
 #include "rhi/IDevice.h"
 
 #include <cstdint>
@@ -46,17 +47,17 @@ namespace NSRHIVulkan
         uint32_t QueueFamilyIndex() const { return m_queueFamily; }
         VkSurfaceKHR Surface() const { return m_surface; }
 
-        // Picks a memory type satisfying both the resource's requirements
-        // and the desired properties — Vulkan has no equivalent of D3D12's
-        // fixed UPLOAD/DEFAULT heap types, so callers must resolve this
-        // per allocation.
-        uint32_t FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const;
+        // Every buffer and image allocates through this. Owned here
+        // because it needs the instance, physical device and device, and
+        // must outlive every resource created from it.
+        VmaAllocator Allocator() const { return m_allocator; }
 
     private:
         bool CreateInstance();
         bool CreateSurface(wl_display* display, wl_surface* surface);
         bool PickPhysicalDevice();
         bool CreateLogicalDevice();
+        bool CreateAllocator();
 
         VkInstance m_instance{ VK_NULL_HANDLE };
         VkDebugUtilsMessengerEXT m_debugMessenger{ VK_NULL_HANDLE };
@@ -64,6 +65,7 @@ namespace NSRHIVulkan
         VkPhysicalDevice m_physicalDevice{ VK_NULL_HANDLE };
         VkDevice m_device{ VK_NULL_HANDLE };
         VkQueue m_queue{ VK_NULL_HANDLE };
+        VmaAllocator m_allocator{ VK_NULL_HANDLE };
         uint32_t m_queueFamily{ UINT32_MAX };
         bool m_validationEnabled{ false };
     };

@@ -195,6 +195,32 @@ def GenerateWaylandProtocols(targetOs):
             print(f'Generated {dest}')
 
 
+def DropStalePrecompiledHeaders():
+    """Remove precompiled headers invalidated by regeneration.
+
+    D12F_VERSION embeds the build date, so regenerating on a later day
+    changes it - and clang refuses a .gch whose macros disagree with the
+    command line:
+
+        error: definition of macro 'D12F_VERSION' differs between the
+        precompiled file ... and the command line
+
+    Make cannot see that, because the .gch depends on stdafx.h and stdafx.h
+    has not changed. The build then fails on the FIRST source file, with a
+    message that says nothing about regeneration. Dropping them here means
+    the next build simply rebuilds the header.
+    """
+    stale = glob.glob('./build/*/obj/*/*.gch')
+    for path in stale:
+        try:
+            os.remove(path)
+        except OSError as e:
+            print(f'Warning: could not remove {path}: {e}')
+
+    if stale:
+        print(f'Dropped {len(stale)} precompiled header(s) invalidated by regeneration')
+
+
 def GetVcpkgDownloadUrl():
     """Get the download URL for vcpkg based on the platform"""
     # vcpkg is distributed as source, we clone/download and bootstrap
@@ -380,6 +406,7 @@ if __name__ == '__main__':
     # Generate Wayland protocol bindings (needs conan's wayland-scanner +
     # wayland-protocols, so it has to come after the conan step)
     GenerateWaylandProtocols(targetOs)
+    DropStalePrecompiledHeaders()
 
     # GCC Prefix (based on target OS, not host)
     gccPrefix = hostArch[f'gcc_{targetOs}_prefix'] + '-'
