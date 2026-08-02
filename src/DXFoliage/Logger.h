@@ -35,6 +35,19 @@ inline void g_FWarn(const std::string_view fmt)
     g_PlatformConsoleWrite(ELogLevel::EWARN, fmt);
 }
 
+// EINFO/ETRACE existed in the enum but had no helpers until the Vulkan
+// debug messenger started routing INFO and VERBOSE severities. Both
+// overloads for the same -Wformat-security reason as g_FWarn above.
+inline void g_FInfo(const std::string_view fmt)
+{
+    g_PlatformConsoleWrite(ELogLevel::EINFO, fmt);
+}
+
+inline void g_FTrace(const std::string_view fmt)
+{
+    g_PlatformConsoleWrite(ELogLevel::ETRACE, fmt);
+}
+
 template<typename... Args>
 inline void g_FDebug(const std::string_view fmt, Args&&... args)
 {
@@ -51,4 +64,16 @@ template<typename... Args>
 inline void g_FWarn(const std::string_view fmt, Args&&... args)
 {
     g_PlatformConsoleWrite(ELogLevel::EWARN, NSTool::format(fmt, std::forward<Args>(args)...));
+}
+
+template<typename... Args>
+inline void g_FInfo(const std::string_view fmt, Args&&... args)
+{
+    g_PlatformConsoleWrite(ELogLevel::EINFO, NSTool::format(fmt, std::forward<Args>(args)...));
+}
+
+template<typename... Args>
+inline void g_FTrace(const std::string_view fmt, Args&&... args)
+{
+    g_PlatformConsoleWrite(ELogLevel::ETRACE, NSTool::format(fmt, std::forward<Args>(args)...));
 }

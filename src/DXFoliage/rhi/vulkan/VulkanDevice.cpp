@@ -43,8 +43,13 @@ namespace NSRHIVulkan
             const VkDebugUtilsMessengerCallbackDataEXT* data,
             void*)
         {
+            // Ordered most severe first: the severity parameter is a single
+            // bit in practice, but testing high-to-low keeps this correct
+            // even if that ever stops being true.
             if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)        g_FError("%s", data->pMessage);
             else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) g_FWarn("%s", data->pMessage);
+            else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)    g_FInfo("%s", data->pMessage);
+            else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) g_FTrace("%s", data->pMessage);
             return VK_FALSE;
         }
 
@@ -133,7 +138,14 @@ namespace NSRHIVulkan
         if (m_validationEnabled)
         {
             VkDebugUtilsMessengerCreateInfoEXT dbg{ VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
-            dbg.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+            // All four severities. INFO and VERBOSE are noisy — the loader
+            // and layer narrate object creation at those levels — but
+            // subscribing to only WARNING/ERROR meant a clean log could not
+            // be distinguished from a messenger that was never wired up.
+            dbg.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
+                | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+                | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+                | VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
             dbg.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
                 | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
                 | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;

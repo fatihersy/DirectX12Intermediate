@@ -60,7 +60,24 @@ namespace NSRHIDX12
         }
 
         psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+
+        // D3D12_DEFAULT is already "no blending", so Opaque needs no edits.
+        // Only RenderTarget[0] is touched: NumRenderTargets never exceeds 1
+        // here or in DXTerrain, and IndependentBlendEnable stays FALSE, so
+        // slot 0 is the one that applies.
+        CD3DX12_BLEND_DESC blendDesc(D3D12_DEFAULT);
+        if (desc.blendMode == NSRHI::EBlendMode::AlphaBlend)
+        {
+            D3D12_RENDER_TARGET_BLEND_DESC& rt = blendDesc.RenderTarget[0];
+            rt.BlendEnable = TRUE;
+            rt.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+            rt.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+            rt.BlendOp = D3D12_BLEND_OP_ADD;
+            rt.SrcBlendAlpha = D3D12_BLEND_ONE;
+            rt.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+            rt.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        }
+        psoDesc.BlendState = blendDesc;
 
         CD3DX12_DEPTH_STENCIL_DESC depthDesc(D3D12_DEFAULT);
         depthDesc.DepthEnable = desc.depthTestEnabled;

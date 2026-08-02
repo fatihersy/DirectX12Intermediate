@@ -16,7 +16,7 @@
 //     matrix is World * View * Proj.
 //   - Layout is plain floats with no padding, so these are drop-in
 //     replacements inside constant-buffer structs (the 16-byte-alignment
-//     static_asserts in RendererTypes.h still hold).
+//     static_asserts here still hold).
 //
 // Scalar (non-SIMD) implementation on purpose: it's simple, portable and
 // correct. If profiling ever shows math is hot, the internals can move to

@@ -48,6 +48,7 @@ Makefile
 
 # Claude
 .claude/
+PLAN.md
 
 # Codex
 .codex/
@@ -57,3 +58,6 @@ Makefile
 
 # Backup destinations (machine-specific, per-machine paths)
 /mox.backup.json
+
+#ImGui
+imgui.ini

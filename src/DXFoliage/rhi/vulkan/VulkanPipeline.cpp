@@ -119,10 +119,20 @@ namespace NSRHIVulkan
         depthStencil.depthWriteEnable = desc.depthWriteEnabled;
         depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 
+        // Applied to every colour attachment. DXTerrain never exceeds one
+        // (NumRenderTargets is 0 or 1 at all 27 sites), so per-attachment
+        // blend modes would be untestable as well as unused.
+        const bool blend = (desc.blendMode == NSRHI::EBlendMode::AlphaBlend);
         std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(
             desc.colorTargetFormats.size(),
             VkPipelineColorBlendAttachmentState{
-                .blendEnable = VK_FALSE,
+                .blendEnable = blend ? VK_TRUE : VK_FALSE,
+                .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+                .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                .colorBlendOp = VK_BLEND_OP_ADD,
+                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                .alphaBlendOp = VK_BLEND_OP_ADD,
                 .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                                 | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
             });

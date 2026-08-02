@@ -17,8 +17,7 @@ namespace
 
     // Matches the pipeline's vertex attributes below: POSITION (3 floats)
     // at offset 0, COLOR (4 floats) at offset 12. Declared locally because
-    // it's temporary demo content — the equivalent in RendererTypes.h
-    // (NSDebug::Vertex) lives in a header that still carries DX12 types.
+    // it's temporary demo content, replaced when real meshes arrive.
     struct DemoVertex
     {
         float position[3];
@@ -47,6 +46,7 @@ bool Renderer::Initialize(NSPlatform::IWindow& window, uint32_t width, uint32_t 
 
     CreateFrameTargets();
     CreateTriangleResources();
+    CreateBlendProofResources();  // TEMP-BLEND
 
     return true;
 }
@@ -173,6 +173,87 @@ void Renderer::CreateTriangleResources()
     m_indexBuffer->Unmap();
 }
 
+// TEMP-BLEND: the observable control for EBlendMode. ImGui cannot render a
+// single widget without alpha blending, so this proves the state actually
+// reaches the GPU before anything depends on it - the whole of this
+// function goes when the ImGui pass lands.
+void Renderer::CreateBlendProofResources()
+{
+    NSRHI::IDevice& device = m_backend->GetDevice();
+
+    // Same shaders and layout as the cubes: the ONLY difference from
+    // m_pipeline is blendMode and the depth state. One variable per step -
+    // if the quad appears blended, blending is what changed.
+    //
+    // Depth test off so the quad always draws on top regardless of where
+    // the cubes are, and depth write off so it leaves the buffer alone.
+    // Transparent geometry that writes depth occludes whatever is drawn
+    // after it, which is a different bug entirely and not the one under
+    // test here.
+    m_blendPipeline = device.CreateGraphicsPipeline(NSRHI::GraphicsPipelineDesc{
+        .vertexShader = { L"vert.hlsl", L"mainVS", NSRHI::EShaderStage::Vertex },
+        .pixelShader = { L"pixel.hlsl", L"mainPS", NSRHI::EShaderStage::Pixel },
+        .vertexAttributes = {
+            { "POSITION", NSRHI::EFormat::R32G32B32_FLOAT, 0 },
+            { "COLOR", NSRHI::EFormat::R32G32B32A32_FLOAT, 12 }
+        },
+        .vertexStrideBytes = m_vertexStride,
+        .topology = NSRHI::EPrimitiveTopology::TriangleList,
+        .colorTargetFormats = { m_backend->BackBufferFormat() },
+        .depthTargetFormat = kDepthFormat,
+        .depthTestEnabled = false,
+        .depthWriteEnabled = false,
+        .blendMode = NSRHI::EBlendMode::AlphaBlend,
+        .layout = m_pipelineLayout.get()
+    });
+
+    // Coordinates are already clip space: DrawScene pushes an identity
+    // matrix for this draw, so no model/view/projection is involved and
+    // the quad cannot be mispositioned by a matrix bug. z = 0.5 is inside
+    // the 0..1 depth range, though nothing tests it here.
+    //
+    // Alpha 0.5 with a strong green: over a black clear it reads as dark
+    // green, and over a cube face it visibly tints rather than replaces.
+    const DemoVertex quadVertices[]{
+        { { -0.6f, -0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
+        { {  0.6f, -0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
+        { {  0.6f,  0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
+        { { -0.6f,  0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
+    };
+
+    m_quadVertexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
+        .sizeBytes = sizeof(quadVertices),
+        .usage = NSRHI::EBufferUsage::Vertex,
+        .cpuVisible = true
+    });
+    void* mappedQuad = m_quadVertexBuffer->Map();
+    std::memcpy(mappedQuad, quadVertices, sizeof(quadVertices));
+    m_quadVertexBuffer->Unmap();
+
+    // BOTH windings on purpose. Culling is on (VK_CULL_MODE_BACK_BIT /
+    // FRONT_FACE_CLOCKWISE) and this quad skips the projection entirely,
+    // so getting the winding backwards would make it vanish - which looks
+    // exactly like blending having done nothing. Two mirrored copies mean
+    // the quad is visible either way, and exactly one of each mirrored
+    // pair survives culling, so it is still drawn once and the 0.5 alpha
+    // is not applied twice. Removes culling as a variable from a test
+    // that is about blending.
+    const uint16_t quadIndices[]{
+        0, 3, 2,  0, 2, 1,   // one winding
+        0, 2, 3,  0, 1, 2,   // the mirror; the culled half of each pair
+    };
+    m_quadIndexCount = static_cast<uint32_t>(std::size(quadIndices));
+
+    m_quadIndexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
+        .sizeBytes = sizeof(quadIndices),
+        .usage = NSRHI::EBufferUsage::Index,
+        .cpuVisible = true
+    });
+    void* mappedQuadIndices = m_quadIndexBuffer->Map();
+    std::memcpy(mappedQuadIndices, quadIndices, sizeof(quadIndices));
+    m_quadIndexBuffer->Unmap();
+}
+
 void Renderer::Shutdown()
 {
     // Drain first: these resources may still be referenced by a command
@@ -185,9 +266,13 @@ void Renderer::Shutdown()
     // with it the device) goes away.
     m_vertexBuffer.reset();
     m_indexBuffer.reset();
+    m_quadVertexBuffer.reset();  // TEMP-BLEND
+    m_quadIndexBuffer.reset();  // TEMP-BLEND
     m_renderTarget.reset();
     m_depthBuffer.reset();
     m_pipeline.reset();
+    m_blendPipeline.reset();  // TEMP-BLEND
+    // Layout last: both pipelines were built against it.
     m_pipelineLayout.reset();
 
     if (m_backend)
@@ -308,6 +393,16 @@ void Renderer::DrawScene(std::shared_ptr<NSScene::IScene>)
     // last, and visibly overlaps the nearer cube.
     m_cmd->SetRootConstants(0, 16, &farCube);  // TEMP-MTX
     m_cmd->DrawIndexed(m_indexCount);  // TEMP-MTX
+
+    // TEMP-BLEND: drawn LAST and over the cubes, which are the known-good
+    // control. Identity transform - the quad's vertices are already clip
+    // space, so nothing here depends on the matrix path being right.
+    const NSMath::Float4x4 identity = NSMath::Float4x4::Identity();  // TEMP-BLEND
+    m_cmd->SetPipeline(m_blendPipeline.get());  // TEMP-BLEND
+    m_cmd->SetVertexBuffer(m_quadVertexBuffer.get(), m_vertexStride);  // TEMP-BLEND
+    m_cmd->SetIndexBuffer(m_quadIndexBuffer.get(), false);  // TEMP-BLEND
+    m_cmd->SetRootConstants(0, 16, &identity);  // TEMP-BLEND
+    m_cmd->DrawIndexed(m_quadIndexCount);  // TEMP-BLEND
 }
 
 void Renderer::EndFrame()

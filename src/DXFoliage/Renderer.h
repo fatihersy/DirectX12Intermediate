@@ -15,9 +15,10 @@ namespace NSScene { class IScene; }
 //
 // Engine-level render passes (shadow/gbuffer/post) belong here too when
 // they arrive: an ordered list this class iterates each frame, each pass
-// recording into the same ICommandList. (The IRenderPass scaffolding in
-// RendererTypes.h still carries DX12 types in its signatures, so it needs
-// its own neutralizing pass before it can be adopted here.)
+// recording into the same ICommandList. Deliberately NOT built yet -
+// there is one pass, and an abstraction designed over a single instance
+// is a guess. An earlier IRenderPass sketch lived in RendererTypes.h;
+// see git history before it was deleted.
 class Renderer
 {
 public:
@@ -34,6 +35,7 @@ public:
 
 private:
     void CreateTriangleResources();
+    void CreateBlendProofResources();  // TEMP-BLEND
     void CreateFrameTargets();
 
     std::unique_ptr<NSRHI::IRendererBackend> m_backend;
@@ -48,6 +50,16 @@ private:
     std::unique_ptr<NSRHI::IPipeline> m_pipeline;
     std::unique_ptr<NSRHI::IBuffer> m_vertexBuffer;
     std::unique_ptr<NSRHI::IBuffer> m_indexBuffer;
+
+    // TEMP-BLEND: proves EBlendMode::AlphaBlend reaches the GPU, ahead of
+    // ImGui depending on it. A half-transparent quad drawn over the cubes:
+    // if blending works the cubes show through, if it silently does
+    // nothing they are hidden behind a solid rectangle. Delete once ImGui
+    // renders - that becomes the real consumer.
+    std::unique_ptr<NSRHI::IPipeline> m_blendPipeline;
+    std::unique_ptr<NSRHI::IBuffer> m_quadVertexBuffer;
+    std::unique_ptr<NSRHI::IBuffer> m_quadIndexBuffer;
+    uint32_t m_quadIndexCount{};
 
     // Recreated on resize: both must match the backbuffer extent, and
     // unlike the swapchain images nothing else owns them. The scene is

@@ -40,6 +40,23 @@ namespace NSRHI
         LineList,
     };
 
+    // Deliberately a small enum rather than a full source/dest/op matrix.
+    // Every blending site that actually exists wants the same thing:
+    // DXTerrain enables blending in 2 of its 11 pipelines and both are
+    // straight alpha blending, and ImGui needs exactly this too. A general
+    // blend-factor struct here would be an interface designed against no
+    // caller — add a mode when something needs one.
+    //
+    // (DXTerrain's geometry pass differs in one detail: it uses a
+    // destination *alpha* factor of ZERO where this uses InvSrcAlpha. That
+    // only matters when the render target's alpha channel is later read,
+    // which nothing does yet. Revisit when the HDR/tonemap path lands.)
+    enum class EBlendMode : uint8_t
+    {
+        Opaque,
+        AlphaBlend,
+    };
+
     // One entry per vertex input, matching an HLSL semantic
     // (e.g. "POSITION", "COLOR") to where that data lives in the vertex
     // buffer. DXC assigns SPIR-V input locations in declaration order,
@@ -74,6 +91,8 @@ namespace NSRHI
 
         bool depthTestEnabled{ true };
         bool depthWriteEnabled{ true };
+
+        EBlendMode blendMode{ EBlendMode::Opaque };
 
         IPipelineLayout* layout{ nullptr };
     };
