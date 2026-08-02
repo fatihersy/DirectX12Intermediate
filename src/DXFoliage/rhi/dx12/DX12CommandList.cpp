@@ -22,12 +22,33 @@ namespace NSRHIDX12
                 case NSRHI::EResourceState::CopySource:      return D3D12_RESOURCE_STATE_COPY_SOURCE;
                 case NSRHI::EResourceState::CopyDestination: return D3D12_RESOURCE_STATE_COPY_DEST;
                 case NSRHI::EResourceState::ShaderResource:  return D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+                // KNOWN GAP - this mapping is wrong and will trip the
+                // debug layer. See TransitionTexture below.
                 case NSRHI::EResourceState::Undefined:       return D3D12_RESOURCE_STATE_COMMON;
                 default:                                     return D3D12_RESOURCE_STATE_COMMON;
             }
         }
     }
 
+    // KNOWN GAP, untested because this path has never been compiled.
+    //
+    // EResourceState::Undefined means "discard the contents" - see
+    // rhi/RHITypes.h. Vulkan expresses that directly as an oldLayout of
+    // VK_IMAGE_LAYOUT_UNDEFINED. D3D12's LEGACY resource barriers have no
+    // equivalent: the `before` state must match the resource's ACTUAL
+    // current state or the debug layer reports a mismatch.
+    //
+    // So the COMMON mapping above is wrong in a specific, reproducible
+    // way. Renderer::BeginFrame transitions the depth buffer from
+    // Undefined every frame; after the first, the resource is really in
+    // DEPTH_WRITE, and COMMON -> DEPTH_WRITE will error.
+    //
+    // The fix is Enhanced Barriers (ID3D12GraphicsCommandList7::Barrier),
+    // which added D3D12_BARRIER_LAYOUT_UNDEFINED plus explicit sync and
+    // access masks - deliberately modelled on Vulkan, so it maps onto this
+    // interface far better than legacy barriers do. This backend already
+    // requires ID3D12GraphicsCommandList10, so the API is available; it
+    // simply has not been rewritten. Do that before trusting this path.
     void DX12CommandList::TransitionTexture(NSRHI::ITexture* texture, NSRHI::EResourceState before, NSRHI::EResourceState after)
     {
         auto* dx = static_cast<DX12Texture*>(texture);

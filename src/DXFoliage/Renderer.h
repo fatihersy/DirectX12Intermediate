@@ -34,6 +34,7 @@ public:
 
 private:
     void CreateTriangleResources();
+    void CreateFrameTargets();
 
     std::unique_ptr<NSRHI::IRendererBackend> m_backend;
 
@@ -47,6 +48,13 @@ private:
     std::unique_ptr<NSRHI::IPipeline> m_pipeline;
     std::unique_ptr<NSRHI::IBuffer> m_vertexBuffer;
     std::unique_ptr<NSRHI::IBuffer> m_indexBuffer;
+
+    // Recreated on resize: both must match the backbuffer extent, and
+    // unlike the swapchain images nothing else owns them. The scene is
+    // rendered into m_renderTarget and the backend blits it across at
+    // EndFrame - the front-end never touches a swapchain image.
+    std::unique_ptr<NSRHI::ITexture> m_renderTarget;
+    std::unique_ptr<NSRHI::ITexture> m_depthBuffer;
     uint32_t m_vertexStride{};
     uint32_t m_indexCount{};
 

@@ -50,8 +50,7 @@ namespace NSRHIDX12
         }
 
         NSRHI::ICommandList& BeginFrame() override;
-        void EndFrame() override;
-        NSRHI::ITexture& CurrentBackBuffer() override;
+        void EndFrame(NSRHI::ITexture& finalImage) override;
         void WaitForGPU() override;
 
     private:
@@ -204,10 +203,6 @@ namespace NSRHIDX12
         m_swapchain->Resize(width, height);
     }
 
-    NSRHI::ITexture& DX12RendererBackend::CurrentBackBuffer()
-    {
-        return *m_swapchain->GetBackBufferTexture(m_currentFrameIndex);
-    }
 
     NSRHI::ICommandList& DX12RendererBackend::BeginFrame()
     {
@@ -231,7 +226,13 @@ namespace NSRHIDX12
         return m_cmdList;
     }
 
-    void DX12RendererBackend::EndFrame()
+    // UNTESTED, like the rest of this backend since the split.
+    // finalImage is blitted into the backbuffer here. D3D12's
+    // CopyResource requires identical dimensions and compatible formats
+    // and CANNOT rescale, unlike Vulkan's vkCmdBlitImage - so a
+    // render-resolution-scaled source will need a full-screen draw on this
+    // path rather than a copy. See task #29.
+    void DX12RendererBackend::EndFrame(NSRHI::ITexture& finalImage)
     {
         DX12Texture* backBuffer = m_swapchain->GetBackBufferTexture(m_currentFrameIndex);
 

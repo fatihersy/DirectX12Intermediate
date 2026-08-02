@@ -6,6 +6,7 @@
 #include "VulkanDevice.h"
 #include "VulkanSwapchain.h"
 #include "VulkanTexture.h"
+#include "VulkanTexture.h"
 
 #include <array>
 
@@ -37,9 +38,8 @@ namespace NSRHIVulkan
             }
 
             NSRHI::ICommandList& BeginFrame() override;
-            void EndFrame() override;
+            void EndFrame(NSRHI::ITexture& finalImage) override;
 
-            NSRHI::ITexture& CurrentBackBuffer() override;
 
             void WaitForGPU() override
             {
@@ -200,30 +200,49 @@ namespace NSRHIVulkan
 
             m_cmdList.SetCommandBuffer(frame.commandBuffer);
 
-            if (m_frameValid)
-            {
-                // Undefined rather than Present as the source state: the
-                // previous contents are cleared anyway, and declaring them
-                // undefined lets the driver skip preserving them.
-                m_cmdList.TransitionTexture(
-                    m_swapchain->GetBackBufferTexture(m_currentImage),
-                    NSRHI::EResourceState::Undefined,
-                    NSRHI::EResourceState::RenderTarget);
-            }
-
+            // The backbuffer is not transitioned here: nothing renders
+            // into it any more. EndFrame makes it a transfer destination
+            // for the blit instead.
             return m_cmdList;
         }
 
-        void VulkanRendererBackend::EndFrame()
+        void VulkanRendererBackend::EndFrame(NSRHI::ITexture& finalImage)
         {
             FrameResources& frame = m_frames[m_frameIndex];
 
             if (m_frameValid)
             {
-                m_cmdList.TransitionTexture(
-                    m_swapchain->GetBackBufferTexture(m_currentImage),
-                    NSRHI::EResourceState::RenderTarget,
-                    NSRHI::EResourceState::Present);
+                auto* source = static_cast<VulkanTexture*>(&finalImage);
+                VulkanTexture* backBuffer = m_swapchain->GetBackBufferTexture(m_currentImage);
+
+                // The front-end left its target as a colour attachment;
+                // both sides now become transfer participants.
+                m_cmdList.TransitionTexture(source,
+                    NSRHI::EResourceState::RenderTarget, NSRHI::EResourceState::CopySource);
+                // Undefined as the source state: whatever the presentation
+                // engine left in the backbuffer is about to be entirely
+                // overwritten.
+                m_cmdList.TransitionTexture(backBuffer,
+                    NSRHI::EResourceState::Undefined, NSRHI::EResourceState::CopyDestination);
+
+                // Blit rather than copy, because it filters: a source that
+                // does not match the backbuffer extent still works, which
+                // is what makes render-resolution scaling free later.
+                VkImageBlit region{};
+                region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                region.srcOffsets[1] = { static_cast<int32_t>(source->Width()),
+                                         static_cast<int32_t>(source->Height()), 1 };
+                region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                region.dstOffsets[1] = { static_cast<int32_t>(m_swapchain->Extent().width),
+                                         static_cast<int32_t>(m_swapchain->Extent().height), 1 };
+
+                vkCmdBlitImage(frame.commandBuffer,
+                    source->Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    backBuffer->Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    1, &region, VK_FILTER_LINEAR);
+
+                m_cmdList.TransitionTexture(backBuffer,
+                    NSRHI::EResourceState::CopyDestination, NSRHI::EResourceState::Present);
             }
 
             VK_CHECK(vkEndCommandBuffer(frame.commandBuffer));
@@ -261,14 +280,6 @@ namespace NSRHIVulkan
             m_frameValid = false;
         }
 
-        NSRHI::ITexture& VulkanRendererBackend::CurrentBackBuffer()
-        {
-            // On a failed acquire there's no current image, but the
-            // front-end will still ask for one. Image 0 is a valid texture
-            // to hand back — nothing recorded this frame gets submitted.
-            const uint32_t index = m_frameValid ? m_currentImage : 0;
-            return *m_swapchain->GetBackBufferTexture(index);
-        }
     }
 
     std::unique_ptr<NSRHI::IRendererBackend> CreateVulkanBackend()

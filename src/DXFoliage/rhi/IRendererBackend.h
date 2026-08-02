@@ -62,13 +62,27 @@ namespace NSRHI
         virtual EFormat BackBufferFormat() const = 0;
 
         // --- Frame boundary ---
-        // BeginFrame acquires this frame's backbuffer, transitions it to a
-        // render target, begins command recording, and returns the command
-        // list for the front-end to record draws into. EndFrame finishes
-        // recording, submits, and presents. Acquire/submit/present + the
-        // frame fence stay backend-private; command *recording* is exposed.
+        // BeginFrame acquires this frame's backbuffer, begins command
+        // recording, and returns the command list for the front-end to
+        // record draws into. EndFrame finishes recording, blits the image
+        // it is given into the backbuffer, submits, and presents.
+        // Acquire/submit/present and the frame fence stay backend-private;
+        // command *recording* is exposed.
         virtual ICommandList& BeginFrame() = 0;
-        virtual void EndFrame() = 0;
+
+        // `finalImage` is what ends up on screen. The backend blits it
+        // into the acquired backbuffer, then submits and presents.
+        //
+        // The front-end renders into its OWN targets and never touches a
+        // backbuffer, which is why there is no CurrentBackBuffer() here.
+        // That keeps ownership to a single rule - the front-end owns every
+        // texture it draws into; the swapchain images are the backend's
+        // and are never exposed - and it keeps depth attachments away from
+        // the swapchain entirely.
+        //
+        // Passing the image to EndFrame rather than setting it separately
+        // makes it impossible to end a frame without saying what to show.
+        virtual void EndFrame(ITexture& finalImage) = 0;
 
         // Blocks until the GPU has finished everything submitted so far.
         //
@@ -83,10 +97,5 @@ namespace NSRHI
         // only, never per frame.
         virtual void WaitForGPU() = 0;
 
-        // The current frame's backbuffer, as a render-target ITexture the
-        // front-end passes to cmd.BeginRendering(). Valid between
-        // BeginFrame() and EndFrame(); must be re-fetched each frame
-        // (the swapchain recreates its backbuffers on resize).
-        virtual ITexture& CurrentBackBuffer() = 0;
     };
 }

@@ -29,7 +29,12 @@ namespace NSRHIVulkan
             if (desc.isDepthStencil) return VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
             VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-            if (desc.isRenderTarget) usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            if (desc.isRenderTarget)
+            {
+                // TRANSFER_SRC too: a render target is a candidate for the
+                // final blit to the backbuffer.
+                usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            }
             return usage;
         }
     }

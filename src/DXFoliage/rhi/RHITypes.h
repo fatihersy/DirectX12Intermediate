@@ -26,8 +26,17 @@ namespace NSRHI
     // of a D3D12_RESOURCE_STATES transition / a Vulkan image layout +
     // pipeline barrier. Each backend maps these onto its own native
     // barrier mechanism internally.
+    // This enum is modelled on Vulkan image layouts, which is worth
+    // knowing because one member does not survive the trip to D3D12's
+    // LEGACY barriers - see the note on Undefined below and
+    // DX12CommandList::TransitionTexture.
     enum class EResourceState : uint8_t
     {
+        // NOT "the resource is in no particular state". It means "I do not
+        // care what is currently here - you may discard it", and is only
+        // ever valid as the BEFORE state of a transition. Used when the
+        // contents are about to be cleared anyway, which lets a driver skip
+        // preserving them.
         Undefined,
         RenderTarget,
         DepthWrite,

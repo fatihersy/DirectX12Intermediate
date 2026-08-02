@@ -79,7 +79,10 @@ namespace NSRHIVulkan
         info.imageColorSpace = surfaceFormat.colorSpace;
         info.imageExtent = m_extent;
         info.imageArrayLayers = 1;
-        info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        // TRANSFER_DST as well as COLOR_ATTACHMENT: nothing renders into
+        // the backbuffer directly any more. The front-end renders to its
+        // own target and the backend blits that here.
+        info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         // One queue family handles both graphics and present (VulkanDevice
         // only accepts a device where that's true), so no sharing needed.
         info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
