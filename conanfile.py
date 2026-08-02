@@ -37,12 +37,6 @@ class MoxPPRecipe(ConanFile):
             # cursor means building a wl_buffer from a theme image.
             self.requires("wayland-protocols/1.45")
 
-            # HLSL -> SPIR-V for the Vulkan backend. shaderc wraps glslang,
-            # whose HLSL frontend handles this project's shaders (verified:
-            # both compile and validate, with vertex inputs landing on the
-            # locations the pipeline expects). DXC stays the Windows/DXIL
-            # path — same HLSL source, one frontend per backend.
-            self.requires("shaderc/2025.3")
 
             # Vulkan Memory Allocator. Vulkan makes the application own GPU
             # memory: every resource otherwise needs create / query

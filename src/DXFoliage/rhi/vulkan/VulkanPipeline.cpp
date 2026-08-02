@@ -58,11 +58,12 @@ namespace NSRHIVulkan
         }
 
         // D3D12 matches vertex inputs by HLSL semantic name; Vulkan matches
-        // them by numeric location. glslang assigns locations to an HLSL
+        // them by numeric location. DXC assigns locations to an HLSL
         // entry point's inputs in declaration order, which is the same
         // order the neutral vertexAttributes list is written in, so the
         // index here IS the location. (Verified against the compiled
-        // SPIR-V: POSITION -> 0, COLOR -> 1.)
+        // SPIR-V: POSITION -> 0, COLOR -> 1 - and identically under the
+        // previous glslang frontend, so this survived the compiler swap.)
         std::vector<VkVertexInputAttributeDescription> attributes;
         attributes.reserve(desc.vertexAttributes.size());
         for (size_t i = 0; i < desc.vertexAttributes.size(); ++i)

@@ -109,14 +109,28 @@ if _OPTIONS["mox_target_os"] == "linux" then
 
     useConanPackage("wayland", true)
 
-    -- shaderc (HLSL -> SPIR-V) is a static library built on glslang and
-    -- SPIRV-Tools. Conan deploys those as separate packages, but linking
-    -- them individually invites duplicate-symbol trouble: libshaderc.a
-    -- and libshaderc_combined.a both define the shaderc API, and
-    -- libshaderc_combined.a already has glslang and SPIRV-Tools archived
-    -- into it. So link the combined library alone.
-    useConanPackage("shaderc", true)
-    links { "shaderc_combined" }
+    -- DXC (libdxcompiler.so) rather than shaderc/glslang. Same HLSL
+    -- frontend Windows already uses, which is the point: two frontends
+    -- accepting different subsets of one language means a shader can build
+    -- on one platform and fail on the other. glslang also stops around
+    -- SM6.0 - it rejects 16-bit types and templates that DXC accepts.
+    --
+    -- From vcpkg rather than conan, which has no DXC recipe. The port
+    -- declares (linux & x64) support and ships a prebuilt shared library.
+    local vcpkgRoot = path.getabsolute(_MAIN_SCRIPT_DIR .. "/../dependencies/vcpkg_installed/x64-linux")
+    if not os.isdir(vcpkgRoot) then
+        error("vcpkg x64-linux tree not found - run `mox init` first")
+    end
+    externalincludedirs { vcpkgRoot .. "/include/directx-dxc" }
+    libdirs { vcpkgRoot .. "/lib" }
+    links { "dxcompiler" }
+
+    -- libdxcompiler.so is loaded at runtime and is not on a system library
+    -- path, so the loader has to look beside the executable. premake
+    -- already emits -Wl,-rpath,'$ORIGIN' for this target, correctly
+    -- quoted; adding another unquoted one lets the shell expand $ORIGIN to
+    -- nothing, and -rpath then swallows the following -l flag as its
+    -- value. The postbuild step below puts the library there.
 
     links {
         "wayland-client",
@@ -136,6 +150,8 @@ if _OPTIONS["mox_target_os"] == "linux" then
     postbuildcommands {
         'mkdir -p "%{cfg.targetdir}/shaders"',
         'cp -r "%{prj.location}/shaders/." "%{cfg.targetdir}/shaders/"',
+        -- Ship the compiler beside the binary; see the $ORIGIN rpath above.
+        'cp -u "' .. vcpkgRoot .. '/lib/libdxcompiler.so" "%{cfg.targetdir}/"',
     }
 
     -- The generated protocol bindings are C, and can't consume the
