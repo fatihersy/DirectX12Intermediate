@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IBuffer.h"
+#include "IDescriptorHeap.h"
 #include "IPipeline.h"
 #include "IPipelineLayout.h"
 #include "ITexture.h"
@@ -31,5 +32,33 @@ namespace NSRHI
         virtual std::unique_ptr<ITexture> CreateTexture(const TextureDesc& desc) = 0;
         virtual std::unique_ptr<IPipelineLayout> CreatePipelineLayout(const PipelineLayoutDesc& desc) = 0;
         virtual std::unique_ptr<IPipeline> CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) = 0;
+
+        // Descriptor STORAGE. The front-end wraps the returned heap in
+        // whatever allocation policy it wants (NSDescriptor::StaticHeap,
+        // RingHeap) — those are index arithmetic and live above this line.
+        virtual std::unique_ptr<IDescriptorHeap> CreateDescriptorHeap(const DescriptorHeapDesc& desc) = 0;
+
+        // Descriptor WRITES live on the device, matching both APIs:
+        // D3D12 is device->CreateShaderResourceView(res, &desc, cpuHandle)
+        // and Vulkan is vkUpdateDescriptorSets(device, ...). The heap is
+        // the destination, never the actor.
+        //
+        // The heap is passed explicitly even though D3D12 would not need it
+        // (a CPU handle is an absolute address there). Vulkan does: an
+        // index alone does not name a VkDescriptorSet. The alternative — a
+        // device-side registry mapping heap ids back to heaps — buys
+        // nothing and adds a lifetime hazard.
+        //
+        // `where` must come from that heap's At/OffsetOf; the mismatch is
+        // caught by Validate rather than silently writing elsewhere.
+        //
+        // Whole-texture, default-format SRV only for now. Mip ranges, array
+        // slices, cube views and UAVs all want a TextureViewDesc parameter
+        // — DXTerrain builds TEXTURE2D/3D/CUBE SRVs and per-mip
+        // TEXTURE2D/2DARRAY UAVs — but nothing here has a caller for them
+        // yet, and guessing the shape without one is how the last three
+        // versions of this interface went wrong.
+        virtual void CreateShaderResourceView(IDescriptorHeap& heap, DescriptorOffset where,
+                                              ITexture* texture) = 0;
     };
 }

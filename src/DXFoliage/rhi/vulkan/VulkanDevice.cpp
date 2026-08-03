@@ -2,6 +2,7 @@
 #include "VulkanDevice.h"
 
 #include "VulkanBuffer.h"
+#include "VulkanDescriptorHeap.h"
 #include "VulkanPipeline.h"
 #include "VulkanTexture.h"
 #include "VulkanPipelineLayout.h"
@@ -259,6 +260,40 @@ namespace NSRHIVulkan
         features13.dynamicRendering = VK_TRUE;
         features13.synchronization2 = VK_TRUE;
 
+        // Descriptor indexing — the Vulkan half of the bindless model (see
+        // rhi/IDescriptorHeap.h). Core in 1.2, but like dynamic rendering
+        // every bit is off until asked for, and asking for the wrong subset
+        // fails at descriptor-set-layout creation rather than here, which
+        // is a confusing place to find out.
+        //
+        // Why each one:
+        //   runtimeDescriptorArray        - lets the shader declare
+        //                                   Texture2D g_textures[] with no
+        //                                   size, which is the whole point
+        //   ...PartiallyBound             - most slots in a big heap are
+        //                                   empty; without this, every
+        //                                   descriptor must be written
+        //                                   before the set can be bound
+        //   ...UpdateAfterBind            - textures get written into slots
+        //                                   while earlier frames are still
+        //                                   in flight using the same set
+        //   ...NonUniformIndexing         - the index comes from a push
+        //                                   constant, so it is uniform in
+        //                                   practice today, but stops being
+        //                                   so the moment a shader indexes
+        //                                   per-pixel (material IDs)
+        //   ...VariableDescriptorCount    - allocate the real capacity at
+        //                                   run time instead of baking a
+        //                                   maximum into the layout
+        VkPhysicalDeviceVulkan12Features features12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+        features12.descriptorIndexing = VK_TRUE;
+        features12.runtimeDescriptorArray = VK_TRUE;
+        features12.descriptorBindingPartiallyBound = VK_TRUE;
+        features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+        features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
+        features13.pNext = &features12;
+
         VkPhysicalDeviceFeatures2 features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
         features2.pNext = &features13;
 
@@ -311,7 +346,54 @@ namespace NSRHIVulkan
 
     std::unique_ptr<NSRHI::IPipelineLayout> VulkanDevice::CreatePipelineLayout(const NSRHI::PipelineLayoutDesc& desc)
     {
-        return std::make_unique<VulkanPipelineLayout>(m_device, desc);
+        // The set layout comes from whichever heap the caller named, so
+        // this class has no opinion about where descriptors live.
+        VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
+        if (desc.usesBindlessDescriptorTable)
+        {
+            ASSERT(desc.bindlessHeap != nullptr,
+                "usesBindlessDescriptorTable needs a bindlessHeap to take its set layout from");
+            setLayout = static_cast<VulkanDescriptorHeap*>(desc.bindlessHeap)->Layout();
+        }
+
+        return std::make_unique<VulkanPipelineLayout>(m_device, desc, setLayout);
+    }
+
+    std::unique_ptr<NSRHI::IDescriptorHeap> VulkanDevice::CreateDescriptorHeap(const NSRHI::DescriptorHeapDesc& desc)
+    {
+        return std::make_unique<VulkanDescriptorHeap>(*this, desc);
+    }
+
+    void VulkanDevice::CreateShaderResourceView(NSRHI::IDescriptorHeap& heap,
+                                                NSRHI::DescriptorOffset where,
+                                                NSRHI::ITexture* texture)
+    {
+        // Validate is the neutral replacement for IDescriptor's pointer
+        // comparison: it catches an offset built by a different heap, which
+        // would otherwise write a descriptor somewhere the caller never
+        // named and fail much later at draw time.
+        ASSERT(heap.Validate(where), "Descriptor offset does not belong to this heap");
+
+        auto* vkTexture = static_cast<VulkanTexture*>(texture);
+        if (not vkTexture) return;
+
+        auto& vkHeap = static_cast<VulkanDescriptorHeap&>(heap);
+
+        VkDescriptorImageInfo imageInfo{};
+        // No sampler: this binding is SAMPLED_IMAGE and the sampler is
+        // immutable at the other binding.
+        imageInfo.imageView = vkTexture->View();
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = vkHeap.Set();
+        write.dstBinding = 0;  // kBindingResources
+        write.dstArrayElement = where.index;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
     }
 
     std::unique_ptr<NSRHI::IPipeline> VulkanDevice::CreateGraphicsPipeline(const NSRHI::GraphicsPipelineDesc& desc)

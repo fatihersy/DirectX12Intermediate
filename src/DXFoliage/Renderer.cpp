@@ -23,6 +23,15 @@ namespace
         float position[3];
         float color[4];
     };
+
+    // Checker cube vertex: POSITION (3 floats) at 0, TEXCOORD (2 floats)
+    // at 12, matching checker.hlsl's input signature and the pipeline's
+    // vertex attributes.
+    struct CheckerVertex
+    {
+        float position[3];
+        float uv[2];
+    };
 }
 
 Renderer::Renderer() = default;
@@ -44,8 +53,26 @@ bool Renderer::Initialize(NSPlatform::IWindow& window, uint32_t width, uint32_t 
         return false;
     }
 
+    // THE descriptor heap, before anything that allocates a slot from it.
+    // Sizes are guesses with headroom, not measurements: 256 transient
+    // slots per frame covers ImGui's per-frame texture set several times
+    // over, 512 statics covers every texture DXTerrain binds. The driver
+    // limit here is ~1M, so generosity costs nothing but descriptors.
+    {
+        constexpr uint32_t kRingSlotsPerFrame = 256;
+        constexpr uint32_t kStaticSlots = 512;
+        const uint32_t frames = m_backend->FramesInFlight();
+
+        m_descriptorHeap = m_backend->GetDevice().CreateDescriptorHeap(NSRHI::DescriptorHeapDesc{
+            .type = NSRHI::EDescriptorHeapType::ShaderResource,
+            .capacity = kRingSlotsPerFrame * frames + kStaticSlots,
+        });
+        m_descriptors = NSDescriptor::RingHeap(
+            *m_descriptorHeap, kRingSlotsPerFrame, frames, kStaticSlots);
+    }
+
     CreateFrameTargets();
-    CreateTriangleResources();
+    CreateCheckerCubeResources();
     CreateBlendProofResources();  // TEMP-BLEND
 
     return true;
@@ -76,30 +103,80 @@ void Renderer::CreateFrameTargets()
     });
 }
 
-void Renderer::CreateTriangleResources()
+// The bindless texture path's first consumer, end to end: a 4x4x4 cube
+// whose checkerboard cell is exactly 1 world unit — the texture doubles
+// as a ruler, four cells per edge = four units. Everything the last
+// sessions built fires for the first time here: heap slot from
+// AllocateStatic, descriptor written by CreateShaderResourceView, index
+// pushed as a root constant, shader reads g_textures[index].
+void Renderer::CreateCheckerCubeResources()
 {
     NSRHI::IDevice& device = m_backend->GetDevice();
 
-    // Empty layout — these shaders bind no resources at all.
-        // Two 32-bit values: a float2 screen-space offset the vertex shader
-    // adds. Small enough to be a push constant on Vulkan and a root
-    // constant on DX12, which is what this layout describes.
-    m_pipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{
-        // A full float4x4: 16 values, 64 bytes. Vulkan only guarantees
-        // 128 bytes of push-constant space, so one matrix fits comfortably
-        // but a separate model/view/projection trio (192) would not - that
-        // will need a uniform buffer.
-        .num32BitRootConstants = 16
+    // -- Texture: 256x256, 4x4 cells of 64px each. Big cells rather than
+    // a 4x4-PIXEL texture because the sampler is linear: bilinear blends
+    // one texel wide, and at 4 pixels stretched over a whole face that
+    // "edge" would be a quarter of the face. At 64px cells it is ~1
+    // screen pixel — crisp squares, no point sampler needed.
+    constexpr uint32_t kTexSize = 256;
+    constexpr uint32_t kCellPx = kTexSize / 4;
+
+    m_checkerTexture = device.CreateTexture(NSRHI::TextureDesc{
+        .width = kTexSize,
+        .height = kTexSize,
+        .format = NSRHI::EFormat::R8G8B8A8_UNORM
     });
 
-    m_vertexStride = sizeof(DemoVertex);
+    m_checkerStaging = device.CreateBuffer(NSRHI::BufferDesc{
+        .sizeBytes = kTexSize * kTexSize * 4,
+        .usage = NSRHI::EBufferUsage::Upload,
+        .cpuVisible = true
+    });
+
+    auto* pixels = static_cast<uint8_t*>(m_checkerStaging->Map());
+    for (uint32_t y = 0; y < kTexSize; ++y)
+    {
+        for (uint32_t x = 0; x < kTexSize; ++x)
+        {
+            // Two greys, not black/white: pure black merges with the
+            // clear colour at glancing angles and hides the silhouette.
+            const bool light = ((x / kCellPx) + (y / kCellPx)) % 2 == 0;
+            uint8_t* p = pixels + (y * kTexSize + x) * 4;
+            p[0] = p[1] = p[2] = light ? 220 : 45;
+            p[3] = 255;
+        }
+    }
+    m_checkerStaging->Unmap();
+    // The copy itself is recorded in BeginFrame — uploads are command-list
+    // work and no command list exists during Initialize.
+    m_checkerUploadPending = true;
+
+    // A static slot: this texture lives as long as the renderer, exactly
+    // what the static region is for. Writing the descriptor while the
+    // image is still UNDEFINED is fine — a descriptor write touches the
+    // heap, not the image; the layout only has to be right when a draw
+    // actually samples it, and BeginFrame's barrier runs first.
+    m_checkerSlot = m_descriptors.AllocateStatic();
+    ASSERT(m_checkerSlot.IsValid(), "Descriptor heap static region exhausted at startup");
+    device.CreateShaderResourceView(
+        *m_descriptorHeap, m_descriptorHeap->At(m_checkerSlot.index), m_checkerTexture.get());
+
+    // 17 root constants: float4x4 (16) + the texture index (1). Still
+    // well inside Vulkan's guaranteed 128-byte push budget (68 bytes).
+    m_texPipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{
+        .num32BitRootConstants = 17,
+        .usesBindlessDescriptorTable = true,
+        .bindlessHeap = m_descriptorHeap.get()
+    });
+
+    m_vertexStride = sizeof(CheckerVertex);
 
     m_pipeline = device.CreateGraphicsPipeline(NSRHI::GraphicsPipelineDesc{
-        .vertexShader = { L"vert.hlsl", L"mainVS", NSRHI::EShaderStage::Vertex },
-        .pixelShader = { L"pixel.hlsl", L"mainPS", NSRHI::EShaderStage::Pixel },
+        .vertexShader = { L"checker.hlsl", L"mainVS", NSRHI::EShaderStage::Vertex },
+        .pixelShader = { L"checker.hlsl", L"mainPS", NSRHI::EShaderStage::Pixel },
         .vertexAttributes = {
             { "POSITION", NSRHI::EFormat::R32G32B32_FLOAT, 0 },
-            { "COLOR", NSRHI::EFormat::R32G32B32A32_FLOAT, 12 }
+            { "TEXCOORD", NSRHI::EFormat::R32G32_FLOAT, 12 }
         },
         .vertexStrideBytes = m_vertexStride,
         .topology = NSRHI::EPrimitiveTopology::TriangleList,
@@ -107,69 +184,81 @@ void Renderer::CreateTriangleResources()
         // whatever the surface supports (B8G8R8A8 on this compositor,
         // R8G8B8A8 elsewhere) and a mismatch here is a validation error.
         .colorTargetFormats = { m_backend->BackBufferFormat() },
-        // Must match the depth texture's format: Vulkan bakes attachment
-        // formats into the pipeline, so a mismatch is a validation error
-        // rather than a silent artefact.
         .depthTargetFormat = kDepthFormat,
         .depthTestEnabled = true,
         .depthWriteEnabled = true,
-        .layout = m_pipelineLayout.get()
+        .layout = m_texPipelineLayout.get()
     });
 
-    // A unit cube centred on the origin. Eight corners, each a distinct
-    // colour so faces are told apart at a glance - which is what makes a
-    // missing depth test visible rather than merely suspected.
-    //
-    // World-space units, with no aspect correction baked in: that belongs
-    // in the projection matrix, and applying it here too would squash the
-    // geometry horizontally.
-    const DemoVertex triangleVertices[]{
-        { { -0.5f, -0.5f, -0.5f }, { 0.f, 0.f, 0.f, 1.f } },  // 0
-        { {  0.5f, -0.5f, -0.5f }, { 1.f, 0.f, 0.f, 1.f } },  // 1
-        { {  0.5f,  0.5f, -0.5f }, { 1.f, 1.f, 0.f, 1.f } },  // 2
-        { { -0.5f,  0.5f, -0.5f }, { 0.f, 1.f, 0.f, 1.f } },  // 3
-        { { -0.5f, -0.5f,  0.5f }, { 0.f, 0.f, 1.f, 1.f } },  // 4
-        { {  0.5f, -0.5f,  0.5f }, { 1.f, 0.f, 1.f, 1.f } },  // 5
-        { {  0.5f,  0.5f,  0.5f }, { 1.f, 1.f, 1.f, 1.f } },  // 6
-        { { -0.5f,  0.5f,  0.5f }, { 0.f, 1.f, 1.f, 1.f } },  // 7
+    // 24 vertices, not 8: shared corners cannot carry per-face UVs, and
+    // every face wants the full 0..1 checker. Positions are ±2 — the
+    // 4-unit cube this function exists to prove. Each face's corner
+    // order and both triangles are lifted verbatim from the proven
+    // shared-corner cube (see git history), so the winding survives:
+    // clockwise from outside, matching FRONT_FACE_CLOCKWISE + back cull.
+    const CheckerVertex cubeVertices[]{
+        // back (-Z)
+        { { -2.f, -2.f, -2.f }, { 0.f, 0.f } },
+        { { -2.f,  2.f, -2.f }, { 0.f, 1.f } },
+        { {  2.f,  2.f, -2.f }, { 1.f, 1.f } },
+        { {  2.f, -2.f, -2.f }, { 1.f, 0.f } },
+        // front (+Z)
+        { { -2.f, -2.f,  2.f }, { 0.f, 0.f } },
+        { {  2.f, -2.f,  2.f }, { 1.f, 0.f } },
+        { {  2.f,  2.f,  2.f }, { 1.f, 1.f } },
+        { { -2.f,  2.f,  2.f }, { 0.f, 1.f } },
+        // left (-X)
+        { { -2.f, -2.f, -2.f }, { 0.f, 0.f } },
+        { { -2.f, -2.f,  2.f }, { 1.f, 0.f } },
+        { { -2.f,  2.f,  2.f }, { 1.f, 1.f } },
+        { { -2.f,  2.f, -2.f }, { 0.f, 1.f } },
+        // right (+X)
+        { {  2.f, -2.f, -2.f }, { 0.f, 0.f } },
+        { {  2.f,  2.f, -2.f }, { 0.f, 1.f } },
+        { {  2.f,  2.f,  2.f }, { 1.f, 1.f } },
+        { {  2.f, -2.f,  2.f }, { 1.f, 0.f } },
+        // top (+Y)
+        { { -2.f,  2.f, -2.f }, { 0.f, 0.f } },
+        { { -2.f,  2.f,  2.f }, { 0.f, 1.f } },
+        { {  2.f,  2.f,  2.f }, { 1.f, 1.f } },
+        { {  2.f,  2.f, -2.f }, { 1.f, 0.f } },
+        // bottom (-Y)
+        { { -2.f, -2.f, -2.f }, { 0.f, 0.f } },
+        { {  2.f, -2.f, -2.f }, { 1.f, 0.f } },
+        { {  2.f, -2.f,  2.f }, { 1.f, 1.f } },
+        { { -2.f, -2.f,  2.f }, { 0.f, 1.f } },
     };
 
     m_vertexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
-        .sizeBytes = sizeof(triangleVertices),
+        .sizeBytes = sizeof(cubeVertices),
         .usage = NSRHI::EBufferUsage::Vertex,
         .cpuVisible = true
     });
 
     void* mapped = m_vertexBuffer->Map();
-    std::memcpy(mapped, triangleVertices, sizeof(triangleVertices));
+    std::memcpy(mapped, cubeVertices, sizeof(cubeVertices));
     m_vertexBuffer->Unmap();
 
-    // Indexed drawing, exercising SetIndexBuffer/DrawIndexed. For one
-    // triangle this is pure overhead - the point is that the mechanism is
-    // proven on known-good geometry before a cube depends on it. 16-bit
-    // because a cube needs 36 indices, nowhere near the 65535 limit.
-    // 12 triangles, wound clockwise when viewed from OUTSIDE - matching
-    // the pipeline's FRONT_FACE_CLOCKWISE, so every outward face survives
-    // culling and every inward one is discarded. Get a face backwards and
-    // it simply vanishes, which is a quick way to spot a mistake.
-    const uint16_t triangleIndices[]{
-        0, 2, 1,  0, 3, 2,   // back   (-Z)
-        4, 5, 6,  4, 6, 7,   // front  (+Z)
-        0, 4, 7,  0, 7, 3,   // left   (-X)
-        1, 2, 6,  1, 6, 5,   // right  (+X)
-        3, 7, 6,  3, 6, 2,   // top    (+Y)
-        0, 1, 5,  0, 5, 4,   // bottom (-Y)
-    };
-    m_indexCount = static_cast<uint32_t>(std::size(triangleIndices));
+    // Every face is (b, b+1, b+2)(b, b+2, b+3) over its four vertices —
+    // the per-face orders above were chosen to make that uniform.
+    uint16_t cubeIndices[36]{};
+    for (uint16_t face = 0; face < 6; ++face)
+    {
+        const uint16_t b = face * 4;
+        uint16_t* tri = cubeIndices + face * 6;
+        tri[0] = b; tri[1] = b + 1; tri[2] = b + 2;
+        tri[3] = b; tri[4] = b + 2; tri[5] = b + 3;
+    }
+    m_indexCount = static_cast<uint32_t>(std::size(cubeIndices));
 
     m_indexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
-        .sizeBytes = sizeof(triangleIndices),
+        .sizeBytes = sizeof(cubeIndices),
         .usage = NSRHI::EBufferUsage::Index,
         .cpuVisible = true
     });
 
     void* mappedIndices = m_indexBuffer->Map();
-    std::memcpy(mappedIndices, triangleIndices, sizeof(triangleIndices));
+    std::memcpy(mappedIndices, cubeIndices, sizeof(cubeIndices));
     m_indexBuffer->Unmap();
 }
 
@@ -180,6 +269,14 @@ void Renderer::CreateTriangleResources()
 void Renderer::CreateBlendProofResources()
 {
     NSRHI::IDevice& device = m_backend->GetDevice();
+
+    // The quad's own layout — one float4x4 (16 dwords), no descriptor
+    // heap. Lived with the old vertex-colour cube until the checker cube
+    // replaced that pipeline; the quad still draws with the original
+    // vert/pixel.hlsl pair, so the plain layout moves here with it.
+    m_pipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{
+        .num32BitRootConstants = 16
+    });
 
     // Same shaders and layout as the cubes: the ONLY difference from
     // m_pipeline is blendMode and the depth state. One variable per step -
@@ -197,7 +294,9 @@ void Renderer::CreateBlendProofResources()
             { "POSITION", NSRHI::EFormat::R32G32B32_FLOAT, 0 },
             { "COLOR", NSRHI::EFormat::R32G32B32A32_FLOAT, 12 }
         },
-        .vertexStrideBytes = m_vertexStride,
+        // Its OWN stride — m_vertexStride now belongs to the checker
+        // cube (20 bytes); this quad still uses DemoVertex (28).
+        .vertexStrideBytes = sizeof(DemoVertex),
         .topology = NSRHI::EPrimitiveTopology::TriangleList,
         .colorTargetFormats = { m_backend->BackBufferFormat() },
         .depthTargetFormat = kDepthFormat,
@@ -268,12 +367,17 @@ void Renderer::Shutdown()
     m_indexBuffer.reset();
     m_quadVertexBuffer.reset();  // TEMP-BLEND
     m_quadIndexBuffer.reset();  // TEMP-BLEND
+    m_checkerStaging.reset();
+    m_checkerTexture.reset();
     m_renderTarget.reset();
     m_depthBuffer.reset();
     m_pipeline.reset();
     m_blendPipeline.reset();  // TEMP-BLEND
-    // Layout last: both pipelines were built against it.
+    // Layouts after the pipelines built against them; the heap after the
+    // layouts that referenced its set layout.
     m_pipelineLayout.reset();
+    m_texPipelineLayout.reset();
+    m_descriptorHeap.reset();
 
     if (m_backend)
     {
@@ -303,6 +407,25 @@ void Renderer::BeginFrame()
     if (not m_backend) return;
 
     m_cmd = &m_backend->BeginFrame();
+
+    // Reclaim this frame's ring range. Safe here and only here: the
+    // backend's BeginFrame just waited on this frame slot's fence, so the
+    // previous submission that read these descriptors has retired.
+    m_descriptors.BeginFrame(m_backend->FrameIndex());
+
+    // One-shot uploads, recorded BEFORE BeginRendering — copies are
+    // illegal inside a dynamic-rendering pass. Undefined as the source
+    // state because the image's current contents are garbage anyway;
+    // ShaderResource afterwards so this same frame can already sample it.
+    if (m_checkerUploadPending)
+    {
+        m_cmd->TransitionTexture(m_checkerTexture.get(),
+            NSRHI::EResourceState::Undefined, NSRHI::EResourceState::CopyDestination);
+        m_cmd->CopyBufferToTexture(m_checkerTexture.get(), m_checkerStaging.get());
+        m_cmd->TransitionTexture(m_checkerTexture.get(),
+            NSRHI::EResourceState::CopyDestination, NSRHI::EResourceState::ShaderResource);
+        m_checkerUploadPending = false;
+    }
 
     // Our own target, not a swapchain image: the backend blits this
     // across at EndFrame. Needs the same Undefined -> RenderTarget
@@ -347,59 +470,60 @@ void Renderer::DrawScene(std::shared_ptr<NSScene::IScene>)
 {
     if (not m_cmd) return;
 
+    // The heap once per frame, before any pipeline that indexes it. On
+    // Vulkan the actual vkCmdBindDescriptorSets is deferred inside until
+    // SetPipeline supplies a layout; on DX12 this is the real
+    // SetDescriptorHeaps call. Recorded per frame because the command
+    // list is reset per frame — nothing persists across the reset.
+    m_cmd->SetDescriptorHeap(m_descriptorHeap.get());
+
     m_cmd->SetPipeline(m_pipeline.get());
 
-    // TEMP-MTX: an animated rotation. A spin proves more than a static
-    // angle - it shows the matrix is rebuilt and re-pushed every frame,
-    // not baked once at startup.
-    static const auto tempStart = std::chrono::steady_clock::now();  // TEMP-MTX
-    const float tempSeconds = std::chrono::duration<float>(  // TEMP-MTX
-        std::chrono::steady_clock::now() - tempStart).count();  // TEMP-MTX
+    // An animated rotation: the spin shows all six faces in turn, and
+    // proves the matrix is rebuilt and re-pushed every frame rather than
+    // baked once at startup.
+    static const auto start = std::chrono::steady_clock::now();
+    const float seconds = std::chrono::duration<float>(
+        std::chrono::steady_clock::now() - start).count();
 
-    // Rotating about Y rather than Z: a Z spin looks identical under
-    // orthographic and perspective, whereas turning edge-on foreshortens
-    // only if the projection is doing its job.
-    const NSMath::Float4x4 model = NSMath::Multiply(  // TEMP-MTX
-        NSMath::RotationX(tempSeconds * 0.6f), NSMath::RotationY(tempSeconds));  // TEMP-MTX
-    const NSMath::Float4x4 view = NSMath::LookAtLH(  // TEMP-MTX
-        { 0.f, 0.f, -2.5f }, { 0.f, 0.f, 0.f }, { 0.f, 1.f, 0.f });  // TEMP-MTX
-    const NSMath::Float4x4 proj = NSMath::PerspectiveFovLH(  // TEMP-MTX
-        1.0472f,  // 60 degrees  // TEMP-MTX
-        static_cast<float>(m_width) / static_cast<float>(m_height),  // TEMP-MTX
-        0.1f, 100.f);  // TEMP-MTX
+    const NSMath::Float4x4 model = NSMath::Multiply(
+        NSMath::RotationX(seconds * 0.6f), NSMath::RotationY(seconds));
+    // Eye at -8, not the old -2.5: the cube is 4 units across now and the
+    // rotating diagonal sweeps ~3.5 — the old camera would be inside it.
+    const NSMath::Float4x4 view = NSMath::LookAtLH(
+        { 0.f, 0.f, -8.f }, { 0.f, 0.f, 0.f }, { 0.f, 1.f, 0.f });
+    const NSMath::Float4x4 proj = NSMath::PerspectiveFovLH(
+        1.0472f,  // 60 degrees
+        static_cast<float>(m_width) / static_cast<float>(m_height),
+        0.1f, 100.f);
 
-    // TWO cubes, and the far one drawn SECOND. A single convex object
-    // needs no depth test - back-face culling alone resolves it, which is
-    // why one cube looked correct with depth disabled. Two overlapping
-    // objects is the case depth actually exists for: without it, draw
-    // ORDER decides what you see; with it, DISTANCE does.
-    const NSMath::Float4x4 viewProj = NSMath::Multiply(view, proj);  // TEMP-MTX
+    // Mirrors checker.hlsl's PushConstants exactly: 16 dwords of matrix
+    // plus the bindless slot index. The index travelling as a plain
+    // number in the push constants IS the binding model working.
+    struct PushConstants
+    {
+        NSMath::Float4x4 mvp;
+        uint32_t textureIndex;
+    };
+    static_assert(sizeof(PushConstants) == 17 * sizeof(uint32_t),
+        "Must match the pipeline layout's num32BitRootConstants");
 
-    // Camera sits at -Z looking toward +Z, so smaller z is nearer.
-    const NSMath::Float4x4 nearCube = NSMath::Multiply(  // TEMP-MTX
-        NSMath::Multiply(model, NSMath::Translation(-0.35f, 0.f, -0.6f)), viewProj);  // TEMP-MTX
-    const NSMath::Float4x4 farCube = NSMath::Multiply(  // TEMP-MTX
-        NSMath::Multiply(model, NSMath::Translation( 0.35f, 0.f,  0.6f)), viewProj);  // TEMP-MTX
+    const PushConstants push{
+        NSMath::Multiply(model, NSMath::Multiply(view, proj)),
+        m_checkerSlot.index
+    };
 
-    // Buffers first: both draws share the same geometry, so they are
-    // bound once and only the push constant changes between them.
     m_cmd->SetVertexBuffer(m_vertexBuffer.get(), m_vertexStride);
     m_cmd->SetIndexBuffer(m_indexBuffer.get(), false);   // false = 16-bit
-
-    m_cmd->SetRootConstants(0, 16, &nearCube);  // TEMP-MTX
-    m_cmd->DrawIndexed(m_indexCount);  // TEMP-MTX
-
-    // Farther away, drawn later. Without depth it wins purely by being
-    // last, and visibly overlaps the nearer cube.
-    m_cmd->SetRootConstants(0, 16, &farCube);  // TEMP-MTX
-    m_cmd->DrawIndexed(m_indexCount);  // TEMP-MTX
+    m_cmd->SetRootConstants(0, 17, &push);
+    m_cmd->DrawIndexed(m_indexCount);
 
     // TEMP-BLEND: drawn LAST and over the cubes, which are the known-good
     // control. Identity transform - the quad's vertices are already clip
     // space, so nothing here depends on the matrix path being right.
     const NSMath::Float4x4 identity = NSMath::Float4x4::Identity();  // TEMP-BLEND
     m_cmd->SetPipeline(m_blendPipeline.get());  // TEMP-BLEND
-    m_cmd->SetVertexBuffer(m_quadVertexBuffer.get(), m_vertexStride);  // TEMP-BLEND
+    m_cmd->SetVertexBuffer(m_quadVertexBuffer.get(), sizeof(DemoVertex));  // TEMP-BLEND
     m_cmd->SetIndexBuffer(m_quadIndexBuffer.get(), false);  // TEMP-BLEND
     m_cmd->SetRootConstants(0, 16, &identity);  // TEMP-BLEND
     m_cmd->DrawIndexed(m_quadIndexCount);  // TEMP-BLEND

@@ -46,6 +46,9 @@ namespace NSRHIVulkan
                 if (m_device) vkDeviceWaitIdle(m_device->Device());
             }
 
+            uint32_t FrameIndex() const override { return m_frameIndex; }
+            uint32_t FramesInFlight() const override { return kFramesInFlight; }
+
         private:
             struct FrameResources
             {

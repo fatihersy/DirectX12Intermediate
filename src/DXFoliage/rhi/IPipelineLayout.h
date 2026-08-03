@@ -18,10 +18,22 @@
 // textures/materials are added.
 namespace NSRHI
 {
+    class IDescriptorHeap;
+
     struct PipelineLayoutDesc
     {
         uint32_t num32BitRootConstants{ 0 };
         bool usesBindlessDescriptorTable{ false };
+
+        // Which heap the bindless table refers to. Required when
+        // usesBindlessDescriptorTable is set, ignored otherwise.
+        //
+        // Explicit rather than "the device's heap", because there is no
+        // longer a single device-owned heap to mean — the front-end
+        // creates them. Vulkan needs the matching VkDescriptorSetLayout at
+        // pipeline-layout creation, so this cannot be deferred to bind
+        // time the way D3D12 could.
+        IDescriptorHeap* bindlessHeap{ nullptr };
     };
 
     class IPipelineLayout

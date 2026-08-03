@@ -53,6 +53,9 @@ namespace NSRHIDX12
         void EndFrame(NSRHI::ITexture& finalImage) override;
         void WaitForGPU() override;
 
+        uint32_t FrameIndex() const override { return m_currentFrameIndex; }
+        uint32_t FramesInFlight() const override { return kFramesInFlight; }
+
     private:
         void MoveToNextFrame();
 

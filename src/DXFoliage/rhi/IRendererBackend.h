@@ -84,6 +84,18 @@ namespace NSRHI
         // makes it impossible to end a frame without saying what to show.
         virtual void EndFrame(ITexture& finalImage) = 0;
 
+        // Which of the FramesInFlight() slots the NEXT/current frame uses,
+        // and how many there are. Exposed for exactly one consumer: a
+        // front-end ring allocator (NSDescriptor::RingHeap) has to know
+        // which per-frame range is safe to reuse, and "safe" is defined by
+        // the backend's frame fence — by the time BeginFrame() returns,
+        // the previous submission using this index has completed. The
+        // backend still owns the fence and the pacing; only the index and
+        // the count cross the seam, mirroring how DXTerrain's Renderer
+        // drives m_srvHeap.BeginFrame(frameIndex).
+        virtual uint32_t FrameIndex() const = 0;
+        virtual uint32_t FramesInFlight() const = 0;
+
         // Blocks until the GPU has finished everything submitted so far.
         //
         // Needed because destroying a resource the GPU may still be reading

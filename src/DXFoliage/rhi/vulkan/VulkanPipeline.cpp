@@ -27,7 +27,9 @@ namespace NSRHIVulkan
         : m_device(device)
     {
         ASSERT(desc.layout != nullptr, "GraphicsPipelineDesc needs a layout");
-        m_layout = static_cast<VulkanPipelineLayout*>(desc.layout)->Raw();
+        auto* layout = static_cast<VulkanPipelineLayout*>(desc.layout);
+        m_layout = layout->Raw();
+        m_usesBindlessSet = layout->UsesBindlessSet();
 
         // Both results are kept alive for the whole function: pName below
         // points straight into their entryPoint strings, and the pipeline

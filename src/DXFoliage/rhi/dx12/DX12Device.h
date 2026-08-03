@@ -26,6 +26,10 @@ namespace NSRHIDX12
         std::unique_ptr<NSRHI::IPipelineLayout> CreatePipelineLayout(const NSRHI::PipelineLayoutDesc& desc) override;
         std::unique_ptr<NSRHI::IPipeline> CreateGraphicsPipeline(const NSRHI::GraphicsPipelineDesc& desc) override;
 
+        std::unique_ptr<NSRHI::IDescriptorHeap> CreateDescriptorHeap(const NSRHI::DescriptorHeapDesc& desc) override;
+        void CreateShaderResourceView(NSRHI::IDescriptorHeap& heap, NSRHI::DescriptorOffset where,
+                                      NSRHI::ITexture* texture) override;
+
         // --- Internal accessors (used by the backend, not exposed) ---
         ID3D12Device14* Raw() const { return m_device.Get(); }
         IDXGIFactory7* Factory() const { return m_factory.Get(); }

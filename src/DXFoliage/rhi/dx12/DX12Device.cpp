@@ -5,8 +5,10 @@
 #include "Logger.h"
 
 #include "DX12Buffer.h"
+#include "DX12DescriptorHeap.h"
 #include "DX12Pipeline.h"
 #include "DX12PipelineLayout.h"
+#include "DX12Texture.h"
 
 namespace NSRHIDX12
 {
@@ -123,5 +125,31 @@ namespace NSRHIDX12
     std::unique_ptr<NSRHI::IPipeline> DX12Device::CreateGraphicsPipeline(const NSRHI::GraphicsPipelineDesc& desc)
     {
         return std::make_unique<DX12Pipeline>(m_device.Get(), desc);
+    }
+
+    std::unique_ptr<NSRHI::IDescriptorHeap> DX12Device::CreateDescriptorHeap(const NSRHI::DescriptorHeapDesc& desc)
+    {
+        return std::make_unique<DX12DescriptorHeap>(m_device.Get(), desc);
+    }
+
+    void DX12Device::CreateShaderResourceView(NSRHI::IDescriptorHeap& heap,
+                                              NSRHI::DescriptorOffset where,
+                                              NSRHI::ITexture* texture)
+    {
+        // The neutral replacement for IDescriptor::Validate's pointer
+        // comparison — catches an offset built by a different heap.
+        ASSERT(heap.Validate(where), "Descriptor offset does not belong to this heap");
+
+        auto* dxTexture = static_cast<DX12Texture*>(texture);
+        if (not dxTexture) return;
+
+        auto& dxHeap = static_cast<DX12DescriptorHeap&>(heap);
+
+        // A null desc means "the resource's own format and full mip
+        // chain", which is what a whole-texture SRV is. Mip ranges, array
+        // slices and cube views need a real D3D12_SHADER_RESOURCE_VIEW_DESC
+        // built from a neutral TextureViewDesc — see IDevice.h for why that
+        // parameter is not here yet.
+        m_device->CreateShaderResourceView(dxTexture->Raw(), nullptr, dxHeap.CpuHandle(where.index));
     }
 }

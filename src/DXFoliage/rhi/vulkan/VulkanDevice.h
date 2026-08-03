@@ -5,6 +5,7 @@
 #include "rhi/IDevice.h"
 
 #include <cstdint>
+#include <memory>
 
 struct wl_display;
 struct wl_surface;
@@ -19,6 +20,8 @@ struct wl_surface;
 // differently.
 namespace NSRHIVulkan
 {
+    class VulkanDescriptorHeap;
+
     class VulkanDevice final : public NSRHI::IDevice
     {
     public:
@@ -38,6 +41,9 @@ namespace NSRHIVulkan
         std::unique_ptr<NSRHI::ITexture> CreateTexture(const NSRHI::TextureDesc& desc) override;
         std::unique_ptr<NSRHI::IPipelineLayout> CreatePipelineLayout(const NSRHI::PipelineLayoutDesc& desc) override;
         std::unique_ptr<NSRHI::IPipeline> CreateGraphicsPipeline(const NSRHI::GraphicsPipelineDesc& desc) override;
+        std::unique_ptr<NSRHI::IDescriptorHeap> CreateDescriptorHeap(const NSRHI::DescriptorHeapDesc& desc) override;
+        void CreateShaderResourceView(NSRHI::IDescriptorHeap& heap, NSRHI::DescriptorOffset where,
+                                      NSRHI::ITexture* texture) override;
 
         // --- Internal accessors (backend-only, not exposed) ---
         VkInstance Instance() const { return m_instance; }

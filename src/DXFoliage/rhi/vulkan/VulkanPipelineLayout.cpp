@@ -3,11 +3,12 @@
 
 namespace NSRHIVulkan
 {
-    VulkanPipelineLayout::VulkanPipelineLayout(VkDevice device, const NSRHI::PipelineLayoutDesc& desc)
-        : m_device(device)
+    VulkanPipelineLayout::VulkanPipelineLayout(VkDevice device, const NSRHI::PipelineLayoutDesc& desc,
+                                               VkDescriptorSetLayout bindlessSetLayout)
+        : m_device(device), m_usesBindlessSet(desc.usesBindlessDescriptorTable)
     {
-        ASSERT(not desc.usesBindlessDescriptorTable,
-            "Bindless descriptor sets aren't implemented on the Vulkan backend yet");
+        ASSERT(not desc.usesBindlessDescriptorTable or bindlessSetLayout != VK_NULL_HANDLE,
+            "usesBindlessDescriptorTable was set but no descriptor set layout was supplied");
 
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -19,6 +20,15 @@ namespace NSRHIVulkan
         {
             info.pushConstantRangeCount = 1;
             info.pPushConstantRanges = &pushRange;
+        }
+
+        // Set 0, matching the [[vk::binding(N, 0)]] attributes in the
+        // shaders. One set is the whole bindless model: everything
+        // sampleable lives in it and is reached by index.
+        if (desc.usesBindlessDescriptorTable)
+        {
+            info.setLayoutCount = 1;
+            info.pSetLayouts = &bindlessSetLayout;
         }
 
         VK_CHECK(vkCreatePipelineLayout(device, &info, nullptr, &m_layout));

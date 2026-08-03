@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Descriptor.h"
 #include "rhi/IRendererBackend.h"
 
 #include <cstdint>
@@ -34,7 +35,7 @@ public:
     void EndFrame();
 
 private:
-    void CreateTriangleResources();
+    void CreateCheckerCubeResources();
     void CreateBlendProofResources();  // TEMP-BLEND
     void CreateFrameTargets();
 
@@ -43,13 +44,33 @@ private:
     // Valid only between BeginFrame() and EndFrame().
     NSRHI::ICommandList* m_cmd{ nullptr };
 
-    // Temporary demo content, front-end-owned (created through
-    // m_backend->GetDevice()). Replaced by real scene/model resources
-    // as the renderer grows.
-    std::unique_ptr<NSRHI::IPipelineLayout> m_pipelineLayout;
+    // THE descriptor heap — singular by constraint, not convenience:
+    // D3D12 allows one shader-visible CBV_SRV_UAV heap bound at a time,
+    // so ring transients and long-lived statics share it, split by the
+    // front-end RingHeap policy (see Descriptor.h and the in-flight
+    // contract there).
+    std::unique_ptr<NSRHI::IDescriptorHeap> m_descriptorHeap;
+    NSDescriptor::RingHeap m_descriptors;
+
+    // Demo content: a 4x4x4 checkerboard cube — the bindless texture
+    // path's first consumer (slot from AllocateStatic, index pushed as a
+    // root constant, shader reads g_textures[index]). The checker cell
+    // size is 1 world unit, so the texture doubles as a ruler: four
+    // cells per edge = four units.
+    std::unique_ptr<NSRHI::IPipelineLayout> m_pipelineLayout;      // quad's: 16 root constants, no heap
+    std::unique_ptr<NSRHI::IPipelineLayout> m_texPipelineLayout;   // cube's: 17 root constants + bindless heap
     std::unique_ptr<NSRHI::IPipeline> m_pipeline;
     std::unique_ptr<NSRHI::IBuffer> m_vertexBuffer;
     std::unique_ptr<NSRHI::IBuffer> m_indexBuffer;
+
+    std::unique_ptr<NSRHI::ITexture> m_checkerTexture;
+    // Kept alive for the renderer's lifetime rather than freed after the
+    // upload: the copy is recorded into frame 1's command list, and the
+    // front-end has no per-resource fence to know when the GPU is done
+    // reading it. 256 KB of idle staging is cheaper than the machinery.
+    std::unique_ptr<NSRHI::IBuffer> m_checkerStaging;
+    NSRHI::DescriptorHandle m_checkerSlot;
+    bool m_checkerUploadPending{ false };
 
     // TEMP-BLEND: proves EBlendMode::AlphaBlend reaches the GPU, ahead of
     // ImGui depending on it. A half-transparent quad drawn over the cubes:

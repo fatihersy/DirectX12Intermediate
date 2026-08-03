@@ -2,6 +2,7 @@
 #include "VulkanCommandList.h"
 
 #include "VulkanBuffer.h"
+#include "VulkanDescriptorHeap.h"
 #include "VulkanPipeline.h"
 #include "VulkanTexture.h"
 
@@ -191,6 +192,13 @@ namespace NSRHIVulkan
 
         vkPipeline->Bind(m_cmd);
         m_boundLayout = vkPipeline->Layout();
+        m_boundLayoutUsesBindless = vkPipeline->UsesBindlessSet();
+
+        // Descriptor sets are bound per pipeline layout on Vulkan, so a
+        // heap set once per frame has to be re-bound whenever the layout
+        // changes. D3D12 needs no equivalent - its heap survives PSO
+        // changes - which is why the neutral interface has no "rebind".
+        BindDescriptorSet();
     }
 
     void VulkanCommandList::SetRootConstants(uint32_t offsetIn32BitValues, uint32_t num32BitValues, const void* data)
@@ -204,11 +212,31 @@ namespace NSRHIVulkan
             data);
     }
 
-    void VulkanCommandList::SetDescriptorHeap(NSRHI::IDescriptorHeap*)
+    void VulkanCommandList::SetDescriptorHeap(NSRHI::IDescriptorHeap* heap)
     {
-        // No Vulkan equivalent to bind: D3D12's single global heap becomes
-        // a VkDescriptorSet bound per pipeline layout, which arrives with
-        // the deferred bindless design.
+        auto* vkHeap = static_cast<VulkanDescriptorHeap*>(heap);
+        if (not vkHeap) return;
+
+        // Deferred, not bound here. vkCmdBindDescriptorSets needs the
+        // pipeline layout, and D3D12's SetDescriptorHeaps does not - so
+        // the neutral call can legally arrive BEFORE any pipeline is
+        // bound, which is how the front-end naturally writes it (heap once
+        // per frame, pipelines per pass). Remembering it and binding at
+        // SetPipeline keeps both orderings working.
+        m_boundHeap = vkHeap;
+        BindDescriptorSet();
+    }
+
+    void VulkanCommandList::BindDescriptorSet()
+    {
+        if (not m_boundHeap or m_boundLayout == VK_NULL_HANDLE) return;
+        // Binding set 0 against a layout that declares no sets is a
+        // validation error, and the cube pipeline's layout is exactly that.
+        if (not m_boundLayoutUsesBindless) return;
+
+        const VkDescriptorSet set = m_boundHeap->Set();
+        vkCmdBindDescriptorSets(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            m_boundLayout, 0, 1, &set, 0, nullptr);
     }
 
     void VulkanCommandList::SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t)
@@ -255,10 +283,32 @@ namespace NSRHIVulkan
         vkCmdCopyBuffer(m_cmd, src->Raw(), dst->Raw(), 1, &region);
     }
 
-    void VulkanCommandList::CopyBufferToTexture(NSRHI::ITexture*, NSRHI::IBuffer*)
+    void VulkanCommandList::CopyBufferToTexture(NSRHI::ITexture* destination, NSRHI::IBuffer* source)
     {
-        // Paired with VulkanDevice::CreateTexture — arrives with the
-        // sampled-texture/model work.
-        ASSERT(false, "CopyBufferToTexture: not implemented on the Vulkan backend yet");
+        auto* dst = static_cast<VulkanTexture*>(destination);
+        auto* src = static_cast<VulkanBuffer*>(source);
+        if (not dst or not src) return;
+
+        VkBufferImageCopy region{};
+        // Zero bufferRowLength/bufferImageHeight means "tightly packed to
+        // imageExtent". D3D12 cannot assume that - CopyTextureRegion needs
+        // an explicit RowPitch aligned to 256 bytes - so the DX12 side of
+        // this call will need a padded staging buffer where Vulkan does
+        // not. Worth knowing before that path is written.
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = dst->Aspect();
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = { 0, 0, 0 };
+        region.imageExtent = { dst->Width(), dst->Height(), 1 };
+
+        // The caller is responsible for having transitioned the texture to
+        // CopyDestination first; this records the copy only, matching how
+        // CopyBuffer and the barrier calls are already split.
+        vkCmdCopyBufferToImage(m_cmd, src->Raw(), dst->Image(),
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     }
 }

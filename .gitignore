@@ -48,7 +48,6 @@ Makefile
 
 # Claude
 .claude/
-PLAN.md
 
 # Codex
 .codex/

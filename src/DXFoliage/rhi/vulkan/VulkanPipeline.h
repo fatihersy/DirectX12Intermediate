@@ -29,9 +29,15 @@ namespace NSRHIVulkan
 
         VkPipelineLayout Layout() const { return m_layout; }
 
+        // Copied from the pipeline layout at construction so the command
+        // list can ask the pipeline it was just handed, without keeping a
+        // pointer to the layout object alive alongside it.
+        bool UsesBindlessSet() const { return m_usesBindlessSet; }
+
     private:
         VkDevice m_device{ VK_NULL_HANDLE };
         VkPipeline m_pipeline{ VK_NULL_HANDLE };
         VkPipelineLayout m_layout{ VK_NULL_HANDLE }; // non-owning; owned by desc.layout
+        bool m_usesBindlessSet{ false };
     };
 }

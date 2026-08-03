@@ -67,10 +67,27 @@ namespace NSRHIDX12
                     rootParams.back().InitAsDescriptorTable(1, &ranges.back());
                 }
 
+                // The D3D12 half of the immutable sampler VulkanDescriptorHeap
+                // bakes into its set layout: linear/wrap at s0, matching
+                // checker.hlsl's `SamplerState g_sampler : register(s0)`.
+                // Static because DXTerrain proves that is all this renderer
+                // ever needs — its root signatures carry 1-2 static samplers
+                // and it creates ZERO sampler descriptors at runtime.
+                D3D12_STATIC_SAMPLER_DESC sampler{};
+                sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+                sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                sampler.MaxLOD = D3D12_FLOAT32_MAX;
+                sampler.ShaderRegister = 0;
+                sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+                const bool wantsSampler = desc.usesBindlessDescriptorTable;
+
                 CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc{};
                 rsDesc.Init_1_1(
                     static_cast<UINT>(rootParams.size()), rootParams.empty() ? nullptr : rootParams.data(),
-                    0, nullptr,
+                    wantsSampler ? 1u : 0u, wantsSampler ? &sampler : nullptr,
                     D3D12_ROOT_SIGNATURE_FLAGS::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
                 );
 

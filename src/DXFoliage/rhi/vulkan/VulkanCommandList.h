@@ -5,6 +5,8 @@
 
 namespace NSRHIVulkan
 {
+    class VulkanDescriptorHeap;
+
     // Vulkan implementation of the exposed ICommandList — the counterpart
     // of DX12CommandList. Each method downcasts the I* it's handed to the
     // Vulkan concrete (safe by the backend-affinity invariant) and forwards
@@ -43,7 +45,15 @@ namespace NSRHIVulkan
         void CopyBufferToTexture(NSRHI::ITexture* destination, NSRHI::IBuffer* source) override;
 
     private:
+        void BindDescriptorSet();
+
         VkCommandBuffer m_cmd{ VK_NULL_HANDLE };
+
+        // The heap the front-end last set. Bound lazily rather than
+        // immediately, because vkCmdBindDescriptorSets needs a pipeline
+        // layout and SetDescriptorHeap can legally be called first.
+        VulkanDescriptorHeap* m_boundHeap{ nullptr };
+        bool m_boundLayoutUsesBindless{ false };
 
         // vkCmdPushConstants needs the pipeline layout, which D3D12's
         // SetGraphicsRoot32BitConstants doesn't (the root signature is
