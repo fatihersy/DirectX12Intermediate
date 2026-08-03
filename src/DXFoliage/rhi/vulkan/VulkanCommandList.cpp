@@ -193,6 +193,12 @@ namespace NSRHIVulkan
         vkPipeline->Bind(m_cmd);
         m_boundLayout = vkPipeline->Layout();
         m_boundLayoutUsesBindless = vkPipeline->UsesBindlessSet();
+        m_boundConstantSet = vkPipeline->ConstantSet();
+        m_boundConstantSlots = vkPipeline->NumConstantSlots();
+        // Offsets are stale for the new layout until the front-end sets
+        // them again; marking dirty re-binds set 1 with whatever the next
+        // SetConstantBuffer calls provide before the draw.
+        m_constantsDirty = m_boundConstantSet != VK_NULL_HANDLE;
 
         // Descriptor sets are bound per pipeline layout on Vulkan, so a
         // heap set once per frame has to be re-bound whenever the layout
@@ -239,6 +245,30 @@ namespace NSRHIVulkan
             m_boundLayout, 0, 1, &set, 0, nullptr);
     }
 
+    void VulkanCommandList::SetConstantBuffer(uint32_t slot, uint64_t offsetBytes)
+    {
+        ASSERT(slot < m_boundConstantSlots,
+            "SetConstantBuffer slot not declared by the bound pipeline's layout");
+        ASSERT((offsetBytes % NSRHI::kConstantBufferAlignment) == 0,
+            "Offset not from ConstantAllocator::Allocate");
+
+        m_constantOffsets[slot] = static_cast<uint32_t>(offsetBytes);
+        m_constantsDirty = true;
+    }
+
+    void VulkanCommandList::FlushConstantBinds()
+    {
+        if (not m_constantsDirty or m_boundConstantSet == VK_NULL_HANDLE) return;
+
+        // Set 1 with every slot's dynamic offset in one call. Binding a
+        // HIGHER set never disturbs a lower one, so set 0 (the bindless
+        // heap, bound at SetPipeline) survives this.
+        vkCmdBindDescriptorSets(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            m_boundLayout, 1, 1, &m_boundConstantSet,
+            m_boundConstantSlots, m_constantOffsets);
+        m_constantsDirty = false;
+    }
+
     void VulkanCommandList::SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t)
     {
         auto* vkBuffer = static_cast<VulkanBuffer*>(buffer);
@@ -264,11 +294,13 @@ namespace NSRHIVulkan
 
     void VulkanCommandList::Draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex)
     {
+        FlushConstantBinds();
         vkCmdDraw(m_cmd, vertexCount, instanceCount, firstVertex, 0);
     }
 
     void VulkanCommandList::DrawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset)
     {
+        FlushConstantBinds();
         vkCmdDrawIndexed(m_cmd, indexCount, instanceCount, firstIndex, vertexOffset, 0);
     }
 

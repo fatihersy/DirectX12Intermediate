@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Allocator.h"
 #include "Descriptor.h"
 #include "rhi/IRendererBackend.h"
 
@@ -51,6 +52,12 @@ private:
     // contract there).
     std::unique_ptr<NSRHI::IDescriptorHeap> m_descriptorHeap;
     NSDescriptor::RingHeap m_descriptors;
+
+    // Per-draw constants: one persistently-mapped buffer, rung by frame,
+    // same in-flight contract as the descriptor ring (see Allocator.h).
+    // Named in every pipeline layout that declares constant slots.
+    std::unique_ptr<NSRHI::IBuffer> m_constantBuffer;
+    NSAllocator::ConstantAllocator m_constants;
 
     // Demo content: a 4x4x4 checkerboard cube — the bindless texture
     // path's first consumer (slot from AllocateStatic, index pushed as a

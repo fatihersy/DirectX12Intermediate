@@ -4,13 +4,23 @@ struct PSInput
     float2 uv : TEXCOORD0;
 };
 
-// One matrix plus the texture's slot in the bindless heap. The index IS
-// the binding - the CPU never binds this texture to a slot per draw, it
-// just says which element of the heap to read. 17 dwords total, matching
+// The transform now arrives through constant slot 0 - a per-draw
+// allocation from NSAllocator::ConstantAllocator, reached as
+// register(b1) on DX12 (a root CBV at baseVA + offset) and as
+// [[vk::binding(0, 1)]] on Vulkan (a dynamic-UBO descriptor whose offset
+// changes per draw). Slot N = b{N+1}; b0 stays the push-constant block.
+// Same dual-annotation trick as the heap declarations below.
+struct DrawConstants
+{
+    float4x4 transform;
+};
+[[vk::binding(0, 1)]] ConstantBuffer<DrawConstants> drawCB : register(b1);
+
+// Only the texture's slot in the bindless heap remains pushed - the
+// index IS the binding, which is the bindless model. 1 dword, matching
 // the pipeline layout's num32BitRootConstants.
 struct PushConstants
 {
-    float4x4 transform;
     uint textureIndex;
 };
 [[vk::push_constant]] ConstantBuffer<PushConstants> pushConstants;
@@ -30,7 +40,7 @@ PSInput mainVS(float3 position : POSITION, float2 uv : TEXCOORD0)
     PSInput result;
 
     // mul(matrix, vector) - see the convention note in core/Math.h.
-    result.position = mul(pushConstants.transform, float4(position, 1.0f));
+    result.position = mul(drawCB.transform, float4(position, 1.0f));
     result.uv = uv;
 
     return result;

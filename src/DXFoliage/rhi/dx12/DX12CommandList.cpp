@@ -118,7 +118,26 @@ namespace NSRHIDX12
     void DX12CommandList::SetPipeline(NSRHI::IPipeline* pipeline)
     {
         // DX12Pipeline::Bind sets PSO + root signature + primitive topology.
-        static_cast<DX12Pipeline*>(pipeline)->Bind(m_cmd);
+        auto* dx12Pipeline = static_cast<DX12Pipeline*>(pipeline);
+        dx12Pipeline->Bind(m_cmd);
+
+        // Root state does not survive a root-signature change, so the
+        // front-end must re-issue SetConstantBuffer after SetPipeline —
+        // which it does anyway, per draw. These just route the calls.
+        m_constantBaseVA = dx12Pipeline->ConstantBaseVA();
+        m_constantRootParamBase = dx12Pipeline->ConstantRootParamBase();
+        m_numConstantSlots = dx12Pipeline->NumConstantSlots();
+    }
+
+    void DX12CommandList::SetConstantBuffer(uint32_t slot, uint64_t offsetBytes)
+    {
+        ASSERT(slot < m_numConstantSlots,
+            "SetConstantBuffer slot not declared by the bound pipeline's layout");
+        ASSERT((offsetBytes % NSRHI::kConstantBufferAlignment) == 0,
+            "Offset not from ConstantAllocator::Allocate");
+
+        m_cmd.SetGraphicsRootConstantBufferView(
+            m_constantRootParamBase + slot, m_constantBaseVA + offsetBytes);
     }
 
     void DX12CommandList::SetRootConstants(uint32_t offsetIn32BitValues, uint32_t num32BitValues, const void* data)

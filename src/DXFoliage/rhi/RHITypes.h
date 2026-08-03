@@ -8,6 +8,24 @@
 // outside rhi/ ever needs to know DXGI_FORMAT or VkFormat exist.
 namespace NSRHI
 {
+    // Per-draw constant allocations must start on this boundary. 256 is
+    // D3D12's hard requirement (D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_
+    // ALIGNMENT); Vulkan asks only for minUniformBufferOffsetAlignment
+    // (64 on this GPU) and 256 is a multiple of every power-of-two below
+    // it — so one constant serves both backends, and DXTerrain's
+    // alignment arithmetic ports unchanged.
+    inline constexpr size_t kConstantBufferAlignment = 256;
+
+    // How much of the constant buffer one binding can see. On Vulkan a
+    // dynamic-uniform-buffer descriptor's range is FIXED at descriptor
+    // write time (VK_WHOLE_SIZE + dynamic offsets is illegal: offset +
+    // range must stay inside the buffer), so the descriptor is written
+    // with this range and the buffer carries this much slack after the
+    // last ring byte. 16 KB is the spec floor for maxUniformBufferRange
+    // and dwarfs any constant struct in DXTerrain (largest well under
+    // 1 KB). D3D12 root CBVs have no range and ignore this.
+    inline constexpr size_t kConstantBufferWindowBytes = 16 * 1024;
+
     enum class EFormat : uint8_t
     {
         Unknown,

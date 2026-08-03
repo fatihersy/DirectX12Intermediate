@@ -30,6 +30,8 @@ namespace NSRHIVulkan
         auto* layout = static_cast<VulkanPipelineLayout*>(desc.layout);
         m_layout = layout->Raw();
         m_usesBindlessSet = layout->UsesBindlessSet();
+        m_constantSet = layout->ConstantSet();
+        m_numConstantSlots = layout->NumConstantSlots();
 
         // Both results are kept alive for the whole function: pName below
         // points straight into their entryPoint strings, and the pipeline

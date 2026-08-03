@@ -69,6 +69,20 @@ bool Renderer::Initialize(NSPlatform::IWindow& window, uint32_t width, uint32_t 
         });
         m_descriptors = NSDescriptor::RingHeap(
             *m_descriptorHeap, kRingSlotsPerFrame, frames, kStaticSlots);
+
+        // Per-draw constants. 4 MB/frame ≈ 16k draws at one 256-aligned
+        // allocation each — DXTerrain reserves 1 GB/frame for the same
+        // job, which is ~4 million draws of headroom; this is the same
+        // design at a size the overflow assert can actually police. The
+        // window is tail slack for the last allocation's descriptor
+        // range (see kConstantBufferWindowBytes).
+        constexpr size_t kConstantBytesPerFrame = 4 * 1024 * 1024;
+        m_constantBuffer = m_backend->GetDevice().CreateBuffer(NSRHI::BufferDesc{
+            .sizeBytes = kConstantBytesPerFrame * frames + NSRHI::kConstantBufferWindowBytes,
+            .usage = NSRHI::EBufferUsage::Constant,
+            .cpuVisible = true
+        });
+        m_constants = NSAllocator::ConstantAllocator(*m_constantBuffer, frames);
     }
 
     CreateFrameTargets();
@@ -161,12 +175,18 @@ void Renderer::CreateCheckerCubeResources()
     device.CreateShaderResourceView(
         *m_descriptorHeap, m_descriptorHeap->At(m_checkerSlot.index), m_checkerTexture.get());
 
-    // 17 root constants: float4x4 (16) + the texture index (1). Still
-    // well inside Vulkan's guaranteed 128-byte push budget (68 bytes).
+    // 1 root constant (the texture index); the transform moved to
+    // constant slot 0, allocated per draw from the ConstantAllocator.
+    // This split is deliberate proof-of-work: the same spinning
+    // checkerboard now depends on the whole constant path (allocate →
+    // write → SetConstantBuffer → dynamic offset / root CBV) with zero
+    // new visual variables — the known-good-control method.
     m_texPipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{
-        .num32BitRootConstants = 17,
+        .num32BitRootConstants = 1,
         .usesBindlessDescriptorTable = true,
-        .bindlessHeap = m_descriptorHeap.get()
+        .bindlessHeap = m_descriptorHeap.get(),
+        .numConstantBufferSlots = 1,
+        .constantBuffer = m_constantBuffer.get()
     });
 
     m_vertexStride = sizeof(CheckerVertex);
@@ -373,11 +393,13 @@ void Renderer::Shutdown()
     m_depthBuffer.reset();
     m_pipeline.reset();
     m_blendPipeline.reset();  // TEMP-BLEND
-    // Layouts after the pipelines built against them; the heap after the
-    // layouts that referenced its set layout.
+    // Layouts after the pipelines built against them; the heap and the
+    // constant buffer after the layouts that referenced them (the Vulkan
+    // layout's set 1 points at the constant buffer).
     m_pipelineLayout.reset();
     m_texPipelineLayout.reset();
     m_descriptorHeap.reset();
+    m_constantBuffer.reset();
 
     if (m_backend)
     {
@@ -408,10 +430,12 @@ void Renderer::BeginFrame()
 
     m_cmd = &m_backend->BeginFrame();
 
-    // Reclaim this frame's ring range. Safe here and only here: the
-    // backend's BeginFrame just waited on this frame slot's fence, so the
-    // previous submission that read these descriptors has retired.
+    // Reclaim this frame's ring ranges — descriptors and constants share
+    // the in-flight contract. Safe here and only here: the backend's
+    // BeginFrame just waited on this frame slot's fence, so the previous
+    // submission that read them has retired.
     m_descriptors.BeginFrame(m_backend->FrameIndex());
+    m_constants.BeginFrame(m_backend->FrameIndex());
 
     // One-shot uploads, recorded BEFORE BeginRendering — copies are
     // illegal inside a dynamic-rendering pass. Undefined as the source
@@ -497,25 +521,21 @@ void Renderer::DrawScene(std::shared_ptr<NSScene::IScene>)
         static_cast<float>(m_width) / static_cast<float>(m_height),
         0.1f, 100.f);
 
-    // Mirrors checker.hlsl's PushConstants exactly: 16 dwords of matrix
-    // plus the bindless slot index. The index travelling as a plain
-    // number in the push constants IS the binding model working.
-    struct PushConstants
-    {
-        NSMath::Float4x4 mvp;
-        uint32_t textureIndex;
-    };
-    static_assert(sizeof(PushConstants) == 17 * sizeof(uint32_t),
-        "Must match the pipeline layout's num32BitRootConstants");
+    // The transform goes through the constant ring — write through the
+    // mapped pointer, hand the OFFSET to the command list. Mirrors
+    // DXTerrain's constAlloc + As<T>() + SetGraphicsRootConstantBufferView
+    // triple exactly, one draw's worth per frame.
+    NSAllocator::Ctx drawCB = m_constants.Allocate(sizeof(NSMath::Float4x4));
+    drawCB.As<NSMath::Float4x4>() =
+        NSMath::Multiply(model, NSMath::Multiply(view, proj));
+    m_cmd->SetConstantBuffer(0, drawCB.offsetBytes);
 
-    const PushConstants push{
-        NSMath::Multiply(model, NSMath::Multiply(view, proj)),
-        m_checkerSlot.index
-    };
+    // Only the bindless slot index still travels as a push constant.
+    const uint32_t textureIndex = m_checkerSlot.index;
 
     m_cmd->SetVertexBuffer(m_vertexBuffer.get(), m_vertexStride);
     m_cmd->SetIndexBuffer(m_indexBuffer.get(), false);   // false = 16-bit
-    m_cmd->SetRootConstants(0, 17, &push);
+    m_cmd->SetRootConstants(0, 1, &textureIndex);
     m_cmd->DrawIndexed(m_indexCount);
 
     // TEMP-BLEND: drawn LAST and over the cubes, which are the known-good

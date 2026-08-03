@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "DX12PipelineLayout.h"
 
+#include "DX12Buffer.h"
 #include "DXSampleHelper.h"
 #include "Logger.h"
 
@@ -43,6 +44,22 @@ namespace NSRHIDX12
 
     DX12PipelineLayout::DX12PipelineLayout(ID3D12Device14* device, const NSRHI::PipelineLayoutDesc& desc)
     {
+        ASSERT(desc.numConstantBufferSlots <= NSRHI::kMaxConstantBufferSlots,
+            "More constant slots than kMaxConstantBufferSlots");
+        ASSERT(desc.numConstantBufferSlots == 0 or desc.constantBuffer != nullptr,
+            "numConstantBufferSlots without a constantBuffer to point them at");
+
+        m_numConstantSlots = desc.numConstantBufferSlots;
+        m_constantRootParamBase = (desc.num32BitRootConstants > 0 ? 1u : 0u)
+                                + (desc.usesBindlessDescriptorTable ? 1u : 0u);
+        if (desc.numConstantBufferSlots > 0)
+        {
+            // The root CBV is base VA + per-draw offset; the base never
+            // changes, so it is captured once here rather than fetched
+            // per bind.
+            m_constantBaseVA = static_cast<DX12Buffer*>(desc.constantBuffer)->GPUAddress();
+        }
+
         MakeRootSignature(device, L"DX12PipelineLayout::m_rootSignature", m_rootSignature,
             [&desc](D3D_ROOT_SIGNATURE_VERSION version, ComPtr<ID3D10Blob>& signature, ComPtr<ID3D10Blob>& error) -> HRESULT
             {
@@ -65,6 +82,17 @@ namespace NSRHIDX12
 
                     rootParams.emplace_back();
                     rootParams.back().InitAsDescriptorTable(1, &ranges.back());
+                }
+
+                // Per-draw constant slots as root CBVs — DXTerrain's 23
+                // SetGraphicsRootConstantBufferView sites, made neutral.
+                // Slot N lives at register b{N+1} (b0 is the root-constant
+                // block), matching the shaders' register(b{N+1}) half of
+                // the dual annotation.
+                for (uint32_t slot = 0; slot < desc.numConstantBufferSlots; ++slot)
+                {
+                    rootParams.emplace_back();
+                    rootParams.back().InitAsConstantBufferView(slot + 1, 0);
                 }
 
                 // The D3D12 half of the immutable sampler VulkanDescriptorHeap

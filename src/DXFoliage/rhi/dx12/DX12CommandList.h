@@ -33,6 +33,7 @@ namespace NSRHIDX12
         void SetPipeline(NSRHI::IPipeline* pipeline) override;
         void SetRootConstants(uint32_t offsetIn32BitValues, uint32_t num32BitValues, const void* data) override;
         void SetDescriptorHeap(NSRHI::IDescriptorHeap* heap) override;
+        void SetConstantBuffer(uint32_t slot, uint64_t offsetBytes) override;
 
         void SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t strideBytes) override;
         void SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit) override;
@@ -45,5 +46,13 @@ namespace NSRHIDX12
 
     private:
         NSDX12::GraphicsCommandList m_cmd;
+
+        // From the bound pipeline at SetPipeline — root CBV binds need
+        // the base VA and the slot->root-parameter mapping, which D3D12's
+        // SetGraphicsRootConstantBufferView (unlike Vulkan's set binding)
+        // consumes one slot at a time, immediately.
+        D3D12_GPU_VIRTUAL_ADDRESS m_constantBaseVA{};
+        uint32_t m_constantRootParamBase{ 0 };
+        uint32_t m_numConstantSlots{ 0 };
     };
 }

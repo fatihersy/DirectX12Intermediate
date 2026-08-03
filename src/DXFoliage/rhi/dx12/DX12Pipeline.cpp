@@ -32,6 +32,9 @@ namespace NSRHIDX12
 
         auto* dx12Layout = static_cast<DX12PipelineLayout*>(desc.layout);
         m_rootSignature = dx12Layout->Raw();
+        m_constantBaseVA = dx12Layout->ConstantBaseVA();
+        m_constantRootParamBase = dx12Layout->ConstantRootParamBase();
+        m_numConstantSlots = dx12Layout->NumConstantSlots();
 
         std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements;
         inputElements.reserve(desc.vertexAttributes.size());

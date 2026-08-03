@@ -20,9 +20,19 @@ namespace NSRHIDX12
 
         void Bind(NSDX12::GraphicsCommandList cmdList) const;
 
+        // Copied from the pipeline layout at construction so the command
+        // list can ask the pipeline it was just handed — mirrors
+        // VulkanPipeline's ConstantSet()/NumConstantSlots() pass-through.
+        D3D12_GPU_VIRTUAL_ADDRESS ConstantBaseVA() const { return m_constantBaseVA; }
+        uint32_t ConstantRootParamBase() const { return m_constantRootParamBase; }
+        uint32_t NumConstantSlots() const { return m_numConstantSlots; }
+
     private:
         ComPtr<ID3D12PipelineState> m_pipeline;
         ID3D12RootSignature* m_rootSignature{ nullptr }; // non-owning; owned by desc.layout
         D3D12_PRIMITIVE_TOPOLOGY m_topology{ D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST };
+        D3D12_GPU_VIRTUAL_ADDRESS m_constantBaseVA{};
+        uint32_t m_constantRootParamBase{ 0 };
+        uint32_t m_numConstantSlots{ 0 };
     };
 }

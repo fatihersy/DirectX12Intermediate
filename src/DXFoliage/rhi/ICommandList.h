@@ -60,6 +60,19 @@ namespace NSRHI
         virtual void SetRootConstants(uint32_t offsetIn32BitValues, uint32_t num32BitValues, const void* data) = 0;
         virtual void SetDescriptorHeap(IDescriptorHeap* heap) = 0;
 
+        // Point constant slot `slot` at byte `offsetBytes` of the buffer
+        // the bound pipeline layout was created with (see
+        // PipelineLayoutDesc::constantBuffer). The offset comes from
+        // NSAllocator::Ctx. The neutral form of DXTerrain's
+        // SetGraphicsRootConstantBufferView(slot, gpuAddr):
+        //   - DX12 rebinds immediately — root CBV at baseVA + offset.
+        //   - Vulkan records the offset and binds lazily at the next
+        //     draw, because every dynamic offset for the set travels in
+        //     ONE vkCmdBindDescriptorSets call.
+        // Call after SetPipeline; offsets do not survive a pipeline
+        // layout change on DX12 (root signature swap clears root state).
+        virtual void SetConstantBuffer(uint32_t slot, uint64_t offsetBytes) = 0;
+
         virtual void SetVertexBuffer(IBuffer* buffer, uint32_t strideBytes) = 0;
         virtual void SetIndexBuffer(IBuffer* buffer, bool is32Bit) = 0;
 

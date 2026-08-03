@@ -34,6 +34,7 @@ namespace NSRHIVulkan
         void SetPipeline(NSRHI::IPipeline* pipeline) override;
         void SetRootConstants(uint32_t offsetIn32BitValues, uint32_t num32BitValues, const void* data) override;
         void SetDescriptorHeap(NSRHI::IDescriptorHeap* heap) override;
+        void SetConstantBuffer(uint32_t slot, uint64_t offsetBytes) override;
 
         void SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t strideBytes) override;
         void SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit) override;
@@ -46,6 +47,7 @@ namespace NSRHIVulkan
 
     private:
         void BindDescriptorSet();
+        void FlushConstantBinds();
 
         VkCommandBuffer m_cmd{ VK_NULL_HANDLE };
 
@@ -54,6 +56,17 @@ namespace NSRHIVulkan
         // layout and SetDescriptorHeap can legally be called first.
         VulkanDescriptorHeap* m_boundHeap{ nullptr };
         bool m_boundLayoutUsesBindless{ false };
+
+        // Constant-slot state for the bound layout. Offsets accumulate as
+        // SetConstantBuffer calls arrive and go to the GPU in ONE
+        // vkCmdBindDescriptorSets at the next draw — the API takes every
+        // dynamic offset for the set together, so per-slot immediate
+        // binds are not expressible. DX12 has no equivalent state: its
+        // root CBVs rebind one at a time.
+        VkDescriptorSet m_boundConstantSet{ VK_NULL_HANDLE };
+        uint32_t m_boundConstantSlots{ 0 };
+        uint32_t m_constantOffsets[NSRHI::kMaxConstantBufferSlots]{};
+        bool m_constantsDirty{ false };
 
         // vkCmdPushConstants needs the pipeline layout, which D3D12's
         // SetGraphicsRoot32BitConstants doesn't (the root signature is

@@ -18,7 +18,15 @@
 // textures/materials are added.
 namespace NSRHI
 {
+    class IBuffer;
     class IDescriptorHeap;
+
+    // At most this many per-draw constant buffer slots in one layout.
+    // DXTerrain never exceeds 3 simultaneous root CBVs in any of its 11
+    // root signatures; 4 leaves one spare. Kept small on purpose: D3D12
+    // root-signature cost scales with declared parameters, and Vulkan's
+    // dynamic offsets are supplied for every declared slot at each bind.
+    inline constexpr uint32_t kMaxConstantBufferSlots = 4;
 
     struct PipelineLayoutDesc
     {
@@ -34,6 +42,17 @@ namespace NSRHI
         // pipeline-layout creation, so this cannot be deferred to bind
         // time the way D3D12 could.
         IDescriptorHeap* bindlessHeap{ nullptr };
+
+        // Per-draw constant buffer slots (the neutral form of DXTerrain's
+        // root CBVs — 23 SetGraphicsRootConstantBufferView sites). Slot N
+        // is register b{N+1} in HLSL (b0 stays the root-constant block)
+        // and [[vk::binding(N, 1)]] on Vulkan. `constantBuffer` is the
+        // ConstantAllocator's buffer, named here for the same reason as
+        // bindlessHeap: the DX12 backend stashes its base GPU address,
+        // and Vulkan writes it into the layout's dynamic-UBO descriptor
+        // set — both fixed at layout creation, only OFFSETS move per draw.
+        uint32_t numConstantBufferSlots{ 0 };
+        IBuffer* constantBuffer{ nullptr };
     };
 
     class IPipelineLayout

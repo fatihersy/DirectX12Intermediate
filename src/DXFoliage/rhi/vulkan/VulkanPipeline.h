@@ -33,11 +33,15 @@ namespace NSRHIVulkan
         // list can ask the pipeline it was just handed, without keeping a
         // pointer to the layout object alive alongside it.
         bool UsesBindlessSet() const { return m_usesBindlessSet; }
+        VkDescriptorSet ConstantSet() const { return m_constantSet; }
+        uint32_t NumConstantSlots() const { return m_numConstantSlots; }
 
     private:
         VkDevice m_device{ VK_NULL_HANDLE };
         VkPipeline m_pipeline{ VK_NULL_HANDLE };
         VkPipelineLayout m_layout{ VK_NULL_HANDLE }; // non-owning; owned by desc.layout
         bool m_usesBindlessSet{ false };
+        VkDescriptorSet m_constantSet{ VK_NULL_HANDLE }; // non-owning; owned by desc.layout
+        uint32_t m_numConstantSlots{ 0 };
     };
 }
