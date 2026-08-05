@@ -2,12 +2,19 @@
 
 namespace NSTool
 {
+    // inline, NOT static. In a header, `static` gives every translation
+    // unit its own private copy — so each TU that includes this without
+    // calling format() carries a dead function, which is what
+    // -Wunused-function was reporting 36 times (once per TU, one site).
+    // `inline` is the correct keyword for a header definition: one shared
+    // entity, no duplicates, no warning.
+
     // No-args overload. return the string directly without format
-    static std::string format(const std::string& str)
+    inline std::string format(const std::string& str)
     {
         return str;
     }
-    static std::wstring wformat(const std::wstring& str)
+    inline std::wstring wformat(const std::wstring& str)
     {
         return str;
     }

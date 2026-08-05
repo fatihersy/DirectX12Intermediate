@@ -51,5 +51,14 @@ float4 mainPS(PSInput input) : SV_TARGET
     // The index came from a push constant, so it is uniform across the
     // draw - no NonUniformResourceIndex needed until something indexes
     // per-pixel (material IDs will, one day).
-    return g_textures[pushConstants.textureIndex].Sample(g_sampler, input.uv);
+    float4 s = g_textures[pushConstants.textureIndex].Sample(g_sampler, input.uv);
+
+    // Modulate by alpha. A NO-OP for the checkerboard (alpha is 255
+    // everywhere, so rgb*1 == rgb), but it is what makes a font atlas
+    // legible: ImGui's atlas is white RGB with the glyph shape carried
+    // ENTIRELY in alpha, so sampling it raw would paint a solid white
+    // cube and prove nothing. This pass is temporary scaffolding for
+    // step B - the real ImGui shader multiplies by the vertex colour,
+    // which carries alpha of its own.
+    return float4(s.rgb * s.a, 1.0f);
 }

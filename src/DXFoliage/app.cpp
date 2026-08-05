@@ -1,8 +1,11 @@
 #include "stdafx.h"
 #include "app.h"
 
+#include "ImGuiInput.h"
 #include "Logger.h"
 #include "platform/PlatformUtils.h"
+
+#include "imgui.h"
 
 IApp* IApp::s_instance = nullptr;
 
@@ -94,8 +97,42 @@ void app::OnUpdate()
 {
     im_timer.Tick(NULL);
 
+    // The order of these four is load-bearing, so it lives in one place
+    // rather than spread across helpers:
+    //
+    //   1. Poll the OS once. ImGui and the app's own bindings then read
+    //      the SAME snapshot, so they can never disagree about a frame.
+    //   2. Queue those events for ImGui.
+    //   3. NewFrame turns the queue into this frame's hover/focus state —
+    //      and is what makes WantCaptureMouse/Keyboard valid.
+    //   4. Only now can app bindings ask whether ImGui claimed the input.
+    //      Running them earlier would answer with LAST frame's state,
+    //      which is a one-frame lag that shows up as a keypress leaking
+    //      through on the frame a text field gains focus.
+    //
+    // The UI itself belongs here, not in Renderer: Renderer owns the GPU
+    // side (ImGui::Render, uploads, the draw walk), while deciding what
+    // the UI SAYS is an application concern — and this is the only layer
+    // holding the input to drive it.
+    m_input->Update();
+
+    NSImGuiInput::Feed(m_input->GetKeyboardState(), m_input->GetMouseState(),
+        im_width, im_height, static_cast<float>(im_timer.GetElapsedSeconds()));
+
+    ImGui::NewFrame();
+    BuildUI();
+
     app::UpdateBindings();
 };
+
+void app::BuildUI()
+{
+    // The demo is the placeholder consumer: it exercises nearly every
+    // widget path, so it doubles as a regression test for the renderer
+    // half. Replace with real tooling (frame timings, render-pass
+    // toggles, a scene inspector) as those arrive.
+    ImGui::ShowDemoWindow();
+}
 void app::OnRender()
 {
     m_renderer.BeginFrame();
@@ -137,15 +174,25 @@ void app::ToggleFullScreen()
 
 void app::UpdateBindings()
 {
-    m_input->Update();
-
+    // Polling moved to OnUpdate — it has to happen before ImGui is fed,
+    // and both must see the same snapshot.
     const NSInput::KeyboardState kbState = m_input->GetKeyboardState();
     m_keyboardTracker.Update(kbState);
 
+    // Tracker updated FIRST, unconditionally, even when ImGui has the
+    // keyboard — it diffs against the previous frame, so skipping it
+    // while a text field has focus would make every key look "just
+    // pressed" the moment focus returns.
+    //
+    // End is deliberately exempt: it closes the app, and losing the
+    // ability to quit because a UI widget has focus is a worse bug than
+    // the shortcut firing while typing. Everything below it is not.
     if (m_keyboardTracker.IsKeyReleased(NSInput::EKey::End))
     {
         m_window->RequestClose();
     }
+
+    if (NSImGuiInput::WantsKeyboard()) return;
     if (m_keyboardTracker.IsKeyReleased(NSInput::EKey::Insert))
     {
         const NSInput::MouseState mouseState = m_input->GetMouseState();

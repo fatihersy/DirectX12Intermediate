@@ -24,18 +24,21 @@ namespace NSRHIVulkan
             }
         }
 
-        VkImageUsageFlags UsageFor(const NSRHI::TextureDesc& desc)
+        // A straight 1:1 translation now that the caller declares the whole
+        // set. The previous version INFERRED it — every non-depth texture
+        // got SAMPLED | TRANSFER_DST whether or not anything used them, and
+        // a depth buffer could never be sampled — which is exactly the
+        // over- and under-declaring the mask exists to end.
+        VkImageUsageFlags UsageFor(Flag<NSRHI::ETextureUsage> usage)
         {
-            if (desc.isDepthStencil) return VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-
-            VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-            if (desc.isRenderTarget)
-            {
-                // TRANSFER_SRC too: a render target is a candidate for the
-                // final blit to the backbuffer.
-                usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-            }
-            return usage;
+            VkImageUsageFlags flags{};
+            if (usage.HasLeastOne(NSRHI::ETextureUsage::Sampled))         flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+            if (usage.HasLeastOne(NSRHI::ETextureUsage::RenderTarget))    flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            if (usage.HasLeastOne(NSRHI::ETextureUsage::DepthStencil))    flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            if (usage.HasLeastOne(NSRHI::ETextureUsage::UnorderedAccess)) flags |= VK_IMAGE_USAGE_STORAGE_BIT;
+            if (usage.HasLeastOne(NSRHI::ETextureUsage::CopySource))      flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            if (usage.HasLeastOne(NSRHI::ETextureUsage::CopyDestination)) flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            return flags;
         }
     }
 
@@ -53,11 +56,13 @@ namespace NSRHIVulkan
           m_width(desc.width), m_height(desc.height), m_neutralFormat(desc.format)
     {
         ASSERT(desc.width > 0 and desc.height > 0, "Texture needs a non-zero extent");
+        ASSERT(not desc.usage.Empty(), "Texture created with no usage at all");
 
         const VkFormat format = ToVkFormat(desc.format);
         m_aspect = AspectFor(desc.format);
 
-        VkImageCreateInfo info{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        VkImageCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         info.imageType = VK_IMAGE_TYPE_2D;
         info.format = format;
         info.extent = { desc.width, desc.height, 1 };
@@ -69,7 +74,7 @@ namespace NSRHIVulkan
         // buffer and a copy rather than by writing pixels directly, which
         // is what LINEAR would be for.
         info.tiling = VK_IMAGE_TILING_OPTIMAL;
-        info.usage = UsageFor(desc);
+        info.usage = UsageFor(desc.usage);
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         // Required to be UNDEFINED (or PREINITIALIZED) at creation. The
         // first barrier moves it somewhere useful.
@@ -88,7 +93,8 @@ namespace NSRHIVulkan
 
     void VulkanTexture::CreateView(VkFormat format)
     {
-        VkImageViewCreateInfo info{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        VkImageViewCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         info.image = m_image;
         info.viewType = VK_IMAGE_VIEW_TYPE_2D;
         info.format = format;

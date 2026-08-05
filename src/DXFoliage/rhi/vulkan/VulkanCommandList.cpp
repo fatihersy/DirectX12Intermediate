@@ -75,7 +75,8 @@ namespace NSRHIVulkan
         const ImageBarrierState src = ToBarrierState(before);
         const ImageBarrierState dst = ToBarrierState(after);
 
-        VkImageMemoryBarrier2 barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+        VkImageMemoryBarrier2 barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
         barrier.srcStageMask = src.stage;
         barrier.srcAccessMask = src.access;
         barrier.dstStageMask = dst.stage;
@@ -94,7 +95,8 @@ namespace NSRHIVulkan
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.layerCount = 1;
 
-        VkDependencyInfo dependency{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        VkDependencyInfo dependency{};
+        dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         dependency.imageMemoryBarrierCount = 1;
         dependency.pImageMemoryBarriers = &barrier;
 
@@ -117,7 +119,8 @@ namespace NSRHIVulkan
             width = std::max(width, target->Width());
             height = std::max(height, target->Height());
 
-            VkRenderingAttachmentInfo info{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            VkRenderingAttachmentInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
             info.imageView = target->View();
             info.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             info.loadOp = attachment.clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -127,7 +130,8 @@ namespace NSRHIVulkan
             colors.push_back(info);
         }
 
-        VkRenderingAttachmentInfo depth{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        VkRenderingAttachmentInfo depth{};
+        depth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         const bool hasDepth = depthAttachment != nullptr and depthAttachment->target != nullptr;
         if (hasDepth)
         {
@@ -142,7 +146,8 @@ namespace NSRHIVulkan
             depth.clearValue.depthStencil.depth = depthAttachment->clearDepth;
         }
 
-        VkRenderingInfo info{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+        VkRenderingInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
         info.renderArea.extent = { width, height };
         info.layerCount = 1;
         info.colorAttachmentCount = static_cast<uint32_t>(colors.size());
@@ -269,26 +274,30 @@ namespace NSRHIVulkan
         m_constantsDirty = false;
     }
 
-    void VulkanCommandList::SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t)
+    void VulkanCommandList::SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t,
+                                            uint64_t offsetBytes, uint64_t)
     {
         auto* vkBuffer = static_cast<VulkanBuffer*>(buffer);
         if (not vkBuffer) return;
 
-        // The stride argument is ignored: Vulkan bakes it into the
-        // pipeline's VkVertexInputBindingDescription, whereas D3D12
-        // carries it on the vertex buffer view. The neutral signature
-        // keeps it because DX12 needs it.
+        // Two arguments ignored here, for opposite reasons. The STRIDE is
+        // baked into the pipeline's VkVertexInputBindingDescription,
+        // whereas D3D12 carries it on the buffer view. The SIZE is
+        // likewise implicit — Vulkan binds to the end of the buffer,
+        // while D3D12's view is an explicit (location, size) pair. Both
+        // stay in the neutral signature because DX12 needs them.
         const VkBuffer handle = vkBuffer->Raw();
-        const VkDeviceSize offset = 0;
+        const VkDeviceSize offset = offsetBytes;
         vkCmdBindVertexBuffers(m_cmd, 0, 1, &handle, &offset);
     }
 
-    void VulkanCommandList::SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit)
+    void VulkanCommandList::SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit,
+                                           uint64_t offsetBytes, uint64_t)
     {
         auto* vkBuffer = static_cast<VulkanBuffer*>(buffer);
         if (not vkBuffer) return;
 
-        vkCmdBindIndexBuffer(m_cmd, vkBuffer->Raw(), 0,
+        vkCmdBindIndexBuffer(m_cmd, vkBuffer->Raw(), offsetBytes,
             is32Bit ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
     }
 
@@ -315,32 +324,42 @@ namespace NSRHIVulkan
         vkCmdCopyBuffer(m_cmd, src->Raw(), dst->Raw(), 1, &region);
     }
 
-    void VulkanCommandList::CopyBufferToTexture(NSRHI::ITexture* destination, NSRHI::IBuffer* source)
+    void VulkanCommandList::CopyBufferToTexture(NSRHI::ITexture* destination, NSRHI::IBuffer* source,
+                                                const NSRHI::TextureRegion& region,
+                                                uint32_t srcRowPitchBytes,
+                                                uint64_t srcOffsetBytes)
     {
         auto* dst = static_cast<VulkanTexture*>(destination);
         auto* src = static_cast<VulkanBuffer*>(source);
         if (not dst or not src) return;
 
-        VkBufferImageCopy region{};
-        // Zero bufferRowLength/bufferImageHeight means "tightly packed to
-        // imageExtent". D3D12 cannot assume that - CopyTextureRegion needs
-        // an explicit RowPitch aligned to 256 bytes - so the DX12 side of
-        // this call will need a padded staging buffer where Vulkan does
-        // not. Worth knowing before that path is written.
-        region.bufferOffset = 0;
-        region.bufferRowLength = 0;
-        region.bufferImageHeight = 0;
-        region.imageSubresource.aspectMask = dst->Aspect();
-        region.imageSubresource.mipLevel = 0;
-        region.imageSubresource.baseArrayLayer = 0;
-        region.imageSubresource.layerCount = 1;
-        region.imageOffset = { 0, 0, 0 };
-        region.imageExtent = { dst->Width(), dst->Height(), 1 };
+        ASSERT(region.width > 0 and region.height > 0, "Empty copy region");
+        ASSERT(region.x + region.width <= dst->Width() and
+               region.y + region.height <= dst->Height(),
+            "Copy region extends past the texture");
 
-        // The caller is responsible for having transitioned the texture to
-        // CopyDestination first; this records the copy only, matching how
-        // CopyBuffer and the barrier calls are already split.
+        // bufferRowLength is in TEXELS, not bytes — the one place this
+        // differs from D3D12's PlacedFootprint.RowPitch, which is in
+        // bytes. Zero would mean "tightly packed to imageExtent", which
+        // is wrong whenever the caller padded rows for DX12's benefit or
+        // is uploading a sub-rect out of a wider atlas.
+        const uint32_t bytesPerTexel = NSRHI::BytesPerTexel(dst->Format());
+        ASSERT(bytesPerTexel > 0, "Texture format has no defined texel size");
+        ASSERT(srcRowPitchBytes % bytesPerTexel == 0,
+            "Row pitch must be a whole number of texels for Vulkan's bufferRowLength");
+
+        VkBufferImageCopy copy{};
+        copy.bufferOffset = srcOffsetBytes;
+        copy.bufferRowLength = srcRowPitchBytes / bytesPerTexel;
+        copy.bufferImageHeight = 0;  // tightly packed rows within the region
+        copy.imageSubresource.aspectMask = dst->Aspect();
+        copy.imageSubresource.mipLevel = 0;
+        copy.imageSubresource.baseArrayLayer = 0;
+        copy.imageSubresource.layerCount = 1;
+        copy.imageOffset = { static_cast<int32_t>(region.x), static_cast<int32_t>(region.y), 0 };
+        copy.imageExtent = { region.width, region.height, 1 };
+
         vkCmdCopyBufferToImage(m_cmd, src->Raw(), dst->Image(),
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
     }
 }

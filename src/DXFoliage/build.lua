@@ -9,7 +9,14 @@ architecture "x64"
 -- Target OS comes from --mox_target_os (see scripts/libmox.lua) rather
 -- than being hardcoded, so this same file builds for Windows or Linux.
 mox_target_system()
-warnings "Default"
+-- "Extra" is -Wall -Wextra. It used to be "Default", which emits NEITHER —
+-- so fatalwarnings was guarding an almost-empty set and 143 real warnings
+-- were invisible. Turning it on found no bugs, but four fixable patterns:
+-- static-in-header functions, a missing default member initializer,
+-- third-party headers arriving as -I instead of -isystem, and 52 Vulkan
+-- structs using partial aggregate init. All fixed rather than suppressed,
+-- so a warning appearing here now genuinely means something.
+warnings "Extra"
 fatalwarnings { "All" }
 multiprocessorcompile "On"
 
@@ -108,6 +115,16 @@ if _OPTIONS["mox_target_os"] == "linux" then
     end
 
     useConanPackage("wayland", true)
+
+    -- Third-party headers re-declared as EXTERNAL (-isystem) so their
+    -- warnings are not ours to fix. Conan's generated conandeps file adds
+    -- these with plain -I, which makes clang treat them as first-party and
+    -- report every -Wsign-compare inside libassert's expression
+    -- decomposition — 9 of them, none actionable. That generated file is
+    -- overwritten by `mox init`, so the override belongs here instead.
+    useConanPackage("libassert", false)
+    useConanPackage("cpptrace", false)
+    useConanPackage("imgui", false)
 
     -- DXC (libdxcompiler.so) rather than shaderc/glslang. Same HLSL
     -- frontend Windows already uses, which is the point: two frontends

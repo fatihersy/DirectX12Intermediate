@@ -109,11 +109,21 @@ namespace NSRHIDX12
 
     std::unique_ptr<NSRHI::ITexture> DX12Device::CreateTexture(const NSRHI::TextureDesc&)
     {
-        // Reserved for later — DX12Texture currently only backs swapchain
-        // RTVs and (dead) depth buffers, both backend-internal. A general
-        // sampled-texture constructor lands with the texture/model work,
-        // and wires in here then.
-        ASSERT(false, "CreateTexture: sampled-texture creation not implemented yet");
+        // NOT "reserved for later" any more — that comment was true when
+        // written and is now false. The depth buffer it calls dead is very
+        // much alive, and the front-end creates its render target, depth
+        // buffer, checkerboard AND ImGui's font atlas through here. This
+        // assert fires during Renderer::Initialize, so DX12 never reaches
+        // a frame at all.
+        //
+        // DX12Texture still has only two constructors — wrap a swapchain
+        // backbuffer, and create a depth-stencil. What is missing is a
+        // third for the general case: a committed resource with
+        // ResourceFlagsFor(desc.usage) (already written, and it already
+        // handles RenderTarget/UnorderedAccess/DENY_SHADER_RESOURCE), no
+        // RTV/DSV heap of its own, and COPY_DEST as the initial state so
+        // the regional CopyBufferToTexture path can fill it.
+        ASSERT(false, "CreateTexture: DX12 general texture constructor not written yet — see comment");
         return nullptr;
     }
 

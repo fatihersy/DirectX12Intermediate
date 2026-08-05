@@ -30,6 +30,13 @@ namespace NSRHIDX12
         void CreateShaderResourceView(NSRHI::IDescriptorHeap& heap, NSRHI::DescriptorOffset where,
                                       NSRHI::ITexture* texture) override;
 
+        // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT. Every row of a texture
+        // upload must start on this boundary; Vulkan has no such rule.
+        uint32_t TextureRowPitchAlignment() const override
+        {
+            return D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
+        }
+
         // --- Internal accessors (used by the backend, not exposed) ---
         ID3D12Device14* Raw() const { return m_device.Get(); }
         IDXGIFactory7* Factory() const { return m_factory.Get(); }

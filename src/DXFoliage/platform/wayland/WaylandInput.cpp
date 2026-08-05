@@ -212,6 +212,12 @@ namespace NSPlatformWayland
         // which are left null deliberately. We bind version 5, so the
         // compositor may never send them - and naming the fields keeps
         // this correct if the struct grows again.
+        //
+        // The two unused ones are named explicitly rather than omitted:
+        // "deliberately null" and "forgot" look identical to a reader and
+        // to -Wmissing-designated-field-initializers. Saying it in code
+        // means the day we bind v8 for high-resolution scroll, the
+        // compiler points here instead of staying silent.
         const wl_pointer_listener kPointerListener{
             .enter = WaylandInputCallbacks::PointerEnter,
             .leave = WaylandInputCallbacks::PointerLeave,
@@ -222,6 +228,8 @@ namespace NSPlatformWayland
             .axis_source = WaylandInputCallbacks::PointerAxisSource,
             .axis_stop = WaylandInputCallbacks::PointerAxisStop,
             .axis_discrete = WaylandInputCallbacks::PointerAxisDiscrete,
+            .axis_value120 = nullptr,            // protocol v8, unbound
+            .axis_relative_direction = nullptr,  // protocol v9, unbound
         };
 
         const zwp_relative_pointer_v1_listener kRelativePointerListener{

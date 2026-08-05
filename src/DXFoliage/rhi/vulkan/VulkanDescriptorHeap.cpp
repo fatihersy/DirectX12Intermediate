@@ -28,9 +28,10 @@ namespace NSRHIVulkan
         // trusting the caller. The update-after-bind limit is the one that
         // applies, and it is a different (usually far larger) number than
         // the ordinary one — 1,048,576 vs 1,000,000 on this RTX 3060.
-        VkPhysicalDeviceDescriptorIndexingProperties indexingProps{
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES };
-        VkPhysicalDeviceProperties2 props2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+        VkPhysicalDeviceDescriptorIndexingProperties indexingProps{};
+        indexingProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+        VkPhysicalDeviceProperties2 props2{};
+        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
         props2.pNext = &indexingProps;
         vkGetPhysicalDeviceProperties2(device.PhysicalDevice(), &props2);
 
@@ -46,7 +47,8 @@ namespace NSRHIVulkan
         // sampling and clamped addressing become a second immutable
         // sampler at another binding when something needs them (DXTerrain
         // uses exactly two).
-        VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_LINEAR;
         samplerInfo.minFilter = VK_FILTER_LINEAR;
         samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
@@ -85,12 +87,13 @@ namespace NSRHIVulkan
             | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
         const VkDescriptorBindingFlags flags[2]{ resourceFlags, 0 };
 
-        VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{
-            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+        VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{};
+        flagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
         flagsInfo.bindingCount = 2;
         flagsInfo.pBindingFlags = flags;
 
-        VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.pNext = &flagsInfo;
         layoutInfo.bindingCount = 2;
         layoutInfo.pBindings = bindings;
@@ -103,14 +106,16 @@ namespace NSRHIVulkan
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLER;
         poolSizes[1].descriptorCount = 1;
 
-        VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
         poolInfo.maxSets = 1;
         poolInfo.poolSizeCount = 2;
         poolInfo.pPoolSizes = poolSizes;
         VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_pool));
 
-        VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = m_pool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &m_setLayout;

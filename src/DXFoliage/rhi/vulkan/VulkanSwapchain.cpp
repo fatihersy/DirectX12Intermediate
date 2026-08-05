@@ -72,7 +72,8 @@ namespace NSRHIVulkan
         const VkSurfaceFormatKHR surfaceFormat = ChooseFormat(m_device.PhysicalDevice(), m_device.Surface());
         m_format = surfaceFormat.format;
 
-        VkSwapchainCreateInfoKHR info{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+        VkSwapchainCreateInfoKHR info{};
+        info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         info.surface = m_device.Surface();
         info.minImageCount = imageCount;
         info.imageFormat = m_format;
@@ -108,7 +109,16 @@ namespace NSRHIVulkan
                 m_device.Device(), image, m_format, m_extent.width, m_extent.height, neutralFormat));
         }
 
-        const VkSemaphoreCreateInfo semInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+        // Built in an IIFE so it can stay const: `{}` then assigning sType
+        // is what avoids -Wmissing-field-initializers, but that needs a
+        // mutable object, and this one is deliberately const because both
+        // loops below reuse it unchanged.
+        const VkSemaphoreCreateInfo semInfo = []
+        {
+            VkSemaphoreCreateInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            return info;
+        }();
         m_acquireSemaphores.resize(actualCount);
         m_renderFinishedSemaphores.resize(actualCount);
         for (uint32_t i{}; i < actualCount; ++i)
@@ -186,7 +196,8 @@ namespace NSRHIVulkan
 
         const VkSemaphore waitSemaphore = m_renderFinishedSemaphores[m_currentImage];
 
-        VkPresentInfoKHR info{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+        VkPresentInfoKHR info{};
+        info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         info.waitSemaphoreCount = 1;
         info.pWaitSemaphores = &waitSemaphore;
         info.swapchainCount = 1;

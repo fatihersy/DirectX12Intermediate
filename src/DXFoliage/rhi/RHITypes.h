@@ -40,6 +40,43 @@ namespace NSRHI
         D24_UNORM_S8_UINT,
     };
 
+    // Bytes one texel occupies. Needed to convert between a row pitch in
+    // BYTES (what a caller packs to, and what D3D12's PlacedFootprint
+    // wants) and one in TEXELS (what Vulkan's bufferRowLength wants).
+    // Neutral rather than per-backend because both need the same number
+    // and the caller needs it too, to size its staging allocation.
+    //
+    // Block-compressed formats would break this - BCn has no meaningful
+    // per-texel size - and would need a per-block size plus block
+    // dimensions instead. None are in EFormat yet; add that when the
+    // first compressed texture arrives, not before.
+    inline constexpr uint32_t BytesPerTexel(EFormat format)
+    {
+        switch (format)
+        {
+            case EFormat::R8G8B8A8_UNORM:     return 4u;
+            case EFormat::B8G8R8A8_UNORM:     return 4u;
+            case EFormat::D32_FLOAT:          return 4u;
+            case EFormat::D24_UNORM_S8_UINT:  return 4u;
+            case EFormat::R32G32_FLOAT:       return 8u;
+            case EFormat::R16G16B16A16_FLOAT: return 8u;
+            case EFormat::R32G32B32_FLOAT:    return 12u;
+            case EFormat::R32G32B32A32_FLOAT: return 16u;
+            case EFormat::Unknown:
+            default:                          return 0u;
+        }
+    }
+
+    // A rectangle within a texture's subresource 0. The whole-texture case
+    // is just {0, 0, width, height}.
+    struct TextureRegion
+    {
+        uint32_t x{};
+        uint32_t y{};
+        uint32_t width{};
+        uint32_t height{};
+    };
+
     // What a resource is being used for right now — the neutral version
     // of a D3D12_RESOURCE_STATES transition / a Vulkan image layout +
     // pipeline barrier. Each backend maps these onto its own native

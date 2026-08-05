@@ -33,7 +33,8 @@ namespace NSRHIVulkan
                 bindings[slot].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
             }
 
-            VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+            VkDescriptorSetLayoutCreateInfo layoutInfo{};
+            layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
             layoutInfo.bindingCount = m_numConstantSlots;
             layoutInfo.pBindings = bindings;
             VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_constantSetLayout));
@@ -42,13 +43,15 @@ namespace NSRHIVulkan
             poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
             poolSize.descriptorCount = m_numConstantSlots;
 
-            VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            VkDescriptorPoolCreateInfo poolInfo{};
+            poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             poolInfo.maxSets = 1;
             poolInfo.poolSizeCount = 1;
             poolInfo.pPoolSizes = &poolSize;
             VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_constantPool));
 
-            VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            VkDescriptorSetAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
             allocInfo.descriptorPool = m_constantPool;
             allocInfo.descriptorSetCount = 1;
             allocInfo.pSetLayouts = &m_constantSetLayout;
@@ -67,7 +70,9 @@ namespace NSRHIVulkan
                 bufferInfos[slot].offset = 0;  // the dynamic offset supplies the rest
                 bufferInfos[slot].range = NSRHI::kConstantBufferWindowBytes;
 
-                writes[slot] = VkWriteDescriptorSet{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                // Already value-initialized by the array's {} above, so
+                // this only needs the sType — no temporary to assign from.
+                writes[slot].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 writes[slot].dstSet = m_constantSet;
                 writes[slot].dstBinding = slot;
                 writes[slot].descriptorCount = 1;
@@ -93,7 +98,8 @@ namespace NSRHIVulkan
         {
             if (bindlessSetLayout == VK_NULL_HANDLE)
             {
-                VkDescriptorSetLayoutCreateInfo emptyInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+                VkDescriptorSetLayoutCreateInfo emptyInfo{};
+                emptyInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
                 VK_CHECK(vkCreateDescriptorSetLayout(m_device, &emptyInfo, nullptr, &m_emptySet0Layout));
                 sets[0] = m_emptySet0Layout;
             }
@@ -104,7 +110,8 @@ namespace NSRHIVulkan
             setCount = 1;
         }
 
-        VkPipelineLayoutCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+        VkPipelineLayoutCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         if (desc.num32BitRootConstants > 0)
         {
             info.pushConstantRangeCount = 1;

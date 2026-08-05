@@ -27,7 +27,12 @@ enum EArguments
 struct SCmdArg
 {
     std::vector<std::string> aliases;
-    std::string value;
+    // Explicitly default-initialized like the two bools below. It always
+    // behaved this way (std::string default-constructs), but saying so
+    // silences -Wmissing-designated-field-initializers at the three
+    // g_CmdArguments entries, which name .aliases/.expectsValue and leave
+    // this one out.
+    std::string value{};
     bool present{};
     bool expectsValue{};
 };

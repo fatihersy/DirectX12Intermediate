@@ -35,14 +35,19 @@ namespace NSRHIDX12
         void SetDescriptorHeap(NSRHI::IDescriptorHeap* heap) override;
         void SetConstantBuffer(uint32_t slot, uint64_t offsetBytes) override;
 
-        void SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t strideBytes) override;
-        void SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit) override;
+        void SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t strideBytes,
+                             uint64_t offsetBytes = 0, uint64_t sizeBytes = 0) override;
+        void SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit,
+                            uint64_t offsetBytes = 0, uint64_t sizeBytes = 0) override;
 
         void Draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex) override;
         void DrawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset) override;
 
         void CopyBuffer(NSRHI::IBuffer* destination, NSRHI::IBuffer* source, size_t sizeBytes) override;
-        void CopyBufferToTexture(NSRHI::ITexture* destination, NSRHI::IBuffer* source) override;
+        void CopyBufferToTexture(NSRHI::ITexture* destination, NSRHI::IBuffer* source,
+                                 const NSRHI::TextureRegion& region,
+                                 uint32_t srcRowPitchBytes,
+                                 uint64_t srcOffsetBytes = 0) override;
 
     private:
         NSDX12::GraphicsCommandList m_cmd;

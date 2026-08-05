@@ -62,7 +62,15 @@ namespace NSRHIDX12
             psoDesc.PS = CD3DX12_SHADER_BYTECODE(psBlob->GetBufferPointer(), psBlob->GetBufferSize());
         }
 
-        psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);  // D3D12_DEFAULT is CULL_BACK
+        switch (desc.cullMode)
+        {
+            case NSRHI::ECullMode::None:  rasterDesc.CullMode = D3D12_CULL_MODE_NONE; break;
+            case NSRHI::ECullMode::Front: rasterDesc.CullMode = D3D12_CULL_MODE_FRONT; break;
+            case NSRHI::ECullMode::Back:
+            default:                      rasterDesc.CullMode = D3D12_CULL_MODE_BACK; break;
+        }
+        psoDesc.RasterizerState = rasterDesc;
 
         // D3D12_DEFAULT is already "no blending", so Opaque needs no edits.
         // Only RenderTarget[0] is touched: NumRenderTargets never exceeds 1

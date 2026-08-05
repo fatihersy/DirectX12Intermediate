@@ -98,7 +98,8 @@ namespace NSRHIVulkan
 
     bool VulkanDevice::CreateInstance()
     {
-        VkApplicationInfo appInfo{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
+        VkApplicationInfo appInfo{};
+        appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.pApplicationName = "DXFoliage";
         appInfo.pEngineName = "DXFoliage";
         // 1.3 for dynamic rendering (vkCmdBeginRendering), which this
@@ -122,7 +123,8 @@ namespace NSRHIVulkan
             g_FWarn("Vulkan validation layer unavailable; continuing without it");
         }
 
-        VkInstanceCreateInfo info{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+        VkInstanceCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         info.pApplicationInfo = &appInfo;
         info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         info.ppEnabledExtensionNames = extensions.data();
@@ -138,7 +140,8 @@ namespace NSRHIVulkan
 
         if (m_validationEnabled)
         {
-            VkDebugUtilsMessengerCreateInfoEXT dbg{ VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
+            VkDebugUtilsMessengerCreateInfoEXT dbg{};
+            dbg.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
             // All four severities. INFO and VERBOSE are noisy — the loader
             // and layer narrate object creation at those levels — but
             // subscribing to only WARNING/ERROR meant a clean log could not
@@ -162,7 +165,8 @@ namespace NSRHIVulkan
 
     bool VulkanDevice::CreateSurface(wl_display* display, wl_surface* surface)
     {
-        VkWaylandSurfaceCreateInfoKHR info{ VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR };
+        VkWaylandSurfaceCreateInfoKHR info{};
+        info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
         info.display = display;
         info.surface = surface;
 
@@ -248,7 +252,8 @@ namespace NSRHIVulkan
     bool VulkanDevice::CreateLogicalDevice()
     {
         const float priority = 1.0f;
-        VkDeviceQueueCreateInfo queueInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
+        VkDeviceQueueCreateInfo queueInfo{};
+        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         queueInfo.queueFamilyIndex = m_queueFamily;
         queueInfo.queueCount = 1;
         queueInfo.pQueuePriorities = &priority;
@@ -256,7 +261,8 @@ namespace NSRHIVulkan
         const char* deviceExtensions[]{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
         // Dynamic rendering is core in 1.3 but still has to be switched on.
-        VkPhysicalDeviceVulkan13Features features13{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+        VkPhysicalDeviceVulkan13Features features13{};
+        features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         features13.dynamicRendering = VK_TRUE;
         features13.synchronization2 = VK_TRUE;
 
@@ -285,7 +291,8 @@ namespace NSRHIVulkan
         //   ...VariableDescriptorCount    - allocate the real capacity at
         //                                   run time instead of baking a
         //                                   maximum into the layout
-        VkPhysicalDeviceVulkan12Features features12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+        VkPhysicalDeviceVulkan12Features features12{};
+        features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
         features12.descriptorIndexing = VK_TRUE;
         features12.runtimeDescriptorArray = VK_TRUE;
         features12.descriptorBindingPartiallyBound = VK_TRUE;
@@ -294,10 +301,12 @@ namespace NSRHIVulkan
         features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
         features13.pNext = &features12;
 
-        VkPhysicalDeviceFeatures2 features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        VkPhysicalDeviceFeatures2 features2{};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         features2.pNext = &features13;
 
-        VkDeviceCreateInfo info{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+        VkDeviceCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         info.pNext = &features2;
         info.queueCreateInfoCount = 1;
         info.pQueueCreateInfos = &queueInfo;
@@ -385,7 +394,8 @@ namespace NSRHIVulkan
         imageInfo.imageView = vkTexture->View();
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write.dstSet = vkHeap.Set();
         write.dstBinding = 0;  // kBindingResources
         write.dstArrayElement = where.index;

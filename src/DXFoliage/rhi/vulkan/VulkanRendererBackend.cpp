@@ -102,7 +102,8 @@ namespace NSRHIVulkan
 
             m_swapchain = std::make_unique<VulkanSwapchain>(*m_device, width, height);
 
-            VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+            VkCommandPoolCreateInfo poolInfo{};
+            poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
             // RESET_COMMAND_BUFFER lets each frame's buffer be re-recorded
             // individually, which is the equivalent of D3D12 resetting a
             // per-frame command allocator.
@@ -110,12 +111,14 @@ namespace NSRHIVulkan
             poolInfo.queueFamilyIndex = m_device->QueueFamilyIndex();
             VK_CHECK(vkCreateCommandPool(m_device->Device(), &poolInfo, nullptr, &m_commandPool));
 
-            VkCommandBufferAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+            VkCommandBufferAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             allocInfo.commandPool = m_commandPool;
             allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             allocInfo.commandBufferCount = 1;
 
-            VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+            VkFenceCreateInfo fenceInfo{};
+            fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
             for (FrameResources& frame : m_frames)
             {
@@ -197,7 +200,8 @@ namespace NSRHIVulkan
             // something that can't be recorded into.
             VK_CHECK(vkResetCommandBuffer(frame.commandBuffer, 0));
 
-            VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+            VkCommandBufferBeginInfo beginInfo{};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
             VK_CHECK(vkBeginCommandBuffer(frame.commandBuffer, &beginInfo));
 
@@ -264,7 +268,8 @@ namespace NSRHIVulkan
             // with it.
             const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-            VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+            VkSubmitInfo submit{};
+            submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
             submit.waitSemaphoreCount = 1;
             submit.pWaitSemaphores = &waitSemaphore;
             submit.pWaitDstStageMask = &waitStage;

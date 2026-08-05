@@ -49,7 +49,11 @@ namespace NSRHIDX12
                 .width = width,
                 .height = height,
                 .format = NSRHI::EFormat::R8G8B8A8_UNORM,
-                .isRenderTarget = true
+                // Descriptive only — the swapchain already created these
+                // images; this desc just records what they are for the
+                // wrapping DX12Texture. CopyDestination because EndFrame
+                // blits the front-end's target into them.
+                .usage = NSRHI::ETextureUsage::RenderTarget | NSRHI::ETextureUsage::CopyDestination
             });
         }
     }

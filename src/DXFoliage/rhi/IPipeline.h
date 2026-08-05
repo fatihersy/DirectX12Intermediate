@@ -57,6 +57,19 @@ namespace NSRHI
         AlphaBlend,
     };
 
+    // Back-face culling was hardcoded until ImGui needed None. Not an
+    // ImGui accommodation though — DXTerrain uses all three, and None
+    // MORE than Back (5 sites vs 2), because two-sided geometry is the
+    // norm for foliage: a leaf card has to survive being seen from
+    // behind. Front exists for the same reason it does there: rendering
+    // the inside of a skybox or cubemap capture.
+    enum class ECullMode : uint8_t
+    {
+        Back,   // the default everything used before this existed
+        None,
+        Front,
+    };
+
     // One entry per vertex input, matching an HLSL semantic
     // (e.g. "POSITION", "COLOR") to where that data lives in the vertex
     // buffer. DXC assigns SPIR-V input locations in declaration order,
@@ -93,6 +106,7 @@ namespace NSRHI
         bool depthWriteEnabled{ true };
 
         EBlendMode blendMode{ EBlendMode::Opaque };
+        ECullMode cullMode{ ECullMode::Back };
 
         IPipelineLayout* layout{ nullptr };
     };

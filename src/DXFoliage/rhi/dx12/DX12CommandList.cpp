@@ -149,27 +149,52 @@ namespace NSRHIDX12
 
     void DX12CommandList::SetDescriptorHeap(NSRHI::IDescriptorHeap*)
     {
-        // Reserved for later — bindless descriptor heaps are deferred
-        // (see IDescriptorHeap.h). Lands with the texture/model work.
-        ASSERT(false, "SetDescriptorHeap: bindless not implemented yet");
+        // NOT "deferred" any more — that comment was true when written and
+        // is now false. The bindless model is decided and implemented:
+        // VulkanCommandList binds its set here, DX12DescriptorHeap exists
+        // with Raw() and GpuHandle(), and the front-end calls this EVERY
+        // FRAME from Renderer::DrawScene. So this assert is reached
+        // immediately on DX12, not eventually.
+        //
+        // What is actually missing is two calls:
+        //   1. m_cmd.SetDescriptorHeaps(1, &heap->Raw()) — right here.
+        //   2. SetGraphicsRootDescriptorTable(rootParamIndex,
+        //      heap->GpuHandle(0)) — which needs the root-parameter index
+        //      from the bound pipeline's layout, so it has to be DEFERRED
+        //      to SetPipeline exactly as VulkanCommandList defers its
+        //      vkCmdBindDescriptorSets for the same reason.
+        // DX12PipelineLayout already computes that index (it lays root
+        // params out as [constants?][bindless table?][CBV slots] and
+        // exposes ConstantRootParamBase()); the table's own index is the
+        // one before that base when usesBindlessDescriptorTable is set.
+        ASSERT(false, "SetDescriptorHeap: DX12 bindless bind not written yet — see comment");
     }
 
-    void DX12CommandList::SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t strideBytes)
+    void DX12CommandList::SetVertexBuffer(NSRHI::IBuffer* buffer, uint32_t strideBytes,
+                                          uint64_t offsetBytes, uint64_t sizeBytes)
     {
         auto* dx = static_cast<DX12Buffer*>(buffer);
+        ASSERT(offsetBytes < dx->Size(), "Vertex buffer offset past the end");
+
         D3D12_VERTEX_BUFFER_VIEW vbv{};
-        vbv.BufferLocation = dx->GPUAddress();
-        vbv.SizeInBytes = static_cast<UINT>(dx->Size());
+        vbv.BufferLocation = dx->GPUAddress() + offsetBytes;
+        // SizeInBytes must describe the range from the offset, not the
+        // whole buffer — the view is (location, size) and D3D12 reads
+        // vertexOffset relative to BufferLocation. Zero means "the rest".
+        vbv.SizeInBytes = static_cast<UINT>(sizeBytes > 0 ? sizeBytes : dx->Size() - offsetBytes);
         vbv.StrideInBytes = strideBytes;
         m_cmd.IASetVertexBuffers(0, 1, &vbv);
     }
 
-    void DX12CommandList::SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit)
+    void DX12CommandList::SetIndexBuffer(NSRHI::IBuffer* buffer, bool is32Bit,
+                                         uint64_t offsetBytes, uint64_t sizeBytes)
     {
         auto* dx = static_cast<DX12Buffer*>(buffer);
+        ASSERT(offsetBytes < dx->Size(), "Index buffer offset past the end");
+
         D3D12_INDEX_BUFFER_VIEW ibv{};
-        ibv.BufferLocation = dx->GPUAddress();
-        ibv.SizeInBytes = static_cast<UINT>(dx->Size());
+        ibv.BufferLocation = dx->GPUAddress() + offsetBytes;
+        ibv.SizeInBytes = static_cast<UINT>(sizeBytes > 0 ? sizeBytes : dx->Size() - offsetBytes);
         ibv.Format = is32Bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
         m_cmd.IASetIndexBuffer(&ibv);
     }
@@ -191,10 +216,49 @@ namespace NSRHIDX12
         m_cmd.CopyBufferRegion(dst->Raw(), 0, src->Raw(), 0, sizeBytes);
     }
 
-    void DX12CommandList::CopyBufferToTexture(NSRHI::ITexture*, NSRHI::IBuffer*)
+    void DX12CommandList::CopyBufferToTexture(NSRHI::ITexture* destination, NSRHI::IBuffer* source,
+                                              const NSRHI::TextureRegion& region,
+                                              uint32_t srcRowPitchBytes,
+                                              uint64_t srcOffsetBytes)
     {
-        // Reserved for later — needs the placed-footprint / UpdateSubresources
-        // dance; lands with the texture-upload (model) work.
-        ASSERT(false, "CopyBufferToTexture: not implemented yet");
+        auto* dst = static_cast<DX12Texture*>(destination);
+        auto* src = static_cast<DX12Buffer*>(source);
+        if (not dst or not src) return;
+
+        ASSERT(region.width > 0 and region.height > 0, "Empty copy region");
+        ASSERT(region.x + region.width <= dst->Width() and
+               region.y + region.height <= dst->Height(),
+            "Copy region extends past the texture");
+        // The hard D3D12 rule, and the reason the pitch is an explicit
+        // parameter rather than derived from the region. Vulkan has no
+        // equivalent constraint — this asymmetry is the whole point of
+        // IDevice::TextureRowPitchAlignment().
+        ASSERT((srcRowPitchBytes % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT) == 0,
+            "Row pitch must be 256-byte aligned; pack to IDevice::TextureRowPitchAlignment()");
+        // A placed footprint's offset has its own, coarser alignment.
+        ASSERT((srcOffsetBytes % D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) == 0,
+            "Placed-footprint offset must be 512-byte aligned on D3D12");
+
+        // RowPitch is in BYTES here; Vulkan's bufferRowLength is in
+        // TEXELS. The neutral parameter is bytes and each backend
+        // converts (or does not) on its own side.
+        D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+        srcLoc.pResource = src->Raw();
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint.Offset = srcOffsetBytes;
+        srcLoc.PlacedFootprint.Footprint.Format = ToDXGIFormat(dst->Format());
+        srcLoc.PlacedFootprint.Footprint.Width = region.width;
+        srcLoc.PlacedFootprint.Footprint.Height = region.height;
+        srcLoc.PlacedFootprint.Footprint.Depth = 1;
+        srcLoc.PlacedFootprint.Footprint.RowPitch = srcRowPitchBytes;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+        dstLoc.pResource = dst->Raw();
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
+
+        // The destination offset rides on the call rather than the
+        // footprint — the same shape ImGui's own DX12 backend uses.
+        m_cmd.CopyTextureRegion(&dstLoc, region.x, region.y, 0, &srcLoc, nullptr);
     }
 }

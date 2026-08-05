@@ -48,29 +48,50 @@ namespace NSAllocator
         }
     };
 
-    class ConstantAllocator
+    // Generalized when ImGui arrived and needed the identical ring for
+    // per-frame VERTEX and INDEX data: it rebuilds its whole geometry
+    // stream every frame, which is the same hazard and the same fix as
+    // per-draw constants. One class, two alignments, rather than two
+    // copies of the bump-and-wrap arithmetic.
+    class RingAllocator
     {
     public:
-        ConstantAllocator() = default;
-        // buffer: EBufferUsage::Constant, cpuVisible, created by the
-        // front-end and named in every PipelineLayoutDesc that declares
-        // constant slots. Must outlive this allocator (non-owning — same
-        // pattern as RingHeap over IDescriptorHeap). Its size must be
-        // ring bytes + kConstantBufferWindowBytes of tail slack; see
-        // RHITypes.h for why the slack exists.
-        ConstantAllocator(NSRHI::IBuffer& buffer, uint32_t framesInFlight);
+        RingAllocator() = default;
+
+        // buffer     - cpuVisible, created by the front-end, must outlive
+        //              this allocator (non-owning, same pattern as
+        //              RingHeap over IDescriptorHeap).
+        // alignment  - kConstantBufferAlignment (256) for constants; the
+        //              vertex stride for vertex data; index size for
+        //              indices. Must be a power of two.
+        // tailSlack  - bytes reserved after the last ring byte, excluded
+        //              from the frame regions. Constants need
+        //              kConstantBufferWindowBytes of it because a Vulkan
+        //              dynamic-UBO descriptor's range is fixed and
+        //              offset+range must stay in-buffer. Vertex and index
+        //              bindings take an offset with no range, so they
+        //              pass 0.
+        RingAllocator(NSRHI::IBuffer& buffer, uint32_t framesInFlight,
+                      size_t alignment, size_t tailSlack = 0);
 
         // Call once per frame with IRendererBackend::FrameIndex(), right
         // next to the descriptor ring's BeginFrame — the same fence wait
-        // makes both safe.
+        // makes every ring safe.
         void BeginFrame(uint32_t frameIndex);
 
         Ctx Allocate(size_t size);
+
+        // The buffer allocations come from — needed by any call that
+        // takes (buffer, offset) rather than a pointer, e.g.
+        // ICommandList::CopyBufferToTexture or SetVertexBuffer.
+        NSRHI::IBuffer* Buffer() const { return m_buffer; }
 
     private:
         NSRHI::IBuffer* m_buffer{ nullptr };
         uint8_t* m_cpuBase{ nullptr };
 
+        size_t m_alignment{ NSRHI::kConstantBufferAlignment };
+        size_t m_maxAllocation{};
         size_t m_frameSize{};
         size_t m_frameEnd{};
         size_t m_offset{};

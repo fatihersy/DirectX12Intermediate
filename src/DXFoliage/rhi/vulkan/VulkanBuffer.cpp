@@ -22,7 +22,8 @@ namespace NSRHIVulkan
     VulkanBuffer::VulkanBuffer(VulkanDevice& device, const NSRHI::BufferDesc& desc)
         : m_device(device), m_size(desc.sizeBytes), m_cpuVisible(desc.cpuVisible)
     {
-        VkBufferCreateInfo info{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        VkBufferCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         info.size = desc.sizeBytes;
         info.usage = ToUsage(desc.usage);
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;

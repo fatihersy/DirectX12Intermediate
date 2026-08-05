@@ -45,6 +45,9 @@ namespace NSRHIVulkan
         void CreateShaderResourceView(NSRHI::IDescriptorHeap& heap, NSRHI::DescriptorOffset where,
                                       NSRHI::ITexture* texture) override;
 
+        // Vulkan accepts tightly packed rows, so nothing to align to.
+        uint32_t TextureRowPitchAlignment() const override { return 1; }
+
         // --- Internal accessors (backend-only, not exposed) ---
         VkInstance Instance() const { return m_instance; }
         VkPhysicalDevice PhysicalDevice() const { return m_physicalDevice; }

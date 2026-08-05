@@ -2,10 +2,12 @@
 
 #include "Allocator.h"
 #include "Descriptor.h"
+#include "ImGuiPass.h"
 #include "rhi/IRendererBackend.h"
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace NSScene { class IScene; }
 
@@ -37,7 +39,6 @@ public:
 
 private:
     void CreateCheckerCubeResources();
-    void CreateBlendProofResources();  // TEMP-BLEND
     void CreateFrameTargets();
 
     std::unique_ptr<NSRHI::IRendererBackend> m_backend;
@@ -57,7 +58,25 @@ private:
     // same in-flight contract as the descriptor ring (see Allocator.h).
     // Named in every pipeline layout that declares constant slots.
     std::unique_ptr<NSRHI::IBuffer> m_constantBuffer;
-    NSAllocator::ConstantAllocator m_constants;
+    NSAllocator::RingAllocator m_constants;
+
+    // Per-frame GEOMETRY, the same ring pattern as constants. Exists for
+    // anything that rebuilds its vertices every frame — ImGui first,
+    // foliage instance data later. Two buffers rather than one because
+    // EBufferUsage is single-choice and Vulkan needs distinct
+    // VERTEX_BUFFER_BIT / INDEX_BUFFER_BIT.
+    std::unique_ptr<NSRHI::IBuffer> m_dynamicVertexBuffer;
+    std::unique_ptr<NSRHI::IBuffer> m_dynamicIndexBuffer;
+    NSAllocator::RingAllocator m_dynamicVerts;
+    NSAllocator::RingAllocator m_dynamicIndices;
+
+    // Staging for texture uploads. 512-aligned: D3D12 placed footprints
+    // require it, and a ring beats a per-texture buffer because the frame
+    // fence already says when the bytes are safe to reuse.
+    std::unique_ptr<NSRHI::IBuffer> m_uploadBuffer;
+    NSAllocator::RingAllocator m_uploads;
+
+    ImGuiPass m_imgui;
 
     // Demo content: a 4x4x4 checkerboard cube — the bindless texture
     // path's first consumer (slot from AllocateStatic, index pushed as a
@@ -76,18 +95,11 @@ private:
     // front-end has no per-resource fence to know when the GPU is done
     // reading it. 256 KB of idle staging is cheaper than the machinery.
     std::unique_ptr<NSRHI::IBuffer> m_checkerStaging;
+    // Padded to the backend's TextureRowPitchAlignment(), so the copy can
+    // be told the real stride rather than assuming tight rows.
+    uint32_t m_checkerRowPitch{};
     NSRHI::DescriptorHandle m_checkerSlot;
     bool m_checkerUploadPending{ false };
-
-    // TEMP-BLEND: proves EBlendMode::AlphaBlend reaches the GPU, ahead of
-    // ImGui depending on it. A half-transparent quad drawn over the cubes:
-    // if blending works the cubes show through, if it silently does
-    // nothing they are hidden behind a solid rectangle. Delete once ImGui
-    // renders - that becomes the real consumer.
-    std::unique_ptr<NSRHI::IPipeline> m_blendPipeline;
-    std::unique_ptr<NSRHI::IBuffer> m_quadVertexBuffer;
-    std::unique_ptr<NSRHI::IBuffer> m_quadIndexBuffer;
-    uint32_t m_quadIndexCount{};
 
     // Recreated on resize: both must match the backbuffer extent, and
     // unlike the swapchain images nothing else owns them. The scene is

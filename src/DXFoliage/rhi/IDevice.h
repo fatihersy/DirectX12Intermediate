@@ -60,5 +60,13 @@ namespace NSRHI
         // versions of this interface went wrong.
         virtual void CreateShaderResourceView(IDescriptorHeap& heap, DescriptorOffset where,
                                               ITexture* texture) = 0;
+
+        // Row-pitch alignment a texture upload must be packed to, in
+        // bytes. 256 on D3D12 (D3D12_TEXTURE_DATA_PITCH_ALIGNMENT); 1 on
+        // Vulkan, which accepts tight packing. Queried rather than
+        // assumed so the front-end packs correctly for whichever backend
+        // is live — the single place the two APIs genuinely disagree
+        // about texture uploads.
+        virtual uint32_t TextureRowPitchAlignment() const = 0;
     };
 }

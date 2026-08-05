@@ -7,6 +7,8 @@
 
 #include "rhi/RendererBackendFactory.h"
 
+#include "imgui.h"
+
 #include <cstring>
 
 namespace
@@ -82,12 +84,64 @@ bool Renderer::Initialize(NSPlatform::IWindow& window, uint32_t width, uint32_t 
             .usage = NSRHI::EBufferUsage::Constant,
             .cpuVisible = true
         });
-        m_constants = NSAllocator::ConstantAllocator(*m_constantBuffer, frames);
+        m_constants = NSAllocator::RingAllocator(
+            *m_constantBuffer, frames,
+            NSRHI::kConstantBufferAlignment, NSRHI::kConstantBufferWindowBytes);
+
+        // Per-frame geometry. 4 MB of vertices per frame is ~200k ImGui
+        // verts, far past any realistic debug UI; indices get a quarter of
+        // that. No tail slack — unlike a dynamic UBO descriptor, a vertex
+        // or index binding takes an offset with no fixed range.
+        //
+        // Alignment 16: comfortably above every vertex stride in play and
+        // a multiple of the 2- and 4-byte index sizes, so one number
+        // serves both rings without tying them to a particular struct.
+        constexpr size_t kDynamicVertexBytesPerFrame = 4 * 1024 * 1024;
+        constexpr size_t kDynamicIndexBytesPerFrame = 1 * 1024 * 1024;
+        constexpr size_t kGeometryAlignment = 16;
+
+        m_dynamicVertexBuffer = m_backend->GetDevice().CreateBuffer(NSRHI::BufferDesc{
+            .sizeBytes = kDynamicVertexBytesPerFrame * frames,
+            .usage = NSRHI::EBufferUsage::Vertex,
+            .cpuVisible = true
+        });
+        m_dynamicIndexBuffer = m_backend->GetDevice().CreateBuffer(NSRHI::BufferDesc{
+            .sizeBytes = kDynamicIndexBytesPerFrame * frames,
+            .usage = NSRHI::EBufferUsage::Index,
+            .cpuVisible = true
+        });
+        m_dynamicVerts = NSAllocator::RingAllocator(*m_dynamicVertexBuffer, frames, kGeometryAlignment);
+        m_dynamicIndices = NSAllocator::RingAllocator(*m_dynamicIndexBuffer, frames, kGeometryAlignment);
+
+        // Texture upload staging. 8 MB/frame covers a 1024x1024 RGBA
+        // atlas twice over. Alignment 512 is D3D12's
+        // TEXTURE_DATA_PLACEMENT_ALIGNMENT for placed footprints — the
+        // assert in DX12CommandList::CopyBufferToTexture checks it, and
+        // Vulkan does not care.
+        constexpr size_t kUploadBytesPerFrame = 8 * 1024 * 1024;
+        constexpr size_t kPlacedFootprintAlignment = 512;
+
+        m_uploadBuffer = m_backend->GetDevice().CreateBuffer(NSRHI::BufferDesc{
+            .sizeBytes = kUploadBytesPerFrame * frames,
+            .usage = NSRHI::EBufferUsage::Upload,
+            .cpuVisible = true
+        });
+        m_uploads = NSAllocator::RingAllocator(
+            *m_uploadBuffer, frames, kPlacedFootprintAlignment);
     }
 
     CreateFrameTargets();
     CreateCheckerCubeResources();
-    CreateBlendProofResources();  // TEMP-BLEND
+
+    // Context here rather than inside ImGuiPass: it is shared with
+    // whatever feeds input, which is a platform concern, not a renderer
+    // one. The pass only owns the GPU-side halves.
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    m_imgui.Initialize(m_backend->GetDevice(), *m_descriptorHeap, m_descriptors,
+        m_uploads, m_dynamicVerts, m_dynamicIndices,
+        m_backend->BackBufferFormat(), kDepthFormat);
 
     return true;
 }
@@ -102,18 +156,25 @@ void Renderer::CreateFrameTargets()
     // Matches the backbuffer format so the backend's blit needs no
     // conversion. Once the scene goes HDR this becomes a float format and
     // a tonemapping pass has to produce a display-format image instead.
+    // CopySource because EndFrame blits this into the backbuffer. NOT
+    // Sampled: nothing reads it yet — the tonemap pass adds that bit when
+    // it arrives, and until then the driver is free to compress it in
+    // ways an SRV would forbid.
     m_renderTarget = m_backend->GetDevice().CreateTexture(NSRHI::TextureDesc{
         .width = m_width,
         .height = m_height,
         .format = m_backend->BackBufferFormat(),
-        .isRenderTarget = true
+        .usage = NSRHI::ETextureUsage::RenderTarget | NSRHI::ETextureUsage::CopySource
     });
 
+    // DepthStencil alone, so DX12 can add DENY_SHADER_RESOURCE. DXTerrain
+    // samples its depth buffer in PostProcess.hlsl — when that pass lands
+    // here this gains | Sampled, and that one bit is the whole change.
     m_depthBuffer = m_backend->GetDevice().CreateTexture(NSRHI::TextureDesc{
         .width = m_width,
         .height = m_height,
         .format = kDepthFormat,
-        .isDepthStencil = true
+        .usage = NSRHI::ETextureUsage::DepthStencil
     });
 }
 
@@ -135,14 +196,27 @@ void Renderer::CreateCheckerCubeResources()
     constexpr uint32_t kTexSize = 256;
     constexpr uint32_t kCellPx = kTexSize / 4;
 
+    // Uploaded once, sampled forever — previously it got both bits by
+    // accident, since the old desc handed SAMPLED | TRANSFER_DST to every
+    // non-depth texture whether or not it needed them.
     m_checkerTexture = device.CreateTexture(NSRHI::TextureDesc{
         .width = kTexSize,
         .height = kTexSize,
-        .format = NSRHI::EFormat::R8G8B8A8_UNORM
+        .format = NSRHI::EFormat::R8G8B8A8_UNORM,
+        .usage = NSRHI::ETextureUsage::Sampled | NSRHI::ETextureUsage::CopyDestination
     });
 
+    // Rows are packed to the BACKEND'S required pitch, not tightly: D3D12
+    // demands each row start on a 256-byte boundary, Vulkan does not care.
+    // Asking rather than assuming is the whole reason
+    // TextureRowPitchAlignment() exists — and it is why the staging buffer
+    // is sized from the padded pitch.
+    const uint32_t bpt = NSRHI::BytesPerTexel(NSRHI::EFormat::R8G8B8A8_UNORM);
+    const uint32_t pitchAlign = device.TextureRowPitchAlignment();
+    const uint32_t rowPitch = (kTexSize * bpt + pitchAlign - 1) & ~(pitchAlign - 1);
+
     m_checkerStaging = device.CreateBuffer(NSRHI::BufferDesc{
-        .sizeBytes = kTexSize * kTexSize * 4,
+        .sizeBytes = static_cast<size_t>(rowPitch) * kTexSize,
         .usage = NSRHI::EBufferUsage::Upload,
         .cpuVisible = true
     });
@@ -150,17 +224,21 @@ void Renderer::CreateCheckerCubeResources()
     auto* pixels = static_cast<uint8_t*>(m_checkerStaging->Map());
     for (uint32_t y = 0; y < kTexSize; ++y)
     {
+        // Row base steps by the padded pitch; the gap between the end of
+        // one row's texels and the next row's start is left untouched.
+        uint8_t* row = pixels + static_cast<size_t>(y) * rowPitch;
         for (uint32_t x = 0; x < kTexSize; ++x)
         {
             // Two greys, not black/white: pure black merges with the
             // clear colour at glancing angles and hides the silhouette.
             const bool light = ((x / kCellPx) + (y / kCellPx)) % 2 == 0;
-            uint8_t* p = pixels + (y * kTexSize + x) * 4;
+            uint8_t* p = row + static_cast<size_t>(x) * bpt;
             p[0] = p[1] = p[2] = light ? 220 : 45;
             p[3] = 255;
         }
     }
     m_checkerStaging->Unmap();
+    m_checkerRowPitch = rowPitch;
     // The copy itself is recorded in BeginFrame — uploads are command-list
     // work and no command list exists during Initialize.
     m_checkerUploadPending = true;
@@ -282,96 +360,6 @@ void Renderer::CreateCheckerCubeResources()
     m_indexBuffer->Unmap();
 }
 
-// TEMP-BLEND: the observable control for EBlendMode. ImGui cannot render a
-// single widget without alpha blending, so this proves the state actually
-// reaches the GPU before anything depends on it - the whole of this
-// function goes when the ImGui pass lands.
-void Renderer::CreateBlendProofResources()
-{
-    NSRHI::IDevice& device = m_backend->GetDevice();
-
-    // The quad's own layout — one float4x4 (16 dwords), no descriptor
-    // heap. Lived with the old vertex-colour cube until the checker cube
-    // replaced that pipeline; the quad still draws with the original
-    // vert/pixel.hlsl pair, so the plain layout moves here with it.
-    m_pipelineLayout = device.CreatePipelineLayout(NSRHI::PipelineLayoutDesc{
-        .num32BitRootConstants = 16
-    });
-
-    // Same shaders and layout as the cubes: the ONLY difference from
-    // m_pipeline is blendMode and the depth state. One variable per step -
-    // if the quad appears blended, blending is what changed.
-    //
-    // Depth test off so the quad always draws on top regardless of where
-    // the cubes are, and depth write off so it leaves the buffer alone.
-    // Transparent geometry that writes depth occludes whatever is drawn
-    // after it, which is a different bug entirely and not the one under
-    // test here.
-    m_blendPipeline = device.CreateGraphicsPipeline(NSRHI::GraphicsPipelineDesc{
-        .vertexShader = { L"vert.hlsl", L"mainVS", NSRHI::EShaderStage::Vertex },
-        .pixelShader = { L"pixel.hlsl", L"mainPS", NSRHI::EShaderStage::Pixel },
-        .vertexAttributes = {
-            { "POSITION", NSRHI::EFormat::R32G32B32_FLOAT, 0 },
-            { "COLOR", NSRHI::EFormat::R32G32B32A32_FLOAT, 12 }
-        },
-        // Its OWN stride — m_vertexStride now belongs to the checker
-        // cube (20 bytes); this quad still uses DemoVertex (28).
-        .vertexStrideBytes = sizeof(DemoVertex),
-        .topology = NSRHI::EPrimitiveTopology::TriangleList,
-        .colorTargetFormats = { m_backend->BackBufferFormat() },
-        .depthTargetFormat = kDepthFormat,
-        .depthTestEnabled = false,
-        .depthWriteEnabled = false,
-        .blendMode = NSRHI::EBlendMode::AlphaBlend,
-        .layout = m_pipelineLayout.get()
-    });
-
-    // Coordinates are already clip space: DrawScene pushes an identity
-    // matrix for this draw, so no model/view/projection is involved and
-    // the quad cannot be mispositioned by a matrix bug. z = 0.5 is inside
-    // the 0..1 depth range, though nothing tests it here.
-    //
-    // Alpha 0.5 with a strong green: over a black clear it reads as dark
-    // green, and over a cube face it visibly tints rather than replaces.
-    const DemoVertex quadVertices[]{
-        { { -0.6f, -0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
-        { {  0.6f, -0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
-        { {  0.6f,  0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
-        { { -0.6f,  0.6f, 0.5f }, { 0.f, 1.f, 0.f, 0.5f } },
-    };
-
-    m_quadVertexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
-        .sizeBytes = sizeof(quadVertices),
-        .usage = NSRHI::EBufferUsage::Vertex,
-        .cpuVisible = true
-    });
-    void* mappedQuad = m_quadVertexBuffer->Map();
-    std::memcpy(mappedQuad, quadVertices, sizeof(quadVertices));
-    m_quadVertexBuffer->Unmap();
-
-    // BOTH windings on purpose. Culling is on (VK_CULL_MODE_BACK_BIT /
-    // FRONT_FACE_CLOCKWISE) and this quad skips the projection entirely,
-    // so getting the winding backwards would make it vanish - which looks
-    // exactly like blending having done nothing. Two mirrored copies mean
-    // the quad is visible either way, and exactly one of each mirrored
-    // pair survives culling, so it is still drawn once and the 0.5 alpha
-    // is not applied twice. Removes culling as a variable from a test
-    // that is about blending.
-    const uint16_t quadIndices[]{
-        0, 3, 2,  0, 2, 1,   // one winding
-        0, 2, 3,  0, 1, 2,   // the mirror; the culled half of each pair
-    };
-    m_quadIndexCount = static_cast<uint32_t>(std::size(quadIndices));
-
-    m_quadIndexBuffer = device.CreateBuffer(NSRHI::BufferDesc{
-        .sizeBytes = sizeof(quadIndices),
-        .usage = NSRHI::EBufferUsage::Index,
-        .cpuVisible = true
-    });
-    void* mappedQuadIndices = m_quadIndexBuffer->Map();
-    std::memcpy(mappedQuadIndices, quadIndices, sizeof(quadIndices));
-    m_quadIndexBuffer->Unmap();
-}
 
 void Renderer::Shutdown()
 {
@@ -381,18 +369,24 @@ void Renderer::Shutdown()
     // that runs after these resets - too late.
     if (m_backend) m_backend->WaitForGPU();
 
+    // After the drain, before the device goes: the pass holds textures
+    // and heap slots. The context outlives it by a line because
+    // ImGuiPass touches ImGui::GetIO() on the way out.
+    m_imgui.Shutdown();
+    if (ImGui::GetCurrentContext()) ImGui::DestroyContext();
+
     // Then release front-end-owned GPU resources, before the backend (and
     // with it the device) goes away.
     m_vertexBuffer.reset();
     m_indexBuffer.reset();
-    m_quadVertexBuffer.reset();  // TEMP-BLEND
-    m_quadIndexBuffer.reset();  // TEMP-BLEND
+    m_dynamicVertexBuffer.reset();
+    m_dynamicIndexBuffer.reset();
+    m_uploadBuffer.reset();
     m_checkerStaging.reset();
     m_checkerTexture.reset();
     m_renderTarget.reset();
     m_depthBuffer.reset();
     m_pipeline.reset();
-    m_blendPipeline.reset();  // TEMP-BLEND
     // Layouts after the pipelines built against them; the heap and the
     // constant buffer after the layouts that referenced them (the Vulkan
     // layout's set 1 points at the constant buffer).
@@ -434,8 +428,25 @@ void Renderer::BeginFrame()
     // the in-flight contract. Safe here and only here: the backend's
     // BeginFrame just waited on this frame slot's fence, so the previous
     // submission that read them has retired.
-    m_descriptors.BeginFrame(m_backend->FrameIndex());
-    m_constants.BeginFrame(m_backend->FrameIndex());
+    const uint32_t frameIndex = m_backend->FrameIndex();
+    m_descriptors.BeginFrame(frameIndex);
+    m_constants.BeginFrame(frameIndex);
+    m_dynamicVerts.BeginFrame(frameIndex);
+    m_dynamicIndices.BeginFrame(frameIndex);
+    m_uploads.BeginFrame(frameIndex);
+
+    // Closes the frame app::OnUpdate opened with NewFrame + its UI calls.
+    // Render() here rather than there because everything downstream —
+    // UpdateTextures, the draw walk — consumes what it produces, and
+    // keeping the pair adjacent to its consumers makes the ordering
+    // constraint visible instead of remote.
+    ImGui::Render();
+
+    // Texture work goes here, before BeginRendering — copies are illegal
+    // inside a dynamic-rendering pass. Unlike ImGui's vendored backends,
+    // which spin up a private command list and block, this rides the
+    // frame's own list.
+    m_imgui.UpdateTextures(*m_cmd);
 
     // One-shot uploads, recorded BEFORE BeginRendering — copies are
     // illegal inside a dynamic-rendering pass. Undefined as the source
@@ -445,7 +456,15 @@ void Renderer::BeginFrame()
     {
         m_cmd->TransitionTexture(m_checkerTexture.get(),
             NSRHI::EResourceState::Undefined, NSRHI::EResourceState::CopyDestination);
-        m_cmd->CopyBufferToTexture(m_checkerTexture.get(), m_checkerStaging.get());
+        // Whole texture, expressed as the region {0,0,w,h} — the same call
+        // ImGui will use for a dirty sub-rect of its font atlas, differing
+        // only in the numbers.
+        m_cmd->CopyBufferToTexture(m_checkerTexture.get(), m_checkerStaging.get(),
+            NSRHI::TextureRegion{
+                .width = m_checkerTexture->Width(),
+                .height = m_checkerTexture->Height()
+            },
+            m_checkerRowPitch);
         m_cmd->TransitionTexture(m_checkerTexture.get(),
             NSRHI::EResourceState::CopyDestination, NSRHI::EResourceState::ShaderResource);
         m_checkerUploadPending = false;
@@ -530,23 +549,34 @@ void Renderer::DrawScene(std::shared_ptr<NSScene::IScene>)
         NSMath::Multiply(model, NSMath::Multiply(view, proj));
     m_cmd->SetConstantBuffer(0, drawCB.offsetBytes);
 
-    // Only the bindless slot index still travels as a push constant.
+    // Back to the checkerboard now that step B has proven the atlas path
+    // — the cube is the control again, and the UI has to be visibly
+    // distinct from it rather than sharing a texture.
     const uint32_t textureIndex = m_checkerSlot.index;
 
+    // Static buffers again: the cube's geometry never changes, so paying
+    // a per-frame copy for it was only ever the control that proved the
+    // ring. ImGui is the ring's real consumer now.
     m_cmd->SetVertexBuffer(m_vertexBuffer.get(), m_vertexStride);
     m_cmd->SetIndexBuffer(m_indexBuffer.get(), false);   // false = 16-bit
     m_cmd->SetRootConstants(0, 1, &textureIndex);
     m_cmd->DrawIndexed(m_indexCount);
 
-    // TEMP-BLEND: drawn LAST and over the cubes, which are the known-good
-    // control. Identity transform - the quad's vertices are already clip
-    // space, so nothing here depends on the matrix path being right.
-    const NSMath::Float4x4 identity = NSMath::Float4x4::Identity();  // TEMP-BLEND
-    m_cmd->SetPipeline(m_blendPipeline.get());  // TEMP-BLEND
-    m_cmd->SetVertexBuffer(m_quadVertexBuffer.get(), sizeof(DemoVertex));  // TEMP-BLEND
-    m_cmd->SetIndexBuffer(m_quadIndexBuffer.get(), false);  // TEMP-BLEND
-    m_cmd->SetRootConstants(0, 16, &identity);  // TEMP-BLEND
-    m_cmd->DrawIndexed(m_quadIndexCount);  // TEMP-BLEND
+
+    // The UI last, so it overlays everything. Inside the rendering scope
+    // — its geometry is ordinary draws, unlike the texture uploads which
+    // had to happen before BeginRendering.
+    m_imgui.Render(*m_cmd);
+
+    // ImGui leaves a per-command scissor behind. Restore full-viewport
+    // scissor so the next frame's scene draws are not clipped to
+    // whatever the last UI rectangle happened to be — a stale-state bug
+    // that would look like random geometry disappearing.
+    m_cmd->SetScissor(NSRHI::ScissorRect{
+        .left = 0, .top = 0,
+        .right = static_cast<int32_t>(m_width),
+        .bottom = static_cast<int32_t>(m_height)
+    });
 }
 
 void Renderer::EndFrame()

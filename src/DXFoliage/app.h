@@ -34,6 +34,10 @@ private:
     void LoadAssets();
     void UpdateBindings();
 
+    // Everything the debug UI shows, in one place. Called between
+    // ImGui::NewFrame() and the renderer's ImGui::Render().
+    void BuildUI();
+
     // Renderer and Scene are siblings — Scene is "what exists", the
     // Renderer draws it; neither owns the other. (Scene itself lands with
     // the model/content work.)
