@@ -11,11 +11,19 @@
 
 struct ImTextureData;
 
-// Dear ImGui as a FRONT-END pass over the neutral RHI — not the vendored
-// imgui_impl_vulkan/imgui_impl_dx12 backends. One implementation for both
-// APIs; see the decision note in PLAN.md for why the vendored route was
-// rejected (it would make the backend learn what a shader and a font
-// atlas are, which is the one thing the seam exists to prevent).
+// Dear ImGui's RENDERER BACKEND, written against the neutral RHI instead
+// of the vendored imgui_impl_vulkan/imgui_impl_dx12 — one implementation
+// serving both APIs. See the decision note in PLAN.md for why the vendored
+// route was rejected (it would make the graphics backend learn what a
+// shader and a font atlas are, which is the one thing the seam exists to
+// prevent).
+//
+// NOT called "Pass", despite being invoked from inside the rendering
+// scope: it is not one, and task #14 will introduce a real IRenderPass
+// interface that this class does not implement. "Renderer backend" is
+// ImGui's own term for exactly this object. It also cannot be called
+// plain "ImGui" — that name is taken by Dear ImGui's own namespace, and
+// C++ forbids a class and a namespace sharing a name in one scope.
 //
 // This class owns the two halves of a renderer backend:
 //   1. TEXTURES — ImGui 1.92's ImTextureData lifecycle: WantCreate /
@@ -26,14 +34,14 @@ struct ImTextureData;
 //
 // Deliberately NOT owning: the ImGui context lifetime or NewFrame, which
 // belong with whoever also feeds input.
-class ImGuiPass
+class ImGuiRenderer
 {
 public:
-    ImGuiPass() = default;
-    ~ImGuiPass();
+    ImGuiRenderer() = default;
+    ~ImGuiRenderer();
 
-    ImGuiPass(const ImGuiPass&) = delete;
-    ImGuiPass& operator=(const ImGuiPass&) = delete;
+    ImGuiRenderer(const ImGuiRenderer&) = delete;
+    ImGuiRenderer& operator=(const ImGuiRenderer&) = delete;
 
     // heap/descriptors: THE bindless heap and its allocator — atlas slots
     // come from the static region, since a font atlas outlives every

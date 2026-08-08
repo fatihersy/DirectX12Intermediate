@@ -11,6 +11,10 @@ struct wl_registry;
 struct wl_seat;
 struct wl_surface;
 struct wp_cursor_shape_device_v1;
+struct wl_data_device;
+struct wl_data_device_manager;
+struct wl_data_offer;
+struct wl_data_source;
 struct wp_cursor_shape_manager_v1;
 struct zwp_locked_pointer_v1;
 struct zwp_pointer_constraints_v1;
@@ -68,10 +72,25 @@ struct xkb_state;
 //      release never does. Without clearing state there, a key held while
 //      alt-tabbing stays down forever.
 //
-// NOT implemented, deliberately: key repeat. Wayland sends a rate/delay via
-// repeat_info and expects the client to run the timer itself (GLFW, SDL and
-// Godot each implement this by hand). Nothing in this app repeats - End and
-// Insert are read on release - so it is left out rather than half-done.
+// Also carries TEXT INPUT and the CLIPBOARD, neither of which is strictly
+// "input". Both are here because both belong to the seat: text comes from
+// the same xkb state as the key events (and cannot be derived from EKey —
+// punctuation and accented characters have no EKey at all), and
+// wl_data_device is obtained from wl_seat, with set_selection requiring a
+// serial from a real input event. Splitting either out would mean the new
+// interface reaching back into this one.
+//
+// NOT implemented, deliberately: key repeat for held LETTERS. Wayland
+// sends a rate/delay via repeat_info and expects the client to run the
+// timer itself (GLFW, SDL and Godot each implement this by hand).
+//
+// This used to say "nothing in this app repeats", which stopped being
+// true when ImGui arrived. What is actually true now: ImGui derives
+// repeat for NAVIGATION keys itself from how long a key has been down
+// (io.KeyRepeatDelay/Rate), and we re-send the down state every frame, so
+// held Backspace and arrows already repeat inside a text field. Only a
+// held letter fails to spam, because a character is emitted once on the
+// initial press. That is the remaining half of task #19.
 namespace NSPlatformWayland
 {
     class WaylandInput final : public NSInput::IInputSource
@@ -89,6 +108,10 @@ namespace NSPlatformWayland
 
         NSInput::KeyboardState GetKeyboardState() const override { return m_keyboard; }
         NSInput::MouseState GetMouseState() const override { return m_mouse; }
+        const std::string& GetTextInput() const override { return m_textInput; }
+
+        const std::string& GetClipboardText() override;
+        void SetClipboardText(const std::string& text) override;
 
         void SetMouseMode(NSInput::EMouseMode mode) override;
 
@@ -100,6 +123,15 @@ namespace NSPlatformWayland
         void OnKeymap(uint32_t format, int32_t fd, uint32_t size);
         void OnKeyboardLeave();
         void OnKey(uint32_t key, uint32_t state);
+        void AppendTextFor(uint32_t keycode);
+
+        void NoteInputSerial(uint32_t serial);
+        void CreateDataDevice();
+        void OnDataOfferCreated(wl_data_offer* offer);
+        void OnDataOfferMime(wl_data_offer* offer, const char* mimeType);
+        void OnSelection(wl_data_offer* offer);
+        void OnDataSourceSend(int32_t fd);
+        void OnDataSourceCancelled(wl_data_source* source);
         void OnModifiers(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
 
         void OnPointerEnter(uint32_t serial, double x, double y);
@@ -171,6 +203,32 @@ namespace NSPlatformWayland
         xkb_context* m_xkbContext{ nullptr };
         xkb_keymap* m_xkbKeymap{ nullptr };
         xkb_state* m_xkbState{ nullptr };
+
+        // Two buffers, same reason as the mouse deltas: events arrive
+        // during PumpEvents and accumulate into m_pendingText, then
+        // Update() publishes one frame's worth into m_textInput and
+        // starts a fresh accumulator. Publishing in place would let a
+        // consumer read the same characters twice.
+        std::string m_pendingText;
+        std::string m_textInput;
+
+        // Clipboard. Wayland stores nothing centrally: whoever copied last
+        // stays the owner and is asked to produce the bytes on demand.
+        wl_data_device_manager* m_dataDeviceManager{ nullptr };
+        wl_data_device* m_dataDevice{ nullptr };
+        // Our source, alive only while WE own the clipboard; the compositor
+        // cancels it when another application copies.
+        wl_data_source* m_dataSource{ nullptr };
+        // Someone else's current offer, and whether it can give us text.
+        wl_data_offer* m_selectionOffer{ nullptr };
+        bool m_offerHasText{ false };
+
+        std::string m_clipboardOwned;    // what WE published; served on demand
+        std::string m_clipboardFetched;  // last read from another application
+
+        // set_selection is rejected without a serial from real user input,
+        // so the most recent key/button serial is kept for it.
+        uint32_t m_lastInputSerial{ 0 };
 
         NSInput::KeyboardState m_keyboard;
         NSInput::MouseState m_mouse;

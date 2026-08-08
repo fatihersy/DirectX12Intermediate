@@ -5,9 +5,9 @@
 #include <cstdint>
 
 // Translates our polled input state into ImGui's event queue. The input
-// half of the ImGui integration, mirroring ImGuiPass's GPU half.
+// half of the ImGui integration, mirroring ImGuiRenderer's GPU half.
 //
-// Deliberately NOT in ImGuiPass: that class owns textures and geometry
+// Deliberately NOT in ImGuiRenderer: that class owns textures and geometry
 // and knows nothing about a keyboard. This lives beside app, which is
 // what owns IInputSource and decides what the UI is for.
 //
@@ -25,8 +25,17 @@ namespace NSImGuiInput
     // IWindow.h on why conflating them is the classic HiDPI bug.
     void Feed(const NSInput::KeyboardState& keyboard,
               const NSInput::MouseState& mouse,
+              const std::string& text,
               uint32_t displayWidth, uint32_t displayHeight,
               float deltaSeconds);
+
+    // Points ImGui's clipboard hooks at the platform's. Call once, after
+    // ImGui::CreateContext(). The source must outlive the context.
+    //
+    // ImGui's getter returns a bare const char* it does not own and reads
+    // immediately, so IInputSource::GetClipboardText's reference-to-member
+    // return is exactly the right shape — no lifetime juggling.
+    void BindClipboard(NSInput::IInputSource& source);
 
     // True when ImGui has claimed the input and the application should
     // NOT also act on it — clicking a button must not also drive the

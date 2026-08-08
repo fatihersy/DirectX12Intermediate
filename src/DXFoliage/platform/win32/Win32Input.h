@@ -31,6 +31,26 @@ namespace NSPlatformWin32
         NSInput::KeyboardState GetKeyboardState() const override { return m_keyboardState; }
         NSInput::MouseState GetMouseState() const override { return m_mouseState; }
 
+        // ALWAYS EMPTY on Win32 — a stub, not an implementation. The
+        // Wayland side gets UTF-8 from xkb inside its key handler; the
+        // equivalent here is WM_CHAR, which arrives as UTF-16 in the
+        // window procedure and needs converting, plus surrogate pairs
+        // reassembling. Win32Window would have to route WM_CHAR here, and
+        // none of it can be tested without a Windows machine (see the
+        // standing risk in PLAN.md). Text fields will silently do nothing
+        // on Windows until then.
+        const std::string& GetTextInput() const override { return m_textInput; }
+
+        // STUBS, like GetTextInput above. Win32's clipboard is genuinely
+        // simpler than Wayland's — OpenClipboard/GetClipboardData with
+        // CF_UNICODETEXT, no pipes, no serials, no asynchronous handshake,
+        // because Windows really does store the bytes centrally. It still
+        // needs UTF-16↔UTF-8 conversion and an HWND, and none of it can be
+        // tested here (see the standing risk in PLAN.md), so it is left
+        // honestly empty rather than written blind and assumed correct.
+        const std::string& GetClipboardText() override { return m_clipboard; }
+        void SetClipboardText(const std::string&) override {}
+
         void SetMouseMode(NSInput::EMouseMode mode) override;
 
         // Not part of IInputSource — DirectXTK12's Mouse needs a window
@@ -44,5 +64,10 @@ namespace NSPlatformWin32
 
         NSInput::KeyboardState m_keyboardState;
         NSInput::MouseState m_mouseState;
+
+        // Never written — see GetTextInput/GetClipboardText above. They
+        // exist so the reference returns have something valid to bind to.
+        std::string m_textInput;
+        std::string m_clipboard;
     };
 }

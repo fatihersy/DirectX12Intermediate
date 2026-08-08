@@ -2,7 +2,7 @@
 
 #include "Allocator.h"
 #include "Descriptor.h"
-#include "ImGuiPass.h"
+#include "ImGuiRenderer.h"
 #include "rhi/IRendererBackend.h"
 
 #include <cstdint>
@@ -76,7 +76,7 @@ private:
     std::unique_ptr<NSRHI::IBuffer> m_uploadBuffer;
     NSAllocator::RingAllocator m_uploads;
 
-    ImGuiPass m_imgui;
+    ImGuiRenderer m_imgui;
 
     // Demo content: a 4x4x4 checkerboard cube — the bindless texture
     // path's first consumer (slot from AllocateStatic, index pushed as a

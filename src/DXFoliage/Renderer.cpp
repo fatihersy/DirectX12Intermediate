@@ -133,12 +133,14 @@ bool Renderer::Initialize(NSPlatform::IWindow& window, uint32_t width, uint32_t 
     CreateFrameTargets();
     CreateCheckerCubeResources();
 
-    // Context here rather than inside ImGuiPass: it is shared with
+    // Context here rather than inside ImGuiRenderer: it is shared with
     // whatever feeds input, which is a platform concern, not a renderer
-    // one. The pass only owns the GPU-side halves.
+    // one. ImGuiRenderer owns only the GPU-side halves.
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
+    // Clipboard hooks are bound by app, which owns the IInputSource —
+    // see app::LoadPipeline, right after this returns.
     m_imgui.Initialize(m_backend->GetDevice(), *m_descriptorHeap, m_descriptors,
         m_uploads, m_dynamicVerts, m_dynamicIndices,
         m_backend->BackBufferFormat(), kDepthFormat);
@@ -371,7 +373,7 @@ void Renderer::Shutdown()
 
     // After the drain, before the device goes: the pass holds textures
     // and heap slots. The context outlives it by a line because
-    // ImGuiPass touches ImGui::GetIO() on the way out.
+    // ImGuiRenderer touches ImGui::GetIO() on the way out.
     m_imgui.Shutdown();
     if (ImGui::GetCurrentContext()) ImGui::DestroyContext();
 

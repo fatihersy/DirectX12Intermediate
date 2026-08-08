@@ -7,6 +7,8 @@
 
 #include "imgui.h"
 
+#include <cstdio>
+
 IApp* IApp::s_instance = nullptr;
 
 app::app(uint32_t width, uint32_t height, std::wstring_view title) : IApp(width, height)
@@ -87,7 +89,15 @@ void app::LoadPipeline()
         // frame loop — Run() bails out on this flag.
         g_FError("Renderer initialization failed");
         im_isQuitting = true;
+        return;
     }
+
+    // After Renderer::Initialize, which creates the ImGui context, and
+    // here rather than in the renderer because this layer owns m_input.
+    // m_input outlives the context (destroyed in Renderer::Shutdown, and
+    // this object owns the platform handles), so the captured pointer
+    // stays valid.
+    NSImGuiInput::BindClipboard(*m_input);
 }
 void app::LoadAssets()
 {
@@ -117,6 +127,7 @@ void app::OnUpdate()
     m_input->Update();
 
     NSImGuiInput::Feed(m_input->GetKeyboardState(), m_input->GetMouseState(),
+        m_input->GetTextInput(),
         im_width, im_height, static_cast<float>(im_timer.GetElapsedSeconds()));
 
     ImGui::NewFrame();
@@ -132,6 +143,33 @@ void app::BuildUI()
     // half. Replace with real tooling (frame timings, render-pass
     // toggles, a scene inspector) as those arrive.
     ImGui::ShowDemoWindow();
+
+    // Text input is buried several collapsing headers deep in the demo,
+    // so this puts it in reach. Worth keeping beyond the test: it is
+    // also where non-ASCII, dead keys and a non-QWERTY layout get
+    // checked, and EKey cannot express any of those (it maps by symbol,
+    // not physical position — see the standing risk in PLAN.md).
+    if (ImGui::Begin("Text input"))
+    {
+        static char buffer[128]{};
+        ImGui::InputText("type here", buffer, sizeof(buffer));
+        ImGui::TextUnformatted("Try: shift, punctuation, accented characters,");
+        ImGui::TextUnformatted("held Backspace (ImGui's own key repeat).");
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Clipboard: Ctrl+C/V/X inside the field, or:");
+        if (ImGui::Button("Copy field"))  ImGui::SetClipboardText(buffer);
+        ImGui::SameLine();
+        if (ImGui::Button("Paste over field"))
+        {
+            const char* clip = ImGui::GetClipboardText();
+            if (clip)
+            {
+                std::snprintf(buffer, sizeof(buffer), "%s", clip);
+            }
+        }
+    }
+    ImGui::End();
 }
 void app::OnRender()
 {

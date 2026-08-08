@@ -73,6 +73,7 @@ namespace NSImGuiInput
 
     void Feed(const NSInput::KeyboardState& keyboard,
               const NSInput::MouseState& mouse,
+              const std::string& text,
               uint32_t displayWidth, uint32_t displayHeight,
               float deltaSeconds)
     {
@@ -124,11 +125,47 @@ namespace NSImGuiInput
         io.AddKeyEvent(ImGuiMod_Alt,
             keyboard.IsDown(NSInput::EKey::LeftAlt) or keyboard.IsDown(NSInput::EKey::RightAlt));
 
-        // NOT FED: character input. ImGui needs AddInputCharacter() for
-        // text fields, which needs UTF-8 from the keymap — task #19,
-        // deferred because nothing needed it until now. Everything else
-        // works without it; typing into an InputText box does not. That
-        // task is now unblocked and has its first real caller.
+        // Text, if any. Separate from the key events above because a
+        // character is not a key: 'A' is Shift+A on one layout and a bare
+        // keypress on another, and plenty of characters have no EKey at
+        // all. The platform layer resolves layout, modifiers and dead
+        // keys; this just forwards the result.
+        //
+        // Key REPEAT needs nothing extra here. ImGui derives it from how
+        // long a key has been down (io.KeyRepeatDelay/Rate), and the loop
+        // above re-sends the current down state every frame — so held
+        // Backspace and arrows repeat inside InputText without a timer on
+        // our side. Only held *letters* do not spam, since a character is
+        // only emitted on the initial press.
+        if (not text.empty()) io.AddInputCharactersUTF8(text.c_str());
+    }
+
+    void BindClipboard(NSInput::IInputSource& source)
+    {
+        // Dear ImGui 1.92 (we pin 1.92.5 in conanfile.py) moved these
+        // from ImGuiIO to ImGuiPlatformIO. The old io.GetClipboardTextFn
+        // pair still compiles but is the legacy path and is ignored when
+        // the Platform_ ones are set.
+        ImGuiPlatformIO& platformIO = ImGui::GetPlatformIO();
+        platformIO.Platform_ClipboardUserData = &source;
+
+        platformIO.Platform_GetClipboardTextFn = [](ImGuiContext*) -> const char*
+        {
+            auto* src = static_cast<NSInput::IInputSource*>(
+                ImGui::GetPlatformIO().Platform_ClipboardUserData);
+            // Returns a reference to a member string, so the pointer stays
+            // valid until the next call — which is all ImGui promises to
+            // need. On Wayland this is the expensive one: it round-trips
+            // to whichever application owns the clipboard.
+            return src->GetClipboardText().c_str();
+        };
+
+        platformIO.Platform_SetClipboardTextFn = [](ImGuiContext*, const char* text)
+        {
+            auto* src = static_cast<NSInput::IInputSource*>(
+                ImGui::GetPlatformIO().Platform_ClipboardUserData);
+            src->SetClipboardText(text ? text : "");
+        };
     }
 
     bool WantsMouse()

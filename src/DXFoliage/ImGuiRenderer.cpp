@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "ImGuiPass.h"
+#include "ImGuiRenderer.h"
 
 #include "Logger.h"
 
@@ -19,12 +19,12 @@ namespace
     constexpr NSRHI::EFormat kAtlasFormat = NSRHI::EFormat::R8G8B8A8_UNORM;
 }
 
-ImGuiPass::~ImGuiPass()
+ImGuiRenderer::~ImGuiRenderer()
 {
     Shutdown();
 }
 
-bool ImGuiPass::Initialize(NSRHI::IDevice& device,
+bool ImGuiRenderer::Initialize(NSRHI::IDevice& device,
                            NSRHI::IDescriptorHeap& heap,
                            NSDescriptor::RingHeap& descriptors,
                            NSAllocator::RingAllocator& uploads,
@@ -79,15 +79,16 @@ bool ImGuiPass::Initialize(NSRHI::IDevice& device,
 
     // Tells ImGui it may create and update textures at runtime rather
     // than baking one immutable atlas up front. Without it ImGui falls
-    // back to the pre-1.92 behaviour and never populates
-    // ImDrawData::Textures.
+    // back to its pre-1.92 behaviour (Dear ImGui 1.92 introduced the
+    // ImTextureData lifecycle; we pin 1.92.5 in conanfile.py) and never
+    // populates ImDrawData::Textures, which is what UpdateTextures reads.
     ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
     ImGui::GetIO().BackendRendererName = "DXFoliage-RHI";
 
     return true;
 }
 
-void ImGuiPass::Shutdown()
+void ImGuiRenderer::Shutdown()
 {
     // The caller has already drained the GPU (Renderer::Shutdown waits
     // before releasing anything front-end owned), so these are safe to
@@ -109,7 +110,7 @@ void ImGuiPass::Shutdown()
     m_uploads = nullptr;
 }
 
-void ImGuiPass::UpdateTextures(NSRHI::ICommandList& cmd)
+void ImGuiRenderer::UpdateTextures(NSRHI::ICommandList& cmd)
 {
     ImDrawData* drawData = ImGui::GetDrawData();
     if (not drawData or not drawData->Textures) return;
@@ -145,7 +146,7 @@ void ImGuiPass::UpdateTextures(NSRHI::ICommandList& cmd)
     }
 }
 
-void ImGuiPass::Render(NSRHI::ICommandList& cmd)
+void ImGuiRenderer::Render(NSRHI::ICommandList& cmd)
 {
     ImDrawData* drawData = ImGui::GetDrawData();
     if (not drawData or drawData->CmdListsCount == 0) return;
@@ -163,7 +164,7 @@ void ImGuiPass::Render(NSRHI::ICommandList& cmd)
     if (not loggedOnce)
     {
         loggedOnce = true;
-        g_FInfo("ImGuiPass: cmdLists=%d vtx=%d idx=%d fb=%.0fx%.0f scale=%.2f,%.2f",
+        g_FInfo("ImGuiRenderer: cmdLists=%d vtx=%d idx=%d fb=%.0fx%.0f scale=%.2f,%.2f",
             drawData->CmdListsCount, drawData->TotalVtxCount, drawData->TotalIdxCount,
             fbWidth, fbHeight, drawData->FramebufferScale.x, drawData->FramebufferScale.y);
     }
@@ -182,7 +183,7 @@ void ImGuiPass::Render(NSRHI::ICommandList& cmd)
     NSAllocator::Ctx idxAlloc = m_indices->Allocate(totalIdxBytes);
     if (not vtxAlloc or not idxAlloc)
     {
-        g_FError("ImGuiPass: geometry ring exhausted (%zu vtx / %zu idx bytes)",
+        g_FError("ImGuiRenderer: geometry ring exhausted (%zu vtx / %zu idx bytes)",
             totalVtxBytes, totalIdxBytes);
         return;
     }
@@ -303,7 +304,7 @@ void ImGuiPass::Render(NSRHI::ICommandList& cmd)
     }
 }
 
-void ImGuiPass::CreateTexture(NSRHI::ICommandList& cmd, ImTextureData* tex)
+void ImGuiRenderer::CreateTexture(NSRHI::ICommandList& cmd, ImTextureData* tex)
 {
     ASSERT(tex->Format == ImTextureFormat_RGBA32,
         "Only RGBA32 atlases are handled; Alpha8 needs an R8_UNORM EFormat");
@@ -314,7 +315,7 @@ void ImGuiPass::CreateTexture(NSRHI::ICommandList& cmd, ImTextureData* tex)
     NSRHI::DescriptorHandle slot = m_descriptors->AllocateStatic();
     if (not slot.IsValid())
     {
-        g_FError("ImGuiPass: descriptor heap static region exhausted");
+        g_FError("ImGuiRenderer: descriptor heap static region exhausted");
         return;
     }
 
@@ -344,11 +345,11 @@ void ImGuiPass::CreateTexture(NSRHI::ICommandList& cmd, ImTextureData* tex)
 
     if (not m_fontAtlasSlot.IsValid()) m_fontAtlasSlot = slot;
 
-    g_FInfo("ImGuiPass: atlas %dx%d created in descriptor slot %u",
+    g_FInfo("ImGuiRenderer: atlas %dx%d created in descriptor slot %u",
         tex->Width, tex->Height, index);
 }
 
-void ImGuiPass::UploadRegion(NSRHI::ICommandList& cmd, ImTextureData* tex,
+void ImGuiRenderer::UploadRegion(NSRHI::ICommandList& cmd, ImTextureData* tex,
                              uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     if (w == 0 or h == 0) return;
@@ -364,7 +365,7 @@ void ImGuiPass::UploadRegion(NSRHI::ICommandList& cmd, ImTextureData* tex,
     NSAllocator::Ctx staging = m_uploads->Allocate(static_cast<size_t>(rowPitch) * h);
     if (not staging)
     {
-        g_FError("ImGuiPass: upload ring exhausted for a %ux%u region", w, h);
+        g_FError("ImGuiRenderer: upload ring exhausted for a %ux%u region", w, h);
         return;
     }
 
@@ -392,7 +393,7 @@ void ImGuiPass::UploadRegion(NSRHI::ICommandList& cmd, ImTextureData* tex,
         NSRHI::EResourceState::CopyDestination, NSRHI::EResourceState::ShaderResource);
 }
 
-void ImGuiPass::DestroyTexture(ImTextureData* tex)
+void ImGuiRenderer::DestroyTexture(ImTextureData* tex)
 {
     auto found = m_textures.find(static_cast<uint32_t>(tex->GetTexID()));
     if (found == m_textures.end()) return;

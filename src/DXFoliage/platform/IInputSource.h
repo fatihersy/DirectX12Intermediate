@@ -2,6 +2,7 @@
 
 #include <bitset>
 #include <cstdint>
+#include <string>
 
 // The input contract every backend (Win32, Wayland, ...) implements.
 // Replaces DirectXTK12's Keyboard/Mouse classes (which only exist on
@@ -85,6 +86,32 @@ namespace NSInput
 
         virtual KeyboardState GetKeyboardState() const = 0;
         virtual MouseState GetMouseState() const = 0;
+
+        // UTF-8 text typed since the last Update(), usually empty.
+        //
+        // Deliberately NOT part of KeyboardState. That struct is a
+        // SNAPSHOT — "which keys are down right now" — and is copied every
+        // frame by KeyStateTracker to diff against. Text is the opposite:
+        // a transient queue that must be consumed exactly once, and it
+        // cannot be reconstructed from key state because the same physical
+        // key yields 'a', 'A' or nothing depending on modifiers, layout
+        // and dead keys. The platform layer resolves all of that; callers
+        // just read the result.
+        virtual const std::string& GetTextInput() const = 0;
+
+        // Clipboard. Here rather than in PlatformUtils because on Wayland
+        // it genuinely belongs to the seat: wl_data_device comes from
+        // wl_seat, and set_selection is rejected without a serial from a
+        // recent input event. Splitting it into its own interface would
+        // mean that interface reaching back into this one.
+        //
+        // Get is NOT const and NOT cheap: Wayland keeps no clipboard
+        // storage, so reading means asking the owning application to write
+        // into a pipe and waiting for it. The implementation bounds that
+        // wait rather than blocking the frame indefinitely — a paste can
+        // come back empty if the other application is unresponsive.
+        virtual const std::string& GetClipboardText() = 0;
+        virtual void SetClipboardText(const std::string& text) = 0;
 
         virtual void SetMouseMode(EMouseMode mode) = 0;
     };
